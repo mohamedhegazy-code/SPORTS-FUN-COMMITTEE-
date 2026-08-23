@@ -1,0 +1,6 @@
+node_modules/
+data/db.json
+public/uploads/events/*
+!public/uploads/events/.gitkeep
+*.log
+.DS_Store

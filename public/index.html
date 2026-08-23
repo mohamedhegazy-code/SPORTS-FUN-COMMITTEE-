@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ahlawy — Online Registration &amp; Points</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1 data-i18n="appTitle">Ahlawy — Online Registration &amp; Points</h1>
+    <div class="sub" data-i18n="appSub">Al Ahly Club · Sports Entertainment Committee — Fifth Settlement</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div id="session-badge" class="hidden" style="font-size:0.82rem;color:#fff;display:flex;align-items:center;gap:8px;">
+      <span id="session-badge-text"></span>
+      <button class="secondary" id="session-logout" style="padding:4px 10px;font-size:0.78rem;" data-i18n="btnLogout">Log out</button>
+    </div>
+    <div class="lang-toggle">
+      <button id="lang-en" class="active">EN</button>
+      <button id="lang-ar">AR</button>
+    </div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-view="events" data-i18n="tabEvents">Events</button>
+  <button class="tab-btn" data-view="register" data-i18n="tabRegister">Register</button>
+  <span class="tab-wrap"><button class="tab-btn" data-view="mypoints" data-i18n="tabMyPoints">Member Profile</button><span id="mp-chat-badge" class="tab-badge hidden">0</span></span>
+  <button class="tab-btn" id="tab-ladder-btn" data-view="ladder" data-i18n="tabLadder">Redemption Ladder</button>
+  <button class="tab-btn" data-view="annual" data-i18n="tabAnnual">Annual Activities</button>
+  <button class="tab-btn" data-view="scan" data-i18n="tabScan">Gate Scanner</button>
+  <span class="tab-wrap"><button class="tab-btn" data-view="admin" data-i18n="tabAdmin">Admin</button><span id="admin-chat-badge" class="tab-badge hidden">0</span></span>
+</nav>
+
+<main>
+
+  <!-- ============================= EVENTS (landing page) ============================= -->
+  <section id="view-events" class="view active">
+    <div class="hero-banner">
+      <h2 data-i18n="heroWelcome">Welcome to Ahlawy</h2>
+      <p data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
+    </div>
+
+    <div id="featured-events-section" class="hidden">
+      <h2 class="section-title" data-i18n="featuredEventsTitle">Coming up next</h2>
+      <div class="event-grid featured" id="featured-events-grid"></div>
+    </div>
+
+    <h2 class="section-title" data-i18n="allEventsTitle">All upcoming events</h2>
+    <div class="card" id="events-empty">
+      <p style="color:var(--muted);" data-i18n="eventsEmpty">No upcoming events right now — check back soon.</p>
+    </div>
+    <div class="event-grid" id="events-grid"></div>
+
+    <div id="news-section" style="margin-top:30px;">
+      <h2 class="section-title" data-i18n="newsTitle">Committee News</h2>
+      <p class="section-sub" data-i18n="newsIntro">Announcements and updates from the Sports Entertainment Committee.</p>
+      <div class="card hidden" id="news-empty">
+        <p style="color:var(--muted);" data-i18n="noNewsYet">No news posted yet — check back soon.</p>
+      </div>
+      <div id="news-list"></div>
+    </div>
+
+    <div id="community-section" style="margin-top:30px;">
+      <h2 class="section-title" data-i18n="communityTitle">Community</h2>
+      <p class="section-sub" data-i18n="communityIntro">A quick look at the Ahlawy community.</p>
+      <div class="stat-row" id="community-stats-row" style="margin-bottom:16px;"></div>
+      <div id="top-earners-card" class="card hidden" style="margin-bottom:20px;">
+        <h3 style="margin-top:0;" data-i18n="topEarnersTitle">Top point earners</h3>
+        <div id="top-earners-list"></div>
+      </div>
+    </div>
+
+    <div id="spotlight-section" style="margin-top:30px;">
+      <h2 class="section-title" data-i18n="spotlightTitle">Community Spotlight</h2>
+      <p class="section-sub" data-i18n="spotlightIntro">Members who make Ahlawy what it is.</p>
+      <div class="card hidden" id="spotlight-empty">
+        <p style="color:var(--muted);" data-i18n="noSpotlightsYet">No spotlights yet.</p>
+      </div>
+      <div class="spotlight-grid" id="spotlight-grid"></div>
+    </div>
+  </section>
+
+  <!-- ============================= REGISTER ============================= -->
+  <section id="view-register" class="view">
+
+    <!-- Signed-out: sign up or log in -->
+    <div id="reg-auth" class="grid-2">
+      <div class="card">
+        <h2 data-i18n="signupTitle">Create your account</h2>
+        <label data-i18n="fieldMembership">Membership number</label>
+        <input id="su-membership" placeholder="e.g. 10234" />
+        <label data-i18n="fieldName">Full name</label>
+        <input id="su-name" placeholder="e.g. Ahmed Samir" />
+        <label data-i18n="fieldPassword">Password</label>
+        <input id="su-password" type="password" placeholder="At least 6 characters" />
+        <label data-i18n="fieldFamily">Family group (optional)</label>
+        <input id="su-family" placeholder="e.g. FAM-01" />
+        <label data-i18n="fieldPhone">Phone (optional)</label>
+        <input id="su-phone" placeholder="01xxxxxxxxx" />
+        <button class="primary" id="su-submit" data-i18n="btnSignup">Create account</button>
+        <div class="msg" id="su-msg"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="loginTitle">Already have an account?</h2>
+        <label data-i18n="fieldMembership">Membership number</label>
+        <input id="li-membership" placeholder="e.g. 10234" />
+        <label data-i18n="fieldPassword">Password</label>
+        <input id="li-password" type="password" />
+        <button class="primary" id="li-submit" data-i18n="btnLogin">Log in</button>
+        <div class="msg" id="li-msg"></div>
+        <p class="hint-note" data-i18n="forgotPasswordHint">Forgot your password? Contact the committee (phone/WhatsApp or in person) with your membership number and they'll reset it for you.</p>
+      </div>
+    </div>
+
+    <!-- Signed-in: pick an event -->
+    <div id="reg-form" class="card hidden">
+      <h2 data-i18n="regTitle">Register for an event</h2>
+      <p data-i18n="regIntro" style="color:var(--muted);font-size:0.88rem;">Every participation earns at least 100 points, plus 10 for early registration. Points are awarded when your QR code is scanned at the event, not at sign-up — so register, then show up!</p>
+      <label data-i18n="fieldEvent">Event</label>
+      <select id="reg-event"></select>
+      <p class="hint-note hidden" id="reg-capacity-note"></p>
+
+      <label data-i18n="whoAttending">Who's attending?</label>
+      <div id="reg-attendees-list"></div>
+      <p class="hint-note" data-i18n="manageFamilyHint">Want to register a family member? Add them under Member Profile → My Family, then come back here.</p>
+
+      <button class="primary" id="reg-submit" data-i18n="btnRegister">Submit registration</button>
+      <div class="msg" id="reg-msg"></div>
+    </div>
+
+    <div class="card hidden" id="reg-waitlist-card">
+      <h2 data-i18n="waitlistPromptTitle">This event is full</h2>
+      <p id="reg-waitlist-message-en"></p>
+      <p id="reg-waitlist-message-ar" dir="rtl" lang="ar" style="color:var(--muted);"></p>
+      <label class="checkbox-row">
+        <input type="checkbox" id="reg-waitlist-confirm-check" />
+        <span data-i18n="waitlistConfirmCheckbox">I understand a waiting-list spot is not a guaranteed place at the event</span>
+      </label>
+      <div style="display:flex;gap:10px;margin-top:10px;">
+        <button class="primary" id="reg-waitlist-confirm" data-i18n="btnJoinWaitlist">Join the waiting list</button>
+        <button class="secondary" id="reg-waitlist-cancel" data-i18n="btnCancel">Cancel</button>
+      </div>
+      <div class="msg" id="reg-waitlist-msg"></div>
+    </div>
+
+    <div class="card hidden" id="reg-qr-card">
+      <h2 data-i18n="qrTitle">Your entry QR code(s)</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="qrIntro">Show this at the event entrance to check in. Points are awarded the moment it's scanned — take a screenshot so you have it even offline. You can also come back and view it any time from Member Profile → My Registrations, until the event is over.</p>
+      <div id="reg-qr-list"></div>
+    </div>
+  </section>
+
+  <!-- ============================= MY POINTS ============================= -->
+  <section id="view-mypoints" class="view">
+    <div class="card" id="mp-signed-out">
+      <p style="color:var(--muted);" data-i18n="mpSignInFirst">Log in on the Register tab to see your points balance.</p>
+    </div>
+
+    <div class="card hidden" id="mp-points-disabled-note">
+      <p style="color:var(--muted);" data-i18n="pointsSystemUnavailable">The points system isn't active right now — check back later.</p>
+    </div>
+
+    <div class="card hidden" id="mp-result">
+      <div class="balance-hero">
+        <div class="num" id="mp-balance">0</div>
+        <div class="label" data-i18n="mpCurrentBalance">Current points balance</div>
+        <div class="pool-note" id="mp-pool-note"></div>
+      </div>
+      <div class="stat-row">
+        <div class="stat"><div class="n" id="mp-earned">0</div><div class="l" data-i18n="mpEarned">Total earned</div></div>
+        <div class="stat"><div class="n" id="mp-redeemed">0</div><div class="l" data-i18n="mpRedeemed">Total redeemed</div></div>
+        <div class="stat"><div class="n" id="mp-next">—</div><div class="l" data-i18n="mpNextReward">Next reachable reward</div></div>
+      </div>
+
+      <h3 data-i18n="mpRedeemTitle" style="margin-top:20px;">Request a redemption</h3>
+      <label data-i18n="fieldTier">Reward</label>
+      <select id="mp-tier"></select>
+      <button class="primary" id="mp-redeem" data-i18n="btnRedeem">Submit redemption request</button>
+      <div class="msg" id="mp-redeem-msg"></div>
+    </div>
+
+    <div class="card hidden" id="mp-family-card">
+      <h2 data-i18n="myFamilyTitle">My family</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myFamilyIntro">Add family members here, then pick who's attending when you register for an event. They don't need their own login — everyone's points pool into your balance.</p>
+      <div id="mp-family-list"></div>
+      <div class="grid-2" style="align-items:end;">
+        <div><label data-i18n="fieldFamilyMemberName">Family member's name</label><input id="fam-name" placeholder="e.g. Sara Ahmed" /></div>
+        <div><button class="secondary" id="fam-add" style="margin-top:10px;" data-i18n="btnAddFamilyMember">Add family member</button></div>
+      </div>
+      <div class="msg" id="fam-msg"></div>
+    </div>
+
+    <div class="card hidden" id="mp-registrations-card">
+      <h2 data-i18n="myRegistrationsTitle">My registrations</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myRegistrationsIntro">Your entry QR codes stay available here until each event is over.</p>
+      <div id="mp-registrations-list"></div>
+    </div>
+
+    <div class="card hidden" id="mp-chat-card">
+      <h2 data-i18n="chatTitle">Message the committee</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="chatIntro">Questions about registration, points, or an event? Send a message here and someone from the committee will reply.</p>
+      <div class="chat-thread" id="mp-chat-thread"></div>
+      <div class="chat-compose">
+        <textarea id="mp-chat-input" rows="2" placeholder="Type a message..."></textarea>
+        <button class="primary" id="mp-chat-send" data-i18n="btnSend">Send</button>
+      </div>
+      <div class="msg" id="mp-chat-msg"></div>
+    </div>
+  </section>
+
+  <!-- ============================= LADDER ============================= -->
+  <section id="view-ladder" class="view">
+    <div class="card">
+      <h2 data-i18n="ladderTitle">Redemption ladder</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="ladderIntro">Starting at 1,500 points. Approval level scales with reward value.</p>
+      <div class="ladder-grid" id="ladder-list"></div>
+    </div>
+  </section>
+
+  <!-- ============================= ANNUAL ACTIVITIES (past events) ============================= -->
+  <section id="view-annual" class="view">
+    <div class="card">
+      <h2 data-i18n="annualTitle">Annual activities</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="annualIntro">A look back at events the committee has already run — finished events move here automatically.</p>
+    </div>
+    <div class="card" id="annual-empty">
+      <p style="color:var(--muted);" data-i18n="annualEmpty">No past events yet.</p>
+    </div>
+    <div class="event-grid" id="annual-grid"></div>
+  </section>
+
+  <!-- ============================= SCAN (staff gate scanner) ============================= -->
+  <section id="view-scan" class="view">
+    <div class="card admin-lock" id="scan-lock">
+      <h2 data-i18n="scanLockTitle">Staff sign-in</h2>
+      <input id="staff-username-input" placeholder="Username" style="max-width:280px;margin:10px auto;" />
+      <input id="staff-password-input" type="password" placeholder="Password" style="max-width:280px;margin:10px auto;" />
+      <br/>
+      <button class="primary" id="scan-unlock" data-i18n="btnLogin">Log in</button>
+      <div class="msg" id="scan-lock-msg"></div>
+    </div>
+
+    <div id="scan-panel" class="hidden">
+      <div class="card">
+        <h2 data-i18n="scanTitle">Scan a member's entry QR code</h2>
+        <p style="color:var(--muted);font-size:0.85rem;" data-i18n="scanIntro">Point the camera at the member's QR code. Points are awarded automatically the moment a code is confirmed.</p>
+        <div id="scan-video-wrap" style="max-width:420px;margin:12px auto;border-radius:10px;overflow:hidden;border:1px solid var(--border);">
+          <video id="scan-video" style="width:100%;display:block;" playsinline muted></video>
+        </div>
+        <canvas id="scan-canvas" class="hidden"></canvas>
+        <div style="text-align:center;">
+          <button class="secondary" id="scan-start" data-i18n="btnStartCamera">Start camera</button>
+          <button class="secondary hidden" id="scan-stop" data-i18n="btnStopCamera">Stop camera</button>
+        </div>
+        <div class="msg" id="scan-result-msg" style="margin-top:16px;font-size:1rem;"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= ADMIN ============================= -->
+  <section id="view-admin" class="view">
+    <div class="card admin-lock" id="admin-lock">
+      <h2 data-i18n="adminLockTitle">Committee sign-in</h2>
+      <input id="admin-username-input" placeholder="Username" style="max-width:280px;margin:10px auto;" />
+      <input id="admin-password-input" type="password" placeholder="Password" style="max-width:280px;margin:10px auto;" />
+      <br/>
+      <button class="primary" id="admin-unlock" data-i18n="btnLogin">Log in</button>
+      <div class="msg" id="admin-lock-msg"></div>
+    </div>
+
+    <div id="admin-denied" class="card hidden">
+      <p style="color:var(--muted);" data-i18n="adminDenied">This account doesn't have admin access. Use the Gate Scanner tab instead, or log in with an admin account.</p>
+    </div>
+
+    <div id="admin-panel" class="hidden">
+      <div class="card">
+        <h2 data-i18n="adminOverview">Overview</h2>
+        <div class="stat-row" id="admin-stats"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminDashboardTitle">Event dashboard</h2>
+        <p class="section-sub" data-i18n="adminDashboardIntro">Registrations, waiting list, and attendance for every event, newest first.</p>
+        <div id="admin-dashboard-table"></div>
+        <div id="admin-waitlist-panel" class="hidden" style="margin-top:16px;">
+          <h3 id="admin-waitlist-title" style="margin-top:0;"></h3>
+          <div id="admin-waitlist-list"></div>
+          <div class="msg" id="admin-waitlist-msg"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminPointsToggleTitle">Points system visibility</h2>
+        <p class="section-sub" data-i18n="adminPointsToggleIntro">Turn the points system on or off for members. Points still accumulate in the background either way — this only controls what members can see (their balance, the Redemption Ladder tab, and points mentions on registration).</p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="settings-points-visible" />
+          <span data-i18n="pointsVisibleLabel">Show points &amp; Redemption Ladder to members</span>
+        </label>
+        <div class="msg" id="settings-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminEditRules">Points rules</h2>
+        <p class="warn-note" data-i18n="rulesWarning">Warning: points are calculated live, not frozen when earned. Changing these values immediately changes the point value of every past registration too, not just future ones.</p>
+        <div class="grid-2">
+          <div><label data-i18n="fieldParticipation">Participation points</label><input id="rules-participation" type="number" min="0" step="1" /></div>
+          <div><label data-i18n="fieldEarlyBonus">Early-registration bonus</label><input id="rules-early-bonus" type="number" min="0" step="1" /></div>
+        </div>
+        <h3 style="margin-top:14px;" data-i18n="fieldPositionBonus">Position bonus points</h3>
+        <div class="grid-2" id="rules-position-grid">
+          <div><label data-i18n="place1">1st place</label><input id="rules-pos-1" type="number" min="0" step="1" /></div>
+          <div><label data-i18n="place2">2nd place</label><input id="rules-pos-2" type="number" min="0" step="1" /></div>
+          <div><label data-i18n="place3">3rd place</label><input id="rules-pos-3" type="number" min="0" step="1" /></div>
+          <div><label data-i18n="place4">4th place</label><input id="rules-pos-4" type="number" min="0" step="1" /></div>
+          <div><label data-i18n="place5">5th place</label><input id="rules-pos-5" type="number" min="0" step="1" /></div>
+          <div><label data-i18n="place6">6th place</label><input id="rules-pos-6" type="number" min="0" step="1" /></div>
+        </div>
+        <button class="primary" id="rules-save" data-i18n="btnSaveRules">Save points rules</button>
+        <div class="msg" id="rules-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminEditLadder">Redemption ladder</h2>
+        <p class="warn-note" data-i18n="rulesWarning">Warning: points are calculated live, not frozen when earned. Changing these values immediately changes the point value of every past registration too, not just future ones.</p>
+        <div id="ladder-edit-list"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminAddEvent">Add an event</h2>
+        <div class="grid-2">
+          <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
+          <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
+          <div><label data-i18n="fieldSport">Sport</label><input id="ev-sport" /></div>
+          <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
+          <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-deadline" type="datetime-local" /></div>
+          <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
+          <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-min-capacity" type="number" min="0" /></div>
+          <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-max-capacity" type="number" min="0" /></div>
+        </div>
+        <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
+        <label data-i18n="fieldDescEn">Description (EN)</label>
+        <textarea id="ev-desc-en" rows="3"></textarea>
+        <label data-i18n="fieldDescAr">Description (AR)</label>
+        <textarea id="ev-desc-ar" dir="rtl" rows="3"></textarea>
+        <button class="primary" id="ev-submit" data-i18n="btnAddEvent">Add event</button>
+        <div class="msg" id="ev-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminEditEvent">Edit an event</h2>
+        <p class="hint-note" data-i18n="editEventHint">You can edit an event's details any time before its date has passed. Once an event finishes, its details lock — only the after-event recap below can still be added.</p>
+        <label data-i18n="fieldEvent">Event</label>
+        <select id="ev-edit-select"></select>
+        <button class="secondary" id="ev-edit-load" style="margin-top:10px;" data-i18n="btnLoadEvent">Load event</button>
+        <div id="ev-edit-fields" class="hidden" style="margin-top:14px;">
+          <div class="grid-2">
+            <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
+            <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-edit-name-ar" dir="rtl" /></div>
+            <div><label data-i18n="fieldSport">Sport</label><input id="ev-edit-sport" /></div>
+            <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
+            <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-edit-deadline" type="datetime-local" /></div>
+            <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
+            <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-edit-min-capacity" type="number" min="0" /></div>
+            <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-edit-max-capacity" type="number" min="0" /></div>
+          </div>
+          <p class="hint-note" id="ev-edit-capacity-status"></p>
+          <label data-i18n="fieldDescEn">Description (EN)</label>
+          <textarea id="ev-edit-desc-en" rows="3"></textarea>
+          <label data-i18n="fieldDescAr">Description (AR)</label>
+          <textarea id="ev-edit-desc-ar" dir="rtl" rows="3"></textarea>
+          <button class="primary" id="ev-edit-save" data-i18n="btnSaveEvent">Save changes</button>
+        </div>
+        <div class="msg" id="ev-edit-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminPostNews">Post committee news</h2>
+        <p class="hint-note" data-i18n="postNewsHint">Short announcements that show on the Events landing page under "Committee News" — e.g. schedule changes, new sport added, general updates.</p>
+        <div class="grid-2">
+          <div><label data-i18n="fieldNewsTitleEn">Title (EN)</label><input id="news-title-en" /></div>
+          <div><label data-i18n="fieldNewsTitleAr">Title (AR)</label><input id="news-title-ar" dir="rtl" /></div>
+        </div>
+        <label data-i18n="fieldNewsBodyEn">Body (EN)</label>
+        <textarea id="news-body-en" rows="3"></textarea>
+        <label data-i18n="fieldNewsBodyAr">Body (AR)</label>
+        <textarea id="news-body-ar" dir="rtl" rows="3"></textarea>
+        <label data-i18n="fieldNewsPhoto">Photo (optional)</label>
+        <input id="news-photo" type="file" accept="image/*" />
+        <button class="primary" id="news-submit" data-i18n="btnPostNews">Post news</button>
+        <div class="msg" id="news-msg"></div>
+        <div id="news-admin-list" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminSpotlights">Community spotlights</h2>
+        <p class="hint-note" data-i18n="spotlightAdminHint">Feature a member on the Events landing page under "Community Spotlight" — a photo and a short note about them.</p>
+        <div class="grid-2">
+          <div><label data-i18n="fieldSpotlightName">Member's name</label><input id="spotlight-name" placeholder="e.g. Sara Ahmed" /></div>
+          <div><label data-i18n="fieldSpotlightPhoto">Photo (optional)</label><input id="spotlight-photo" type="file" accept="image/*" /></div>
+        </div>
+        <label data-i18n="fieldSpotlightBlurbEn">About them (EN)</label>
+        <textarea id="spotlight-blurb-en" rows="2"></textarea>
+        <label data-i18n="fieldSpotlightBlurbAr">About them (AR)</label>
+        <textarea id="spotlight-blurb-ar" dir="rtl" rows="2"></textarea>
+        <button class="primary" id="spotlight-submit" data-i18n="btnAddSpotlight">Add spotlight</button>
+        <div class="msg" id="spotlight-msg"></div>
+        <div id="spotlight-admin-list" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminResults">Enter event results</h2>
+        <label data-i18n="fieldEvent">Event</label>
+        <select id="res-event"></select>
+        <button class="secondary" id="res-load" style="margin-top:10px;" data-i18n="btnLoadRegistrations">Load registrations</button>
+        <div id="res-table-wrap" style="margin-top:14px;overflow-x:auto;"></div>
+        <div id="res-recap-fields" class="hidden" style="margin-top:14px;">
+          <h3 data-i18n="recapSectionTitle">After-event recap (optional)</h3>
+          <p class="warn-note" data-i18n="recapNote">Add a short write-up and a few photos once the event is done — this is what shows on the Annual Activities page once the event moves there automatically.</p>
+          <label data-i18n="fieldRecapDescEn">Recap write-up (EN)</label>
+          <textarea id="res-recap-desc-en" rows="3"></textarea>
+          <label data-i18n="fieldRecapDescAr">Recap write-up (AR)</label>
+          <textarea id="res-recap-desc-ar" dir="rtl" rows="3"></textarea>
+          <label data-i18n="fieldRecapPhotos">Recap photos (up to 10)</label>
+          <input id="res-recap-photos" type="file" accept="image/*" multiple />
+        </div>
+        <button class="primary hidden" id="res-save" data-i18n="btnSaveResults">Save results</button>
+        <div class="msg" id="res-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminRedemptions">Redemption requests</h2>
+        <div id="redemptions-table-wrap" style="overflow-x:auto;"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminChatTitle">Member support chat</h2>
+        <p style="color:var(--muted);font-size:0.85rem;" data-i18n="adminChatIntro">Messages from members land here. Pick a conversation to read and reply.</p>
+        <div id="chat-threads-list"></div>
+        <div id="chat-thread-panel" class="hidden" style="margin-top:14px;">
+          <h3 id="chat-thread-panel-title" style="margin-bottom:8px;"></h3>
+          <div class="chat-thread" id="admin-chat-thread"></div>
+          <div class="chat-compose">
+            <textarea id="admin-chat-input" rows="2" placeholder="Type a reply..."></textarea>
+            <button class="primary" id="admin-chat-send" data-i18n="btnSend">Send</button>
+          </div>
+          <div class="msg" id="admin-chat-msg"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminStaffAccounts">Staff &amp; admin accounts</h2>
+        <div id="staff-accounts-table-wrap" style="overflow-x:auto;margin-bottom:14px;"></div>
+        <div class="grid-2">
+          <div><label data-i18n="fieldUsername">Username</label><input id="sa-username" /></div>
+          <div><label data-i18n="fieldFullName">Full name</label><input id="sa-name" /></div>
+          <div><label data-i18n="fieldPassword">Password</label><input id="sa-password" type="password" placeholder="At least 6 characters" /></div>
+          <div>
+            <label data-i18n="fieldRole">Role</label>
+            <select id="sa-role">
+              <option value="staff" data-i18n="roleStaff">Staff (gate scanner only)</option>
+              <option value="admin" data-i18n="roleAdmin">Admin (full access)</option>
+            </select>
+          </div>
+        </div>
+        <button class="primary" id="sa-submit" data-i18n="btnAddStaff">Add account</button>
+        <div class="msg" id="sa-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminResetMemberPassword">Reset a member's password</h2>
+        <p class="hint-note" data-i18n="resetMemberPasswordHint">For when a member forgets their password and contacts the committee. Enter their membership number and set a new temporary password, then let them know it directly.</p>
+        <div class="grid-2">
+          <div><label data-i18n="fieldMembership">Membership number</label><input id="rp-membership" placeholder="e.g. 10234" /></div>
+          <div><label data-i18n="fieldNewPassword">New password</label><input id="rp-password" type="password" placeholder="At least 6 characters" /></div>
+        </div>
+        <button class="primary" id="rp-submit" data-i18n="btnResetPassword">Reset password</button>
+        <div class="msg" id="rp-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="changePasswordTitle">Change my password</h2>
+        <label data-i18n="fieldOldPassword">Current password</label>
+        <input id="cp-old" type="password" />
+        <label data-i18n="fieldNewPassword">New password</label>
+        <input id="cp-new" type="password" placeholder="At least 6 characters" />
+        <button class="primary" id="cp-submit" data-i18n="btnChangePassword">Change password</button>
+        <div class="msg" id="cp-msg"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="modal-overlay hidden" id="event-modal">
+  <div class="modal-box">
+    <button class="modal-close" id="event-modal-close" aria-label="Close">&times;</button>
+    <div id="event-modal-content"></div>
+  </div>
+</div>
+
+<script src="i18n.js"></script>
+<script src="jsQR.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
