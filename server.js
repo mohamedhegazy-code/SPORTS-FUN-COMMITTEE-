@@ -1574,6 +1574,51 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
   res.json({ invited, skipped, overCapacity });
 });
 
+// Full member directory for the admin UI: everything about every member in
+// one place - contact details, current points balance (pooled the same way
+// as everywhere else), family members/dependents, and their registration
+// history (which events, confirmed or waitlisted, checked in or not, and
+// points earned per event). Meant for browsing/printing the whole roster
+// with real detail, as opposed to /api/admin/members which is the lighter
+// list used for search + bulk-invite.
+app.get("/api/admin/directory", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rows = Object.values(db.members)
+    .map((m) => {
+      const snap = balanceSnapshot(db, m.membershipNumber);
+      const registrations = db.registrations
+        .filter((r) => r.membershipNumber === m.membershipNumber)
+        .map((r) => {
+          const event = db.events.find((e) => e.id === r.eventId);
+          return {
+            eventId: r.eventId,
+            nameEn: event ? event.nameEn : "",
+            nameAr: event ? event.nameAr : "",
+            date: event ? event.date : "",
+            dependentName: r.dependentName,
+            waitlisted: !!r.waitlisted,
+            checkedIn: !!r.checkedIn,
+            points: registrationPoints(db, r),
+          };
+        })
+        .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      return {
+        membershipNumber: m.membershipNumber,
+        name: m.name,
+        phone: m.phone || "",
+        familyGroup: m.familyGroup || "",
+        hasLoggedInAccount: !!m.passwordHash,
+        balance: snap ? snap.balance : 0,
+        dependents: (m.dependents || []).map((d) => ({ id: d.id, name: d.name })),
+        registrations,
+        registeredCount: registrations.filter((r) => !r.waitlisted).length,
+        checkedInCount: registrations.filter((r) => r.checkedIn).length,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json(rows);
+});
+
 // -------------------------------------------------------------------------
 // SETTINGS (admin-controlled feature toggles)
 // -------------------------------------------------------------------------

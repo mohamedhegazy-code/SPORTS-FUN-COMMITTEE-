@@ -300,6 +300,19 @@ const I18N = {
     pleaseSelectMembers: "Select at least one member to invite.",
     invitedLabel: "Invited",
     overCapacityByLabel: "This event is now over its set capacity by",
+
+    // Admin: member directory
+    directoryTitle: "Member directory",
+    directoryIntro: "Every member, in one place: contact details, points balance, family members, and their full registration history.",
+    colPointsBalance: "Points balance",
+    colFamilyMembers: "Family members",
+    colStatus: "Status",
+    colPoints: "Points",
+    statusRegistered: "Registered",
+    noDependents: "No family members added.",
+    noRegistrationsYet: "No registrations yet.",
+    btnDetails: "Details",
+    btnHideDetails: "Hide details",
   },
   ar: {
     appTitle: "أهلاوي — التسجيل الإلكتروني ونظام النقاط",
@@ -602,6 +615,19 @@ const I18N = {
     pleaseSelectMembers: "اختر عضواً واحداً على الأقل للدعوة.",
     invitedLabel: "تمت دعوة",
     overCapacityByLabel: "هذه الفعالية الآن تتجاوز السعة المحددة بمقدار",
+
+    // دليل الأعضاء (المسؤول)
+    directoryTitle: "دليل الأعضاء",
+    directoryIntro: "كل عضو في مكان واحد: بيانات التواصل، رصيد النقاط، أفراد العائلة، وسجل التسجيلات الكامل.",
+    colPointsBalance: "رصيد النقاط",
+    colFamilyMembers: "أفراد العائلة",
+    colStatus: "الحالة",
+    colPoints: "النقاط",
+    statusRegistered: "مسجَّل",
+    noDependents: "لم تتم إضافة أفراد عائلة.",
+    noRegistrationsYet: "لا توجد تسجيلات بعد.",
+    btnDetails: "التفاصيل",
+    btnHideDetails: "إخفاء التفاصيل",
   },
 };
 

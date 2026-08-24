@@ -177,6 +177,7 @@ function setLang(lang) {
     loadAdminDashboard();
     renderMembersInviteEventDropdown();
     renderMembersTable();
+    renderDirectoryTable();
   }
   if (ADMIN_CHAT_OPEN_MEMBERSHIP) refreshOpenAdminChatThread();
   updateSessionBadge();
@@ -280,6 +281,7 @@ function updateUIForSession() {
     loadAdminOverview();
     loadAdminDashboard();
     loadAdminMembers();
+    loadAdminDirectory();
     loadRedemptionsTable();
     loadStaffAccountsTable();
     loadRulesForEdit();
@@ -1284,6 +1286,7 @@ async function openAdminWaitlist(eventId, eventLabelText) {
           await api(`/api/admin/registrations/${btn.dataset.promoteId}/promote`, { method: "POST" });
           await openAdminWaitlist(eventId, eventLabelText);
           await loadAdminDashboard();
+          loadAdminDirectory();
           showMsg(document.getElementById("admin-waitlist-msg"), t("promoted"), true);
         } catch (e) {
           showMsg(waitlistMsg, e.message, false);
@@ -1376,6 +1379,7 @@ document.getElementById("members-import-btn").addEventListener("click", async ()
     fileInput.value = "";
     await loadAdminMembers();
     loadAdminOverview();
+    loadAdminDirectory();
   } catch (e) {
     showMsg(msg, e.message, false);
   }
@@ -1400,10 +1404,102 @@ document.getElementById("members-invite-btn").addEventListener("click", async ()
     document.querySelectorAll("#members-table [data-member-checkbox]:checked").forEach((cb) => (cb.checked = false));
     loadAdminDashboard();
     loadAdminOverview();
+    loadAdminDirectory();
   } catch (e) {
     showMsg(msg, e.message, false);
   }
 });
+
+// --------------------------------------------------- admin: member directory --
+let DIRECTORY_DATA = [];
+
+async function loadAdminDirectory() {
+  try {
+    DIRECTORY_DATA = await api("/api/admin/directory");
+  } catch (e) {
+    DIRECTORY_DATA = [];
+  }
+  renderDirectoryTable();
+}
+
+function renderDirectoryTable() {
+  const wrap = document.getElementById("directory-table");
+  if (!DIRECTORY_DATA.length) {
+    wrap.innerHTML = `<p class="dashboard-empty-note">${t("noMembersYet")}</p>`;
+    return;
+  }
+  const rows = DIRECTORY_DATA.map((m, i) => {
+    const searchBlob = escapeAttr(`${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup}`.toLowerCase());
+    const dependentsHtml = m.dependents.length
+      ? `<ul class="directory-list">${m.dependents.map((d) => `<li>${escapeAttr(d.name)}</li>`).join("")}</ul>`
+      : `<p class="dashboard-empty-note">${t("noDependents")}</p>`;
+    const regsHtml = m.registrations.length
+      ? `<table class="dashboard-table"><thead><tr>
+          <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colStatus")}</th><th>${t("colPoints")}</th>
+        </tr></thead><tbody>${m.registrations
+          .map((r) => {
+            const label = currentLang === "ar" ? r.nameAr || r.nameEn : r.nameEn;
+            const who = r.dependentName ? ` (${escapeAttr(r.dependentName)})` : "";
+            const status = r.waitlisted ? t("waitlistLabel") : r.checkedIn ? t("colCheckedIn") : t("statusRegistered");
+            return `<tr><td>${escapeAttr(label)}${who}</td><td>${escapeAttr(r.date)}</td><td>${status}</td><td class="num">${fmt(r.points)}</td></tr>`;
+          })
+          .join("")}</tbody></table>`
+      : `<p class="dashboard-empty-note">${t("noRegistrationsYet")}</p>`;
+    return `<tr data-directory-row data-search="${searchBlob}">
+        <td>${escapeAttr(m.membershipNumber)}</td>
+        <td>${escapeAttr(m.name)}</td>
+        <td>${escapeAttr(m.phone)}</td>
+        <td>${escapeAttr(m.familyGroup)}</td>
+        <td class="num">${fmt(m.balance)}</td>
+        <td class="num">${fmt(m.registeredCount)}</td>
+        <td class="num">${fmt(m.checkedInCount)}</td>
+        <td><button class="secondary" data-directory-toggle="${i}" style="padding:3px 10px;font-size:0.78rem;">${t("btnDetails")}</button></td>
+      </tr>
+      <tr data-directory-row data-search="${searchBlob}" data-directory-detail="${i}" data-open="false" class="hidden">
+        <td colspan="8">
+          <div class="grid-2">
+            <div><h4 style="margin:6px 0;">${t("colFamilyMembers")}</h4>${dependentsHtml}</div>
+            <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
+          </div>
+        </td>
+      </tr>`;
+  }).join("");
+  wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
+    <thead><tr>
+      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colPhone")}</th>
+      <th>${t("colFamilyGroup")}</th><th>${t("colPointsBalance")}</th><th>${t("colRegistrations")}</th>
+      <th>${t("colCheckedIn")}</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+  wrap.querySelectorAll("[data-directory-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const detailRow = wrap.querySelector(`[data-directory-detail="${btn.dataset.directoryToggle}"]`);
+      const nowOpen = detailRow.dataset.open !== "true";
+      detailRow.dataset.open = String(nowOpen);
+      btn.textContent = nowOpen ? t("btnHideDetails") : t("btnDetails");
+      applyDirectorySearchFilter();
+    });
+  });
+  applyDirectorySearchFilter();
+}
+
+// A detail row is visible only when BOTH its summary row matches the search
+// AND the admin has explicitly opened it via the "Details" button - so
+// typing in the search box never forces a detail panel open, and it also
+// doesn't leave a stale open panel visible once its member is filtered out.
+function applyDirectorySearchFilter() {
+  const query = document.getElementById("directory-search").value.trim().toLowerCase();
+  document.querySelectorAll("#directory-table [data-directory-row]").forEach((row) => {
+    const matches = !query || row.dataset.search.includes(query);
+    if (row.hasAttribute("data-directory-detail")) {
+      row.classList.toggle("hidden", !matches || row.dataset.open !== "true");
+    } else {
+      row.classList.toggle("hidden", !matches);
+    }
+  });
+}
+document.getElementById("directory-search").addEventListener("input", applyDirectorySearchFilter);
 
 // -------------------------------------------------------- edit points rules --
 
