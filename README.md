@@ -186,6 +186,40 @@ one place to see "is this event filling up, and did the people who signed
 up actually show up" without cross-referencing the registrations list by
 hand.
 
+## Admin: Members — import, export & inviting to an event
+
+A "Members" card on the Admin tab, right below the Event dashboard, lets
+the committee manage the member roster in bulk instead of one member at a
+time:
+
+- **Export members (.xlsx)** downloads the full roster (membership
+  number, name, phone, family group) as an Excel file — useful as a
+  backup, or as a starting point for a file you'll edit and re-import.
+- **Import members (.xlsx)** reads an Excel file with those same four
+  columns (column order doesn't matter, and header matching is
+  case-insensitive; Phone and Family Group are optional). A membership
+  number that already exists gets its name/phone/family group updated in
+  place — it never touches that member's password or family members. A
+  brand-new membership number gets a fresh profile with no password set
+  yet.
+- A member imported this way **doesn't have a password yet**, so they
+  can't log in immediately. They (or the committee, on their behalf)
+  "claim" the profile later by using the normal Register/Sign-up screen
+  with that same membership number — it recognizes the existing profile
+  and just adds a password to it, keeping whatever phone/family group was
+  already on file unless they type something different.
+- **Invite members to an event** bulk-registers selected members for a
+  chosen event directly — a confirmed spot and a QR code, no self-service
+  registration required from them. This is meant for "we already know
+  who's coming, let's just add them" rather than everyday sign-ups.
+  Search narrows the list by name, membership number, or phone; tick the
+  ones to invite, then click "Invite selected members." Anyone already
+  registered (or already on the waiting list) for that event is silently
+  skipped rather than duplicated. Like promoting from the waiting list,
+  inviting deliberately does not enforce the event's maximum capacity —
+  it's a manual admin action, so the system trusts the judgment call
+  and just reports afterward if the event is now over its set limit.
+
 ## Support chat (member ↔ committee)
 
 Member Profile has a "Message the committee" card — a private message

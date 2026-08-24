@@ -4,6 +4,7 @@ let EVENTS_DATA = [];
 let NEWS_DATA = [];
 let SPOTLIGHTS_DATA = [];
 let COMMUNITY_STATS = null;
+let MEMBERS_DATA = []; // admin: full member roster, for the Members card (import/export/invite)
 // Admin-controlled feature toggle: whether the points system (balance,
 // Redemption Ladder tab, points mentions on registration) is shown to
 // members. Points still accumulate server-side regardless.
@@ -174,6 +175,8 @@ function setLang(lang) {
     document.getElementById("view-admin").classList.contains("active")
   ) {
     loadAdminDashboard();
+    renderMembersInviteEventDropdown();
+    renderMembersTable();
   }
   if (ADMIN_CHAT_OPEN_MEMBERSHIP) refreshOpenAdminChatThread();
   updateSessionBadge();
@@ -276,6 +279,7 @@ function updateUIForSession() {
   if (isAdmin) {
     loadAdminOverview();
     loadAdminDashboard();
+    loadAdminMembers();
     loadRedemptionsTable();
     loadStaffAccountsTable();
     loadRulesForEdit();
@@ -1290,6 +1294,116 @@ async function openAdminWaitlist(eventId, eventLabelText) {
     list.innerHTML = `<p class="dashboard-empty-note">${escapeAttr(e.message)}</p>`;
   }
 }
+
+// ------------------------------------------------- admin: members import/export/invite --
+async function loadAdminMembers() {
+  try {
+    MEMBERS_DATA = await api("/api/admin/members");
+  } catch (e) {
+    MEMBERS_DATA = [];
+  }
+  renderMembersInviteEventDropdown();
+  renderMembersTable();
+}
+
+function renderMembersInviteEventDropdown() {
+  const sel = document.getElementById("members-invite-event");
+  const prevValue = sel.value;
+  const upcoming = EVENTS_DATA.filter(isUpcoming);
+  sel.innerHTML = upcoming.length
+    ? upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("")
+    : `<option value="">${t("noEventsToInvite")}</option>`;
+  if (upcoming.some((ev) => String(ev.id) === prevValue)) sel.value = prevValue;
+}
+
+function renderMembersTable() {
+  const wrap = document.getElementById("members-table");
+  if (!MEMBERS_DATA.length) {
+    wrap.innerHTML = `<p class="dashboard-empty-note">${t("noMembersYet")}</p>`;
+    return;
+  }
+  const rows = MEMBERS_DATA.map((m) => {
+    const searchBlob = escapeAttr(
+      `${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup}`.toLowerCase()
+    );
+    return `<tr data-member-row data-search="${searchBlob}">
+      <td><input type="checkbox" data-member-checkbox value="${escapeAttr(m.membershipNumber)}" /></td>
+      <td>${escapeAttr(m.membershipNumber)}</td>
+      <td>${escapeAttr(m.name)}</td>
+      <td>${escapeAttr(m.phone)}</td>
+      <td>${escapeAttr(m.familyGroup)}</td>
+      <td>${m.hasLoggedInAccount ? t("yesLabel") : t("noLabel")}</td>
+    </tr>`;
+  }).join("");
+  wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
+    <thead><tr>
+      <th></th><th>${t("colMembershipNumber")}</th><th>${t("colName")}</th>
+      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colHasAccount")}</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+  applyMembersSearchFilter();
+}
+
+// Filtering hides/shows existing rows rather than rebuilding the table, so
+// any checkboxes the admin already ticked survive typing in the search box.
+function applyMembersSearchFilter() {
+  const query = document.getElementById("members-search").value.trim().toLowerCase();
+  document.querySelectorAll("#members-table [data-member-row]").forEach((row) => {
+    row.classList.toggle("hidden", !!query && !row.dataset.search.includes(query));
+  });
+}
+document.getElementById("members-search").addEventListener("input", applyMembersSearchFilter);
+
+document.getElementById("members-export-btn").addEventListener("click", () => {
+  window.location.href = "/api/admin/members/export";
+});
+
+document.getElementById("members-import-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("members-import-msg");
+  const fileInput = document.getElementById("members-import-file");
+  const file = fileInput.files[0];
+  if (!file) return showMsg(msg, t("pleaseChooseFile"), false);
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    const result = await api("/api/admin/members/import", { method: "POST", body: fd });
+    showMsg(
+      msg,
+      `${t("importedLabel")}: ${fmt(result.created.length)} ${t("addedLabel")}, ${fmt(result.updated.length)} ${t("updatedLabel")}, ${fmt(result.errors.length)} ${t("skippedLabel")}.`,
+      true
+    );
+    fileInput.value = "";
+    await loadAdminMembers();
+    loadAdminOverview();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+document.getElementById("members-invite-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("members-invite-msg");
+  const eventId = document.getElementById("members-invite-event").value;
+  if (!eventId) return showMsg(msg, t("pleaseSelectEvent"), false);
+  const membershipNumbers = Array.from(
+    document.querySelectorAll("#members-table [data-member-checkbox]:checked")
+  ).map((cb) => cb.value);
+  if (!membershipNumbers.length) return showMsg(msg, t("pleaseSelectMembers"), false);
+  try {
+    const result = await api(`/api/admin/events/${eventId}/invite`, {
+      method: "POST",
+      body: JSON.stringify({ membershipNumbers }),
+    });
+    let text = `${t("invitedLabel")} ${fmt(result.invited.length)}. ${fmt(result.skipped.length)} ${t("skippedLabel")}.`;
+    if (result.overCapacity > 0) text += ` ${t("overCapacityByLabel")} ${fmt(result.overCapacity)}.`;
+    showMsg(msg, text, true);
+    document.querySelectorAll("#members-table [data-member-checkbox]:checked").forEach((cb) => (cb.checked = false));
+    loadAdminDashboard();
+    loadAdminOverview();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
 
 // -------------------------------------------------------- edit points rules --
 

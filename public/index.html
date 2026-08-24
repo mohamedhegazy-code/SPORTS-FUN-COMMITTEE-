@@ -294,6 +294,38 @@
       </div>
 
       <div class="card">
+        <h2 data-i18n="adminMembersTitle">Members</h2>
+        <p class="section-sub" data-i18n="adminMembersIntro">Import your existing member list, export it as a backup, and invite members directly to an event without waiting for them to sign up themselves.</p>
+
+        <div class="grid-2" style="align-items:end;">
+          <div>
+            <label data-i18n="fieldImportFile">Import members (.xlsx)</label>
+            <input type="file" id="members-import-file" accept=".xlsx,.xls" />
+          </div>
+          <div>
+            <button class="secondary" id="members-import-btn" data-i18n="btnImportMembers">Import file</button>
+            <button class="secondary" id="members-export-btn" data-i18n="btnExportMembers">Export members (.xlsx)</button>
+          </div>
+        </div>
+        <p class="hint-note" data-i18n="importFormatHint">Columns expected: Membership Number, Name, Phone (optional), Family Group (optional). Existing membership numbers get updated; new ones are added.</p>
+        <div class="msg" id="members-import-msg"></div>
+
+        <h3 style="margin-top:18px;" data-i18n="inviteToEventTitle">Invite members to an event</h3>
+        <div class="grid-2">
+          <div>
+            <label data-i18n="fieldEvent">Event</label>
+            <select id="members-invite-event"></select>
+          </div>
+          <div>
+            <input id="members-search" type="text" placeholder="Search by name, membership number, or phone" />
+          </div>
+        </div>
+        <div id="members-table"></div>
+        <button class="primary" id="members-invite-btn" style="margin-top:10px;" data-i18n="btnInviteSelected">Invite selected members</button>
+        <div class="msg" id="members-invite-msg"></div>
+      </div>
+
+      <div class="card">
         <h2 data-i18n="adminPointsToggleTitle">Points system visibility</h2>
         <p class="section-sub" data-i18n="adminPointsToggleIntro">Turn the points system on or off for members. Points still accumulate in the background either way — this only controls what members can see (their balance, the Redemption Ladder tab, and points mentions on registration).</p>
         <label class="checkbox-row">

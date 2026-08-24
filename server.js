@@ -13,6 +13,7 @@ const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
 const QRCode = require("qrcode");
 const multer = require("multer");
+const XLSX = require("xlsx");
 
 const DB_PATH = path.join(__dirname, "data", "db.json");
 // Used to sign each registration's QR code so it can't be forged or edited.
@@ -63,6 +64,19 @@ const uploadEventPhoto = multer({
   limits: { fileSize: 8 * 1024 * 1024, files: 10 }, // 8MB/file, up to 10 files at once
   fileFilter: (req, file, cb) => {
     if (!/^image\//.test(file.mimetype)) return cb(new Error("Only image files are allowed"));
+    cb(null, true);
+  },
+});
+
+// -------------------------------------------------------- member import ---
+// Members are imported/exported as .xlsx (not saved to disk - parsed straight
+// from memory, since the file itself doesn't need to persist anywhere).
+const uploadMembersFile = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB is plenty for a member roster
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (![".xlsx", ".xls"].includes(ext)) return cb(new Error("Please upload an .xlsx file"));
     cb(null, true);
   },
 });
@@ -427,14 +441,19 @@ app.post("/api/auth/signup", async (req, res) => {
   if (existing && existing.passwordHash) {
     return res.status(409).json({ error: "An account already exists for this membership number. Please log in." });
   }
+  // `existing` with no passwordHash means an admin imported this member
+  // ahead of time (see /api/admin/members/import) - this is them claiming
+  // that profile rather than starting from scratch, so keep whatever was
+  // already on file (family group, phone, dependents) unless they're
+  // explicitly overriding it here.
   const passwordHash = await bcrypt.hash(password, 10);
   db.members[membershipNumber] = {
     membershipNumber,
     name,
-    familyGroup: familyGroup || "",
-    phone: phone || "",
+    familyGroup: familyGroup || (existing ? existing.familyGroup : "") || "",
+    phone: phone || (existing ? existing.phone : "") || "",
     passwordHash,
-    dependents: [],
+    dependents: (existing && existing.dependents) || [],
   };
   writeDb(db);
 
@@ -1382,6 +1401,180 @@ app.post("/api/admin/registrations/:id/promote", requireStaffRole("admin"), (req
 });
 
 // -------------------------------------------------------------------------
+// MEMBERS: admin roster, import/export, bulk-invite to an event
+// -------------------------------------------------------------------------
+
+// Full member roster for the admin UI - used both to browse/search who's in
+// the system and to pick who to invite to an event. Never includes password
+// hashes.
+app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rows = Object.values(db.members)
+    .map((m) => ({
+      membershipNumber: m.membershipNumber,
+      name: m.name,
+      phone: m.phone || "",
+      familyGroup: m.familyGroup || "",
+      hasLoggedInAccount: !!m.passwordHash,
+      dependentsCount: (m.dependents || []).length,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json(rows);
+});
+
+// Exports the member roster as an .xlsx file. Re-importing this same file
+// (see below) is a safe no-op for anyone unchanged, so this also doubles as
+// a simple backup/round-trip format.
+app.get("/api/admin/members/export", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rows = Object.values(db.members).map((m) => ({
+    "Membership Number": m.membershipNumber,
+    Name: m.name,
+    Phone: m.phone || "",
+    "Family Group": m.familyGroup || "",
+  }));
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Members");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="ahlawy-members.xlsx"');
+  res.send(buffer);
+});
+
+// Bulk-imports members from an .xlsx file. Expected columns (case-insensitive,
+// any order): "Membership Number", "Name", "Phone" (optional), "Family Group"
+// (optional) - matching the export above. A row whose membership number
+// already exists updates that member's name/phone/family group in place;
+// their password and dependents are never touched by import. A brand-new
+// membership number gets a fresh, password-less profile - that person (or
+// the admin, on their behalf) turns it into a real login later by signing up
+// with that same membership number, which claims the profile instead of
+// overwriting it (see /api/auth/signup).
+app.post(
+  "/api/admin/members/import",
+  requireStaffRole("admin"),
+  uploadMembersFile.single("file"),
+  (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    let workbook;
+    try {
+      workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    } catch (e) {
+      return res.status(400).json({ error: "Couldn't read that file - please upload a valid .xlsx file" });
+    }
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return res.status(400).json({ error: "That file has no sheets" });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+
+    const pick = (row, keys) => {
+      for (const key of Object.keys(row)) {
+        if (keys.includes(key.trim().toLowerCase())) return String(row[key]).trim();
+      }
+      return "";
+    };
+
+    const db = req.db;
+    const created = [];
+    const updated = [];
+    const errors = [];
+    rows.forEach((row, i) => {
+      const membershipNumber = pick(row, ["membership number", "membershipnumber", "membership no", "id"]);
+      const name = pick(row, ["name"]);
+      const phone = pick(row, ["phone", "phone number"]);
+      const familyGroup = pick(row, ["family group", "familygroup"]);
+      const rowNum = i + 2; // header row + 1-indexing
+
+      if (!membershipNumber || !name) {
+        errors.push({ row: rowNum, reason: "Missing membership number or name" });
+        return;
+      }
+      const existing = db.members[membershipNumber];
+      if (existing) {
+        existing.name = name;
+        if (phone) existing.phone = phone;
+        if (familyGroup) existing.familyGroup = familyGroup;
+        updated.push({ membershipNumber, name });
+      } else {
+        db.members[membershipNumber] = {
+          membershipNumber,
+          name,
+          familyGroup: familyGroup || "",
+          phone: phone || "",
+          passwordHash: null,
+          dependents: [],
+        };
+        created.push({ membershipNumber, name });
+      }
+    });
+    writeDb(db);
+    res.json({ created, updated, errors, totalRows: rows.length });
+  }
+);
+
+// Bulk-registers a list of already-known members directly for an event -
+// skips the normal self-service registration flow entirely (no waiting-list
+// prompt, no confirmation step from the member). Meant for "invite people
+// we already have on file," not everyday sign-ups. Deliberately does not
+// enforce maxCapacity - same reasoning as /promote above: the admin is
+// making a judgment call with full visibility into the event dashboard, not
+// something the system should silently block.
+app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const event = db.events.find((e) => e.id === eventId);
+  if (!event) return res.status(404).json({ error: "Event not found" });
+  const membershipNumbers = Array.isArray(req.body.membershipNumbers) ? req.body.membershipNumbers : [];
+  if (!membershipNumbers.length) return res.status(400).json({ error: "membershipNumbers is required" });
+
+  const invited = [];
+  const skipped = [];
+  const registeredAt = new Date().toISOString();
+  const earlyRegistration = event.earlyDeadline ? registeredAt <= event.earlyDeadline : false;
+
+  membershipNumbers.forEach((membershipNumber) => {
+    const member = db.members[membershipNumber];
+    if (!member) {
+      skipped.push({ membershipNumber, reason: "No such member" });
+      return;
+    }
+    const already = db.registrations.find(
+      (r) => r.membershipNumber === membershipNumber && r.eventId === eventId && !r.dependentId
+    );
+    if (already) {
+      skipped.push({
+        membershipNumber,
+        reason: already.waitlisted ? "Already on the waiting list" : "Already registered",
+      });
+      return;
+    }
+    const registration = {
+      id: db.nextIds.registration++,
+      membershipNumber,
+      eventId,
+      dependentId: null,
+      dependentName: null,
+      registeredAt,
+      earlyRegistration,
+      position: null,
+      checkedIn: false,
+      checkInAt: null,
+      waitlisted: false,
+    };
+    db.registrations.push(registration);
+    invited.push({ membershipNumber, name: member.name, registrationId: registration.id });
+  });
+  writeDb(db);
+
+  const overCapacity =
+    event.maxCapacity !== null
+      ? Math.max(0, confirmedRegistrationCount(db, eventId) - event.maxCapacity)
+      : 0;
+
+  res.json({ invited, skipped, overCapacity });
+});
+
+// -------------------------------------------------------------------------
 // SETTINGS (admin-controlled feature toggles)
 // -------------------------------------------------------------------------
 // Public so the frontend can decide what to render before anyone logs in
@@ -1408,13 +1601,13 @@ app.put("/api/settings", requireStaffRole("admin"), (req, res) => {
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     const messages = {
-      LIMIT_FILE_SIZE: "Photo is too large (max 8MB per photo).",
-      LIMIT_FILE_COUNT: "Too many photos (max 10 at once).",
-      LIMIT_UNEXPECTED_FILE: "Unexpected photo field.",
+      LIMIT_FILE_SIZE: "File is too large.",
+      LIMIT_FILE_COUNT: "Too many files at once.",
+      LIMIT_UNEXPECTED_FILE: "Unexpected file field.",
     };
     return res.status(400).json({ error: messages[err.code] || err.message });
   }
-  if (err && /only image files/i.test(err.message || "")) {
+  if (err && (/only image files/i.test(err.message || "") || /\.xlsx file/i.test(err.message || ""))) {
     return res.status(400).json({ error: err.message });
   }
   next(err);
