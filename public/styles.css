@@ -492,6 +492,11 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 .activity-row .capacity-badge { margin: 0; }
 button.secondary.small { padding: 5px 10px; font-size: 0.75rem; }
 
+.lang-ar, .lang-en { display: block; }
+.lang-ar { direction: rtl; }
+.lang-en { color: var(--muted); font-size: 0.88em; margin-top: 2px; font-weight: 400; }
+h2 .lang-ar, h3 .lang-ar { font-weight: inherit; }
+
 .dashboard-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .dashboard-table th, .dashboard-table td {
   text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);

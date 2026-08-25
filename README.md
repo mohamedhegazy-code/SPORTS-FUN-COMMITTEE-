@@ -256,6 +256,21 @@ activities nested under it can't be deleted directly — delete or reassign
 those activities first, so nothing is left pointing at a parent that no
 longer exists.
 
+## Arabic-first event names & descriptions
+
+Wherever an event's name or description is shown, the Arabic text is
+displayed first with the English text underneath (or alongside, in compact
+spots like dropdowns) — this is fixed and does **not** change when a
+visitor switches the site language with the EN/AR toggle. It only affects
+which language leads; it doesn't hide either language, and an event with
+only one language filled in just shows that one on its own.
+
+This applies on the events grid cards, the event details modal (title,
+"About" text, and past-event recap), and every place an event name appears
+in a dropdown or admin table. The **admin "Add an event" and "Edit an
+event" forms** also list the Arabic Name and Arabic Description fields
+before their English counterparts, matching the display order.
+
 ## Admin: Event dashboard
 
 A new card on the Admin tab, "Event dashboard," lists every event

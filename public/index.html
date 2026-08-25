@@ -394,8 +394,8 @@
       <div class="card">
         <h2 data-i18n="adminAddEvent">Add an event</h2>
         <div class="grid-2">
-          <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
           <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
+          <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
           <div><label data-i18n="fieldSport">Sport</label><input id="ev-sport" /></div>
           <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
           <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-end-date" type="date" /></div>
@@ -410,10 +410,10 @@
         <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
         <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
         <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
-        <label data-i18n="fieldDescEn">Description (EN)</label>
-        <textarea id="ev-desc-en" rows="3"></textarea>
         <label data-i18n="fieldDescAr">Description (AR)</label>
         <textarea id="ev-desc-ar" dir="rtl" rows="3"></textarea>
+        <label data-i18n="fieldDescEn">Description (EN)</label>
+        <textarea id="ev-desc-en" rows="3"></textarea>
         <button class="primary" id="ev-submit" data-i18n="btnAddEvent">Add event</button>
         <div class="msg" id="ev-msg"></div>
       </div>
@@ -426,8 +426,8 @@
         <button class="secondary" id="ev-edit-load" style="margin-top:10px;" data-i18n="btnLoadEvent">Load event</button>
         <div id="ev-edit-fields" class="hidden" style="margin-top:14px;">
           <div class="grid-2">
-            <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
             <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-edit-name-ar" dir="rtl" /></div>
+            <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
             <div><label data-i18n="fieldSport">Sport</label><input id="ev-edit-sport" /></div>
             <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
             <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-edit-end-date" type="date" /></div>
@@ -442,10 +442,10 @@
           <p class="hint-note" id="ev-edit-capacity-status"></p>
           <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
           <label class="checkbox-row"><input type="checkbox" id="ev-edit-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
-          <label data-i18n="fieldDescEn">Description (EN)</label>
-          <textarea id="ev-edit-desc-en" rows="3"></textarea>
           <label data-i18n="fieldDescAr">Description (AR)</label>
           <textarea id="ev-edit-desc-ar" dir="rtl" rows="3"></textarea>
+          <label data-i18n="fieldDescEn">Description (EN)</label>
+          <textarea id="ev-edit-desc-en" rows="3"></textarea>
           <button class="primary" id="ev-edit-save" data-i18n="btnSaveEvent">Save changes</button>
         </div>
         <div class="msg" id="ev-edit-msg"></div>

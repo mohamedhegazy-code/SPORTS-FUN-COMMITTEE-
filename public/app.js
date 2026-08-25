@@ -46,8 +46,26 @@ function showMsg(el, text, ok) {
 function fmt(n) {
   return Number(n || 0).toLocaleString(currentLang === "ar" ? "ar-EG" : "en-US");
 }
+// Plain-text event name for compact contexts (dropdowns, admin tables,
+// buttons) where HTML markup isn't rendered. Always shows the Arabic name
+// first, then the English name, regardless of the site's current EN/AR
+// toggle (which still controls all the surrounding UI text) - falls back
+// to whichever single language is actually filled in.
 function eventLabel(ev) {
-  return currentLang === "ar" ? (ev.nameAr || ev.nameEn) : ev.nameEn;
+  const ar = (ev.nameAr || "").trim();
+  const en = (ev.nameEn || "").trim();
+  if (ar && en && ar !== en) return `${ar} / ${en}`;
+  return ar || en;
+}
+// Two-line HTML version for headings (card titles, modal title) - Arabic
+// on its own line first, English below it.
+function eventNameHtml(ev) {
+  const ar = (ev.nameAr || "").trim();
+  const en = (ev.nameEn || "").trim();
+  if (ar && en && ar !== en) {
+    return `<span class="lang-ar" dir="rtl">${escapeAttr(ar)}</span><span class="lang-en">${escapeAttr(en)}</span>`;
+  }
+  return escapeAttr(ar || en);
 }
 function ladderLabel(tier) {
   return currentLang === "ar" ? tier.rewardAr : tier.rewardEn;
@@ -164,12 +182,54 @@ function truncate(str, n) {
   str = str || "";
   return str.length > n ? str.slice(0, n).trim() + "…" : str;
 }
-function eventDesc(ev) {
-  return currentLang === "ar" ? ev.descriptionAr || ev.descriptionEn : ev.descriptionEn || ev.descriptionAr;
+// Per-language description text (with the same "prefer this language, fall
+// back to the other if it's blank" rule the old currentLang-based versions
+// used) - kept as explicit-language helpers so callers can render both
+// languages together instead of picking one based on the site's toggle.
+function eventDescForLang(ev, lang) {
+  return lang === "ar" ? ev.descriptionAr || ev.descriptionEn : ev.descriptionEn || ev.descriptionAr;
 }
-function eventRecapDesc(ev) {
+function eventRecapDescForLang(ev, lang) {
   const r = ev.recap || {};
-  return currentLang === "ar" ? r.descriptionAr || r.descriptionEn : r.descriptionEn || r.descriptionAr;
+  return lang === "ar" ? r.descriptionAr || r.descriptionEn : r.descriptionEn || r.descriptionAr;
+}
+// Bilingual HTML for the event's own description (used in the details
+// modal's "About" section) - Arabic paragraph first, English below.
+function eventDescHtml(ev) {
+  const ar = (ev.descriptionAr || "").trim();
+  const en = (ev.descriptionEn || "").trim();
+  if (ar && en && ar !== en) {
+    return `<span class="lang-ar" dir="rtl">${escapeAttr(ar)}</span><span class="lang-en">${escapeAttr(en)}</span>`;
+  }
+  return escapeAttr(ar || en);
+}
+// Bilingual HTML for the after-event recap write-up (modal "Recap" section).
+function eventRecapDescHtml(ev) {
+  const r = ev.recap || {};
+  const ar = (r.descriptionAr || "").trim();
+  const en = (r.descriptionEn || "").trim();
+  if (ar && en && ar !== en) {
+    return `<span class="lang-ar" dir="rtl">${escapeAttr(ar)}</span><span class="lang-en">${escapeAttr(en)}</span>`;
+  }
+  return escapeAttr(ar || en);
+}
+// Bilingual HTML for the event card's snippet - for a past event this
+// prefers the recap write-up over the plain description in each language
+// independently (mirroring the old blended currentLang logic), and
+// truncates each language's text separately so the card stays a
+// reasonable height.
+function eventCardDescHtml(ev, isPast, maxLen) {
+  const forLang = (lang) => (isPast ? eventRecapDescForLang(ev, lang) : "") || eventDescForLang(ev, lang) || "";
+  let ar = forLang("ar").trim();
+  let en = forLang("en").trim();
+  if (maxLen) {
+    ar = truncate(ar, maxLen);
+    en = truncate(en, maxLen);
+  }
+  if (ar && en && ar !== en) {
+    return `<span class="lang-ar" dir="rtl">${escapeAttr(ar)}</span><span class="lang-en">${escapeAttr(en)}</span>`;
+  }
+  return escapeAttr(ar || en);
 }
 
 // ------------------------------------------------------------------- tabs --
@@ -582,17 +642,16 @@ function eventCardHtml(ev, isPast, featured) {
   const isParent = children.length > 0;
   const photo = isPast && ev.recap && ev.recap.photos && ev.recap.photos.length ? ev.recap.photos[0] : ev.coverPhoto;
   const photoStyle = photo ? ` style="background-image:url('${escapeAttr(photo)}')"` : "";
-  const desc = isPast ? eventRecapDesc(ev) || eventDesc(ev) : eventDesc(ev);
   return `
     <div class="event-card${isParent ? " event-card-parent" : ""}" data-event-id="${ev.id}">
       <div class="photo" data-action="details"${photoStyle}>${photo ? "" : escapeAttr(t("noPhoto"))}</div>
       <div class="body">
         ${featured ? `<span class="featured-tag">${escapeAttr(t("featuredEventsTitle"))}</span>` : ""}
-        <h3 data-action="details">${escapeAttr(eventLabel(ev))}</h3>
+        <h3 data-action="details">${eventNameHtml(ev)}</h3>
         <div class="meta">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""} ${
     isParent ? "" : capacityBadgeHtml(ev)
   }</div>
-        <div class="snippet">${escapeAttr(truncate(desc, 110))}</div>
+        <div class="snippet">${eventCardDescHtml(ev, isPast, 110)}</div>
         ${
           isParent
             ? `<div class="activities-list"><div class="activities-title">${escapeAttr(
@@ -749,9 +808,9 @@ function renderSpotlightGrid(spotlights) {
 // ---------------------------------------------------------- event details modal --
 function openEventModal(ev, isPast) {
   const content = document.getElementById("event-modal-content");
-  const desc = eventDesc(ev);
+  const hasDesc = !!((ev.descriptionAr || "").trim() || (ev.descriptionEn || "").trim());
   const recap = ev.recap || {};
-  const recapDesc = eventRecapDesc(ev);
+  const hasRecapDesc = !!((recap.descriptionAr || "").trim() || (recap.descriptionEn || "").trim());
   const recapPhotos = recap.photos || [];
   const heroPhoto = isPast && recapPhotos.length ? recapPhotos[0] : ev.coverPhoto;
   const galleryPhotos = isPast && recapPhotos.length > 1 ? recapPhotos.slice(1) : [];
@@ -760,10 +819,10 @@ function openEventModal(ev, isPast) {
   content.innerHTML = `
     <span class="event-badge ${isPast ? "past" : ""}">${isPast ? t("eventPast") : t("eventUpcoming")}</span>
     ${heroPhoto ? `<img class="photo-hero" src="${escapeAttr(heroPhoto)}" alt="" />` : ""}
-    <h2>${escapeAttr(eventLabel(ev))}</h2>
+    <h2>${eventNameHtml(ev)}</h2>
     <div class="meta" style="margin-bottom:12px;">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""}</div>
-    ${desc ? `<h3>${t("aboutTitle")}</h3><p class="desc">${escapeAttr(desc)}</p>` : ""}
-    ${isPast && recapDesc ? `<h3>${t("recapTitle")}</h3><p class="desc">${escapeAttr(recapDesc)}</p>` : ""}
+    ${hasDesc ? `<h3>${t("aboutTitle")}</h3><p class="desc">${eventDescHtml(ev)}</p>` : ""}
+    ${isPast && hasRecapDesc ? `<h3>${t("recapTitle")}</h3><p class="desc">${eventRecapDescHtml(ev)}</p>` : ""}
     ${
       galleryPhotos.length
         ? `<h3>${t("photosTitle")}</h3><div class="photo-gallery">${galleryPhotos
