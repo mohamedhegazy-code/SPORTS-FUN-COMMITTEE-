@@ -14,6 +14,8 @@ const bcrypt = require("bcryptjs");
 const QRCode = require("qrcode");
 const multer = require("multer");
 const XLSX = require("xlsx");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const DB_PATH = path.join(__dirname, "data", "db.json");
 // Used to sign each registration's QR code so it can't be forged or edited.
@@ -29,7 +31,56 @@ const SESSION_COOKIE = "ahlawy_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const PORT = process.env.PORT || 3000;
 
+// Slows down brute-force password guessing against the login endpoints.
+// Keyed by IP (the real visitor's, not Railway's - see "trust proxy"
+// below). 15 attempts per 10 minutes is generous enough that a real person
+// mistyping their password a few times in a row never notices it, while
+// still shutting down a scripted guessing attempt.
+const loginRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Only WRONG passwords count toward the limit - several staff logging in
+  // successfully back-to-back from the same venue WiFi on event day (all
+  // sharing one public IP) must never get accidentally locked out.
+  skipSuccessfulRequests: true,
+  message: { error: "Too many login attempts. Please wait a few minutes and try again." },
+});
+
 const app = express();
+// Railway (and most hosts) put the app behind a reverse proxy that
+// terminates HTTPS and forwards plain HTTP internally, setting
+// X-Forwarded-* headers. Trusting the first proxy hop makes req.ip reflect
+// the real visitor (not the proxy) - needed for the login rate limiter
+// below to actually apply per-visitor - and makes req.secure correctly
+// report "true" for a visitor on HTTPS, which is what the session cookie's
+// secure flag relies on. Safe here because there is exactly one proxy
+// layer in front of this app (Railway's), never more.
+app.set("trust proxy", 1);
+// Sets standard security-related response headers (clickjacking, MIME-
+// sniffing, etc.). The default Content-Security-Policy is replaced with one
+// that still fits this app: inline style="..." attributes are used
+// throughout the existing HTML/JS (style-src unsafe-inline), and QR codes
+// render as data: URI images (img-src data:) - the stock strict defaults
+// would silently break both.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"],
+      },
+    },
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 // no-cache so a redeployed app.js/index.html/etc. is never served stale from
@@ -304,10 +355,18 @@ function getSession(req) {
   }
   return session;
 }
-function setSessionCookie(res, token) {
+// secure: req.secure (rather than a hardcoded true) means the cookie is
+// HTTPS-only on the real deployment - where every request is HTTPS and
+// req.secure is correctly reported via the trusted proxy's
+// X-Forwarded-Proto header - while still working over plain http://
+// during local development, where req.secure is false and a hardcoded
+// `secure: true` would silently stop the browser from ever sending the
+// cookie back, breaking login.
+function setSessionCookie(req, res, token) {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
+    secure: req.secure,
     maxAge: SESSION_TTL_MS,
   });
 }
@@ -502,11 +561,11 @@ app.post("/api/auth/signup", async (req, res) => {
   writeDb(db);
 
   const token = createSession("member", membershipNumber);
-  setSessionCookie(res, token);
+  setSessionCookie(req, res, token);
   res.status(201).json({ member: publicMember(db.members[membershipNumber]) });
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   const db = readDb();
   const { membershipNumber, password } = req.body;
   const member = db.members[membershipNumber];
@@ -514,11 +573,11 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ error: "Incorrect membership number or password" });
   }
   const token = createSession("member", membershipNumber);
-  setSessionCookie(res, token);
+  setSessionCookie(req, res, token);
   res.json({ member: publicMember(member) });
 });
 
-app.post("/api/auth/staff-login", async (req, res) => {
+app.post("/api/auth/staff-login", loginRateLimiter, async (req, res) => {
   const db = readDb();
   const { username, password } = req.body;
   const staff = db.staffAccounts[username];
@@ -526,7 +585,7 @@ app.post("/api/auth/staff-login", async (req, res) => {
     return res.status(401).json({ error: "Incorrect username or password" });
   }
   const token = createSession("staff", username, staff.role);
-  setSessionCookie(res, token);
+  setSessionCookie(req, res, token);
   res.json({ staff: publicStaff(staff) });
 });
 

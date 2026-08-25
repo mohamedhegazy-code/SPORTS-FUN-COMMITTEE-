@@ -413,6 +413,32 @@ gate staff to use on their own phones, the site needs to be served over
 HTTPS (a free certificate from something like Let's Encrypt, or a host
 that provides HTTPS by default, works fine).
 
+## Security hardening
+
+A few defensive measures beyond the basics:
+
+- **Login rate limiting**: both `/api/auth/login` (members) and
+  `/api/auth/staff-login` (staff/admin) allow at most 15 *wrong-password*
+  attempts per visitor IP per 10 minutes before returning `429 Too Many
+  Requests`. Successful logins never count against this, so several staff
+  logging in back-to-back from the same event WiFi is never a problem —
+  only repeated failures are.
+- **Security headers** via `helmet`, with a custom Content-Security-Policy
+  that still allows what this app actually needs: inline `style="..."`
+  attributes (used throughout the HTML) and `data:` image URIs (how QR
+  codes render). Everything else defaults to same-origin only.
+- **Session cookie** is `httpOnly`, `sameSite: "lax"`, and `secure` exactly
+  when the request itself arrived over HTTPS (`req.secure`) — so it's
+  HTTPS-only on the real deployment without breaking local development
+  over plain `http://localhost`.
+- The app trusts exactly one reverse-proxy hop (`app.set("trust proxy",
+  1)`) so the rate limiter sees each visitor's real IP and `req.secure`
+  correctly reflects HTTPS behind Railway's proxy. Don't raise this past
+  `1` unless another proxy layer is added in front of Railway's.
+- HTTPS itself doesn't need any app-level configuration — Railway
+  terminates TLS automatically for the `*.up.railway.app` domain (and for
+  a custom domain, if one is ever added).
+
 ## Deploying somewhere real
 
 This runs anywhere Node.js runs (a VPS, Render, Railway, an internal server).
