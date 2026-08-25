@@ -175,6 +175,49 @@ no limit.
   being promoted — though none is issued until they are) can't accidentally
   be scanned in as attendance.
 
+## Parent events & sub-activities ("event days")
+
+An event can optionally be a **parent** for any number of individual
+**activities** — e.g. a "Sports Entertainment Day - New Cairo" parent event
+with "Foot Volley," "Dominoes," and "Football" as its activities. This
+mirrors how a real event day works: one poster/announcement, several things
+people can actually sign up for underneath it.
+
+- **Setting it up**: on the Add/Edit event admin forms, a "Parent event"
+  dropdown lets you pick an existing event to nest this one under. Leave it
+  on "none" for a normal standalone event (unchanged from before this
+  feature existed). The dropdown only offers events that aren't themselves
+  already a sub-activity — the hierarchy is intentionally exactly two levels
+  deep: a parent can't be nested under another parent, and an event that
+  already has activities under it can't be turned into someone else's
+  activity. The number of activities per parent is unlimited and entirely up
+  to whoever is setting up the event — it's not fixed at any particular
+  count.
+- **The parent itself is a poster, not something you register for.** Once an
+  event has one or more activities nested under it, it's excluded from the
+  Register tab's event dropdown and direct registration attempts are
+  rejected — members register for one of the individual activities instead,
+  exactly like registering for any other event today (same capacity badges,
+  same waiting list, same QR code per activity).
+- **Landing page**: a parent event still gets exactly one card (both in
+  "Coming up next" and the full grid), but instead of its own capacity badge
+  and register button, the card lists its activities inline — each with its
+  own capacity badge and its own small "Register" button that takes you
+  straight to the Register tab with that activity preselected. "More
+  details" still opens the same modal as before, showing the parent's
+  photo/description plus the same activity list. A standalone event (no
+  parent, no children) looks and behaves exactly as it always has.
+- **"Allow one person to register for more than one activity under this
+  event"**: a checkbox on the parent event's own form. Off by default — a
+  member (or a specific family member/dependent) can only be registered for
+  one activity under that parent at a time, and a second attempt is rejected
+  with a clear message naming which activity they're already in. Turn it on
+  if the event day is fine with people doing more than one activity (like
+  the "Sports Entertainment Day" example above).
+- Admin bulk-invite (see "Members" below) refuses to invite people directly
+  to a parent that has activities under it, for the same reason direct
+  registration is blocked — invite them to the specific activity instead.
+
 ## Admin: Event dashboard
 
 A new card on the Admin tab, "Event dashboard," lists every event

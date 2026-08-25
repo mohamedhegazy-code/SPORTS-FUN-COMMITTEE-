@@ -365,12 +365,21 @@ async function loadEvents() {
   renderFeaturedEvents();
   loadCommunityContent();
 }
+// Is this event a "parent" event day that has activities nested under it?
+// Parent events with children are poster/wrapper cards only - members
+// register for one of the individual activities, never for the parent.
+function isParentEventWithChildren(ev) {
+  return EVENTS_DATA.some((e) => e.parentEventId === ev.id);
+}
 function renderEventDropdowns() {
   // Members can only register for events that haven't happened yet. Full
   // events stay in the list (not hidden) - selecting one still works, it
   // just leads to a waiting-list offer instead of an instant confirmed spot.
+  // Parent "event day" wrappers with activities under them are excluded -
+  // there's nothing to directly register for on the parent itself.
   const upcoming = EVENTS_DATA.filter(isUpcoming);
   const regOpts = upcoming
+    .filter((ev) => !isParentEventWithChildren(ev))
     .map(
       (ev) =>
         `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}${isEventFull(ev) ? " — " + t("badgeFull") : ""}</option>`
@@ -392,6 +401,37 @@ function renderEventDropdowns() {
   // Editing is only allowed up until an event's date has passed.
   const editSel = document.getElementById("ev-edit-select");
   if (editSel) editSel.innerHTML = upcomingOpts || `<option value="">--</option>`;
+
+  populateParentEventOptions();
+}
+// Fills the "Parent event" dropdowns on the Add/Edit event admin forms.
+// Eligible parents are any event that is not itself a child of another
+// event (keeps the hierarchy exactly 2 levels deep) - and, on the Edit
+// form, never the event currently being edited (can't be its own parent),
+// and never an event that already has activities under it (a parent can't
+// also become a child).
+function populateParentEventOptions() {
+  const noneLabel = t("parentEventNone");
+  const buildOptions = (excludeEventId) =>
+    `<option value="">${escapeAttr(noneLabel)}</option>` +
+    EVENTS_DATA.filter((ev) => !ev.parentEventId && ev.id !== excludeEventId)
+      .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
+      .join("");
+
+  const addSel = document.getElementById("ev-parent-event");
+  if (addSel) {
+    const prev = addSel.value;
+    addSel.innerHTML = buildOptions(null);
+    if (prev && Array.from(addSel.options).some((o) => o.value === prev)) addSel.value = prev;
+  }
+  const editSel = document.getElementById("ev-edit-parent-event");
+  if (editSel) {
+    const fields = document.getElementById("ev-edit-fields");
+    const editingId = fields && fields.dataset.eventId ? Number(fields.dataset.eventId) : null;
+    const prev = editSel.value;
+    editSel.innerHTML = buildOptions(editingId);
+    if (prev && Array.from(editSel.options).some((o) => o.value === prev)) editSel.value = prev;
+  }
 }
 // Shows a plain-language capacity status under the Register event picker
 // ("14/20 registered", or a full/waiting-list note) for whichever event is
@@ -425,21 +465,54 @@ function capacityBadgeHtml(ev) {
   }
   return `<span class="capacity-badge ok">${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)}</span>`;
 }
+// Builds the inline "activities" list shown on a parent event day's card -
+// one row per sub-activity, each with its own capacity badge and its own
+// mini register button (registration is still per-activity, exactly as
+// before - there's just no separate details page for it).
+function activityRowsHtml(children, isPast) {
+  return children
+    .map(
+      (child) => `
+      <div class="activity-row" data-child-id="${child.id}">
+        <span class="activity-name">${escapeAttr(eventLabel(child))}</span>
+        ${capacityBadgeHtml(child)}
+        ${
+          isPast
+            ? ""
+            : `<button class="secondary small" data-action="register-child" data-child-id="${child.id}">${t(
+                "btnRegisterCard"
+              )}</button>`
+        }
+      </div>`
+    )
+    .join("");
+}
 function eventCardHtml(ev, isPast, featured) {
+  const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
+  const isParent = children.length > 0;
   const photo = isPast && ev.recap && ev.recap.photos && ev.recap.photos.length ? ev.recap.photos[0] : ev.coverPhoto;
   const photoStyle = photo ? ` style="background-image:url('${escapeAttr(photo)}')"` : "";
   const desc = isPast ? eventRecapDesc(ev) || eventDesc(ev) : eventDesc(ev);
   return `
-    <div class="event-card" data-event-id="${ev.id}">
+    <div class="event-card${isParent ? " event-card-parent" : ""}" data-event-id="${ev.id}">
       <div class="photo" data-action="details"${photoStyle}>${photo ? "" : escapeAttr(t("noPhoto"))}</div>
       <div class="body">
         ${featured ? `<span class="featured-tag">${escapeAttr(t("featuredEventsTitle"))}</span>` : ""}
         <h3 data-action="details">${escapeAttr(eventLabel(ev))}</h3>
-        <div class="meta">${escapeAttr(ev.date)}${ev.sport ? " · " + escapeAttr(ev.sport) : ""} ${capacityBadgeHtml(ev)}</div>
+        <div class="meta">${escapeAttr(ev.date)}${ev.sport ? " · " + escapeAttr(ev.sport) : ""} ${
+    isParent ? "" : capacityBadgeHtml(ev)
+  }</div>
         <div class="snippet">${escapeAttr(truncate(desc, 110))}</div>
+        ${
+          isParent
+            ? `<div class="activities-list"><div class="activities-title">${escapeAttr(
+                t("activitiesTitle")
+              )}</div>${activityRowsHtml(children, isPast)}</div>`
+            : ""
+        }
         <div class="actions">
           <button class="secondary" data-action="details">${t("btnMoreDetails")}</button>
-          ${isPast ? "" : `<button class="primary" data-action="register">${t("btnRegisterCard")}</button>`}
+          ${isPast || isParent ? "" : `<button class="primary" data-action="register">${t("btnRegisterCard")}</button>`}
         </div>
       </div>
     </div>`;
@@ -453,13 +526,21 @@ function wireEventCardButtons(grid, events, isPast) {
     });
     const regBtn = card.querySelector('[data-action="register"]');
     if (regBtn) regBtn.addEventListener("click", () => startRegisterFlow(ev));
+    card.querySelectorAll('[data-action="register-child"]').forEach((btn) => {
+      const child = EVENTS_DATA.find((e) => e.id === Number(btn.dataset.childId));
+      if (child) btn.addEventListener("click", () => startRegisterFlow(child));
+    });
   });
 }
 function renderEventsGrid() {
   const grid = document.getElementById("events-grid");
   const empty = document.getElementById("events-empty");
   if (!grid) return;
-  const upcoming = EVENTS_DATA.filter(isUpcoming).sort((a, b) => a.date.localeCompare(b.date));
+  // Sub-activities never get their own top-level card - they render nested
+  // inside their parent event day's card instead.
+  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
   empty.classList.toggle("hidden", upcoming.length > 0);
   grid.innerHTML = upcoming.map((ev) => eventCardHtml(ev, false)).join("");
   wireEventCardButtons(grid, upcoming, false);
@@ -468,7 +549,9 @@ function renderAnnualGrid() {
   const grid = document.getElementById("annual-grid");
   const empty = document.getElementById("annual-empty");
   if (!grid) return;
-  const past = EVENTS_DATA.filter(isPastEvent).sort((a, b) => b.date.localeCompare(a.date));
+  const past = EVENTS_DATA.filter((ev) => isPastEvent(ev) && !ev.parentEventId).sort((a, b) =>
+    b.date.localeCompare(a.date)
+  );
   empty.classList.toggle("hidden", past.length > 0);
   grid.innerHTML = past.map((ev) => eventCardHtml(ev, true)).join("");
   wireEventCardButtons(grid, past, true);
@@ -480,7 +563,9 @@ function renderFeaturedEvents() {
   const section = document.getElementById("featured-events-section");
   const grid = document.getElementById("featured-events-grid");
   if (!section || !grid) return;
-  const upcoming = EVENTS_DATA.filter(isUpcoming).sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
   const featured = upcoming.slice(0, 3);
   section.classList.toggle("hidden", featured.length === 0);
   grid.innerHTML = featured.map((ev) => eventCardHtml(ev, false, true)).join("");
@@ -580,6 +665,8 @@ function openEventModal(ev, isPast) {
   const recapPhotos = recap.photos || [];
   const heroPhoto = isPast && recapPhotos.length ? recapPhotos[0] : ev.coverPhoto;
   const galleryPhotos = isPast && recapPhotos.length > 1 ? recapPhotos.slice(1) : [];
+  const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
+  const isParent = children.length > 0;
   content.innerHTML = `
     <span class="event-badge ${isPast ? "past" : ""}">${isPast ? t("eventPast") : t("eventUpcoming")}</span>
     ${heroPhoto ? `<img class="photo-hero" src="${escapeAttr(heroPhoto)}" alt="" />` : ""}
@@ -594,12 +681,31 @@ function openEventModal(ev, isPast) {
             .join("")}</div>`
         : ""
     }
-    ${!isPast ? `<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t("btnRegisterCard")}</button>` : ""}
+    ${
+      isParent
+        ? `<h3>${escapeAttr(t("activitiesTitle"))}</h3><div class="activities-list">${activityRowsHtml(
+            children,
+            isPast
+          )}</div>`
+        : !isPast
+        ? `<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t("btnRegisterCard")}</button>`
+        : ""
+    }
   `;
-  if (!isPast) {
+  if (!isPast && !isParent) {
     document.getElementById("modal-register-btn").addEventListener("click", () => {
       closeEventModal();
       startRegisterFlow(ev);
+    });
+  }
+  if (!isPast && isParent) {
+    content.querySelectorAll('[data-action="register-child"]').forEach((btn) => {
+      const child = EVENTS_DATA.find((e) => e.id === Number(btn.dataset.childId));
+      if (!child) return;
+      btn.addEventListener("click", () => {
+        closeEventModal();
+        startRegisterFlow(child);
+      });
     });
   }
   document.getElementById("event-modal").classList.remove("hidden");
@@ -1704,6 +1810,8 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   const descriptionAr = document.getElementById("ev-desc-ar").value.trim();
   const minCapacity = document.getElementById("ev-min-capacity").value;
   const maxCapacity = document.getElementById("ev-max-capacity").value;
+  const parentEventId = document.getElementById("ev-parent-event").value;
+  const allowMultipleActivities = document.getElementById("ev-allow-multi").checked;
   const photoInput = document.getElementById("ev-photo");
   const msg = document.getElementById("ev-msg");
   if (!nameEn || !date) {
@@ -1720,6 +1828,8 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("descriptionAr", descriptionAr);
   fd.append("minCapacity", minCapacity);
   fd.append("maxCapacity", maxCapacity);
+  fd.append("parentEventId", parentEventId);
+  fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   try {
     await api("/api/events", { method: "POST", body: fd });
@@ -1731,6 +1841,8 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-desc-ar").value = "";
     document.getElementById("ev-min-capacity").value = "";
     document.getElementById("ev-max-capacity").value = "";
+    document.getElementById("ev-parent-event").value = "";
+    document.getElementById("ev-allow-multi").checked = false;
     photoInput.value = "";
     await loadEvents();
     await loadAdminOverview();
@@ -1765,6 +1877,14 @@ function populateEditForm(ev) {
     statusEl.textContent = "";
   }
   fields.dataset.eventId = ev.id;
+  // The parent-event dropdown's eligible options depend on which event is
+  // being edited (an event with children can't be assigned a parent, and an
+  // event can't be its own parent) - repopulate now that dataset.eventId is set.
+  populateParentEventOptions();
+  const editParentSel = document.getElementById("ev-edit-parent-event");
+  if (editParentSel) editParentSel.value = ev.parentEventId ? String(ev.parentEventId) : "";
+  const editAllowMulti = document.getElementById("ev-edit-allow-multi");
+  if (editAllowMulti) editAllowMulti.checked = !!ev.allowMultipleActivities;
   fields.classList.remove("hidden");
 }
 document.getElementById("ev-edit-load").addEventListener("click", () => {
@@ -1789,6 +1909,8 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   const descriptionAr = document.getElementById("ev-edit-desc-ar").value.trim();
   const minCapacity = document.getElementById("ev-edit-min-capacity").value;
   const maxCapacity = document.getElementById("ev-edit-max-capacity").value;
+  const parentEventId = document.getElementById("ev-edit-parent-event").value;
+  const allowMultipleActivities = document.getElementById("ev-edit-allow-multi").checked;
   const photoInput = document.getElementById("ev-edit-photo");
   if (!eventId) return;
   if (!nameEn || !date) {
@@ -1805,6 +1927,8 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("descriptionAr", descriptionAr);
   fd.append("minCapacity", minCapacity);
   fd.append("maxCapacity", maxCapacity);
+  fd.append("parentEventId", parentEventId);
+  fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   try {
     const saved = await api("/api/events/" + eventId, { method: "PUT", body: fd });

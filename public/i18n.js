@@ -245,6 +245,13 @@ const I18N = {
     fieldMinCapacity: "Minimum registrations (optional)",
     fieldMaxCapacity: "Maximum registrations (optional)",
     capacityHint: "Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.",
+
+    // Parent events / sub-activities
+    fieldParentEvent: "Parent event (optional)",
+    parentEventNone: "-- none / standalone event --",
+    parentEventHint: "Pick a parent event to make this a sub-activity of an \"event day\" (e.g. foot volley under Sports Entertainment Day). Leave as \"none\" for a normal standalone event.",
+    fieldAllowMultiActivities: "Allow one person to register for more than one activity under this event",
+    activitiesTitle: "Activities",
     badgeFull: "Full",
     regEventFullNote: "This event is full — you'll be offered the waiting list when you submit.",
     regSpotsNote: "registered",
@@ -572,6 +579,13 @@ const I18N = {
     fieldMinCapacity: "الحد الأدنى للتسجيل (اختياري)",
     fieldMaxCapacity: "الحد الأقصى للتسجيل (اختياري)",
     capacityHint: "اتركهما فارغين لعدم وجود حد. الحد الأدنى هو مجرد هدف يظهر في لوحة التحكم — لا يمنع التسجيل أبداً. عند الوصول للحد الأقصى، يُعرض على المسجلين الجدد الانضمام لقائمة الانتظار بدلاً من ذلك.",
+
+    // الفعاليات الرئيسية والأنشطة الفرعية
+    fieldParentEvent: "الفعالية الرئيسية (اختياري)",
+    parentEventNone: "-- بدون / فعالية مستقلة --",
+    parentEventHint: "اختر فعالية رئيسية لجعل هذه الفعالية نشاطاً فرعياً تابعاً ليوم فعاليات (مثال: فوت فولي تحت مظلة يوم الترفيه الرياضي). اتركها \"بدون\" لفعالية مستقلة عادية.",
+    fieldAllowMultiActivities: "السماح للشخص الواحد بالتسجيل في أكثر من نشاط تحت هذه الفعالية",
+    activitiesTitle: "الأنشطة",
     badgeFull: "مكتمل",
     regEventFullNote: "هذه الفعالية مكتملة — سيُعرض عليك الانضمام لقائمة الانتظار عند الإرسال.",
     regSpotsNote: "مسجَّل",

@@ -462,6 +462,23 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 .capacity-badge.waitlist { background: #fff4e0; color: #a06a00; }
 [dir="rtl"] .capacity-badge { margin-left: 0; margin-right: 6px; }
 
+/* ---------------------------------------- parent events / sub-activities -- */
+.event-card-parent { border-top: 3px solid var(--gold); }
+.activities-list {
+  margin: 4px 0 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.activities-title { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
+.activity-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; font-size: 0.85rem;
+}
+.activity-row + .activity-row { border-top: 1px dashed var(--border); }
+.activity-row .activity-name { flex: 1; font-weight: 600; }
+.activity-row .capacity-badge { margin: 0; }
+button.secondary.small { padding: 5px 10px; font-size: 0.75rem; }
+
 .dashboard-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .dashboard-table th, .dashboard-table td {
   text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);

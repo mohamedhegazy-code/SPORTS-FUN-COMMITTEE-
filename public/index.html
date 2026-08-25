@@ -402,8 +402,11 @@
           <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
           <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-min-capacity" type="number" min="0" /></div>
           <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-max-capacity" type="number" min="0" /></div>
+          <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-parent-event"></select></div>
         </div>
         <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
+        <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
+        <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
         <label data-i18n="fieldDescEn">Description (EN)</label>
         <textarea id="ev-desc-en" rows="3"></textarea>
         <label data-i18n="fieldDescAr">Description (AR)</label>
@@ -428,8 +431,11 @@
             <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
             <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-edit-min-capacity" type="number" min="0" /></div>
             <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-edit-max-capacity" type="number" min="0" /></div>
+            <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-edit-parent-event"></select></div>
           </div>
           <p class="hint-note" id="ev-edit-capacity-status"></p>
+          <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
+          <label class="checkbox-row"><input type="checkbox" id="ev-edit-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
           <label data-i18n="fieldDescEn">Description (EN)</label>
           <textarea id="ev-edit-desc-en" rows="3"></textarea>
           <label data-i18n="fieldDescAr">Description (AR)</label>

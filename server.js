@@ -284,6 +284,13 @@ function readDb() {
     coverPhoto: "",
     minCapacity: null,
     maxCapacity: null,
+    // Sub-activities: an event day (e.g. "Sports Entertainment Day - New
+    // Cairo") can have any number of activities nested under it
+    // (parentEventId points at the parent). allowMultipleActivities is set
+    // on the PARENT and controls whether one person can register for more
+    // than one of its sibling activities.
+    parentEventId: null,
+    allowMultipleActivities: false,
     ...ev,
     recap: { descriptionEn: "", descriptionAr: "", photos: [], ...(ev.recap || {}) },
   }));
@@ -834,6 +841,43 @@ function parseCapacity(value) {
   if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.floor(n);
 }
+// Does this event currently have any "sub-activities" nested under it? A
+// parent event day (e.g. "Sports Entertainment Day - New Cairo") is just a
+// poster/wrapper once it has children - members register for one of the
+// individual activities instead, never for the parent itself.
+function eventHasChildren(db, eventId) {
+  return db.events.some((e) => e.parentEventId === eventId);
+}
+// Validates a "parentEventId" field submitted from the Add/Edit event forms.
+// Keeps the hierarchy exactly 2 levels deep: a child activity can't itself
+// become a parent, and an event that already has activities under it can't
+// be turned into someone else's child. Returns { ok, parentEventId } or
+// { ok: false, error }.
+function validateParentEventId(db, existingEvent, parentEventIdRaw) {
+  if (parentEventIdRaw === undefined || parentEventIdRaw === null || parentEventIdRaw === "") {
+    return { ok: true, parentEventId: null };
+  }
+  const parentEventId = Number(parentEventIdRaw);
+  if (!Number.isFinite(parentEventId)) return { ok: false, error: "Invalid parent event" };
+  if (existingEvent && parentEventId === existingEvent.id) {
+    return { ok: false, error: "An event can't be its own parent" };
+  }
+  const parent = db.events.find((e) => e.id === parentEventId);
+  if (!parent) return { ok: false, error: "Parent event not found" };
+  if (parent.parentEventId) {
+    return {
+      ok: false,
+      error: "That event is itself an activity under another event and can't be used as a parent",
+    };
+  }
+  if (existingEvent && eventHasChildren(db, existingEvent.id)) {
+    return {
+      ok: false,
+      error: "This event already has activities under it, so it can't itself be made an activity of another event",
+    };
+  }
+  return { ok: true, parentEventId };
+}
 
 app.get("/api/events", (req, res) => {
   const db = readDb();
@@ -851,8 +895,19 @@ app.post(
   uploadEventPhoto.single("coverPhoto"),
   (req, res) => {
     const db = req.db;
-    const { nameEn, nameAr, sport, date, earlyDeadline, descriptionEn, descriptionAr, minCapacity, maxCapacity } =
-      req.body;
+    const {
+      nameEn,
+      nameAr,
+      sport,
+      date,
+      earlyDeadline,
+      descriptionEn,
+      descriptionAr,
+      minCapacity,
+      maxCapacity,
+      parentEventId,
+      allowMultipleActivities,
+    } = req.body;
     if (!nameEn || !date) return res.status(400).json({ error: "nameEn and date are required" });
     const min = parseCapacity(minCapacity);
     const max = parseCapacity(maxCapacity);
@@ -862,6 +917,8 @@ app.post(
     if (min !== null && max !== null && min > max) {
       return res.status(400).json({ error: "Minimum capacity can't be greater than maximum capacity" });
     }
+    const parentCheck = validateParentEventId(db, null, parentEventId);
+    if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     const event = {
       id: db.nextIds.event++,
       nameEn,
@@ -873,6 +930,8 @@ app.post(
       descriptionAr: descriptionAr || "",
       minCapacity: min,
       maxCapacity: max,
+      parentEventId: parentCheck.parentEventId,
+      allowMultipleActivities: String(allowMultipleActivities) === "true",
       coverPhoto: req.file ? `/uploads/events/${req.file.filename}` : "",
       recap: { descriptionEn: "", descriptionAr: "", photos: [] },
     };
@@ -898,8 +957,19 @@ app.put(
     if (event.date < todayStr()) {
       return res.status(400).json({ error: "This event has already finished and can no longer be edited" });
     }
-    const { nameEn, nameAr, sport, date, earlyDeadline, descriptionEn, descriptionAr, minCapacity, maxCapacity } =
-      req.body;
+    const {
+      nameEn,
+      nameAr,
+      sport,
+      date,
+      earlyDeadline,
+      descriptionEn,
+      descriptionAr,
+      minCapacity,
+      maxCapacity,
+      parentEventId,
+      allowMultipleActivities,
+    } = req.body;
     if (!nameEn || !date) return res.status(400).json({ error: "nameEn and date are required" });
     const min = parseCapacity(minCapacity);
     const max = parseCapacity(maxCapacity);
@@ -909,6 +979,8 @@ app.put(
     if (min !== null && max !== null && min > max) {
       return res.status(400).json({ error: "Minimum capacity can't be greater than maximum capacity" });
     }
+    const parentCheck = validateParentEventId(db, event, parentEventId);
+    if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     event.nameEn = nameEn;
     event.nameAr = nameAr || "";
     event.sport = sport || "";
@@ -918,6 +990,8 @@ app.put(
     event.descriptionAr = descriptionAr || "";
     event.minCapacity = min;
     event.maxCapacity = max;
+    event.parentEventId = parentCheck.parentEventId;
+    event.allowMultipleActivities = String(allowMultipleActivities) === "true";
     if (req.file) event.coverPhoto = `/uploads/events/${req.file.filename}`;
     writeDb(db);
     res.json({
@@ -1158,6 +1232,15 @@ app.post("/api/register", requireMember, async (req, res) => {
   const event = db.events.find((e) => e.id === Number(eventId));
   if (!event) return res.status(404).json({ error: "Event not found" });
 
+  // A parent "event day" that has activities nested under it is just a
+  // poster/wrapper - members must register for one of the individual
+  // activities instead, never for the parent event itself.
+  if (eventHasChildren(db, event.id)) {
+    return res.status(400).json({
+      error: "This is a multi-activity event day - please register for one of its individual activities instead.",
+    });
+  }
+
   // Registering for a family member (dependent) instead of yourself: their
   // registration still lives under the primary member's membershipNumber
   // (so points pool the same way as everything else), but is tagged with
@@ -1193,6 +1276,31 @@ app.post("/api/register", requireMember, async (req, res) => {
       qrDataUrl: already.checkedIn || already.waitlisted ? null : await qrDataUrl(already),
       potentialPoints: potentialPoints(db, already),
     });
+  }
+
+  // Sub-activity restriction: unless the parent event day has explicitly
+  // opted into "allow multiple activities," a member (or a specific
+  // dependent) can only be registered for one sibling activity under the
+  // same parent at a time.
+  if (event.parentEventId) {
+    const parent = db.events.find((e) => e.id === event.parentEventId);
+    if (parent && !parent.allowMultipleActivities) {
+      const siblingIds = db.events.filter((e) => e.parentEventId === event.parentEventId).map((e) => e.id);
+      const siblingRegistration = db.registrations.find(
+        (r) =>
+          r.membershipNumber === membershipNumber &&
+          siblingIds.includes(r.eventId) &&
+          (r.dependentId || null) === normalizedDependentId
+      );
+      if (siblingRegistration) {
+        const siblingEvent = db.events.find((e) => e.id === siblingRegistration.eventId);
+        return res.status(409).json({
+          error: `${dependentName ? dependentName + " is" : "You're"} already registered for ${
+            siblingEvent ? siblingEvent.nameEn : "another activity"
+          } under this event day. Only one activity per person is allowed here.`,
+        });
+      }
+    }
   }
 
   // Capacity check: a "confirmed" registration counts against maxCapacity;
@@ -1627,6 +1735,11 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
   const eventId = Number(req.params.eventId);
   const event = db.events.find((e) => e.id === eventId);
   if (!event) return res.status(404).json({ error: "Event not found" });
+  if (eventHasChildren(db, event.id)) {
+    return res.status(400).json({
+      error: "This is a multi-activity event day - invite people to one of its individual activities instead.",
+    });
+  }
   const membershipNumbers = Array.isArray(req.body.membershipNumbers) ? req.body.membershipNumbers : [];
   if (!membershipNumbers.length) return res.status(400).json({ error: "membershipNumbers is required" });
 
