@@ -146,6 +146,18 @@ button.primary {
   font-weight: 600;
 }
 button.primary:hover { background: var(--red-dark); }
+button.danger {
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid #a12626;
+  color: #a12626;
+  padding: 11px 20px;
+  border-radius: 7px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.danger:hover { background: #fdeaea; }
 button.secondary {
   background: #fff;
   border: 1px solid var(--red);
@@ -476,6 +488,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 }
 .activity-row + .activity-row { border-top: 1px dashed var(--border); }
 .activity-row .activity-name { flex: 1; font-weight: 600; }
+.activity-row .activity-time { font-weight: 400; color: var(--muted); font-size: 0.78rem; }
 .activity-row .capacity-badge { margin: 0; }
 button.secondary.small { padding: 5px 10px; font-size: 0.75rem; }
 

@@ -64,11 +64,80 @@ function escapeAttr(str) {
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
+// The date an event is actually over - a multi-day event (endDate set)
+// isn't done until its end date passes, not its start date.
+function eventEndDate(ev) {
+  return ev.endDate || ev.date;
+}
 function isUpcoming(ev) {
-  return ev.date >= todayStr();
+  return eventEndDate(ev) >= todayStr();
 }
 function isPastEvent(ev) {
-  return ev.date < todayStr();
+  return eventEndDate(ev) < todayStr();
+}
+// Full weekday name for a "YYYY-MM-DD" date string, in the current
+// language. Anchors to local midnight (rather than parsing the bare date
+// string, which JS treats as UTC) so the weekday can't shift by a day
+// depending on the viewer's timezone.
+function weekdayName(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { weekday: "long" });
+}
+// "18:30" -> "6:30 PM" (or the Arabic equivalent) for display.
+function formatTimeOfDay(hhmm) {
+  if (!hhmm) return "";
+  const [h, m] = hhmm.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+  const d = new Date(2000, 0, 1, h, m);
+  return d.toLocaleTimeString(currentLang === "ar" ? "ar-EG" : "en-US", { hour: "numeric", minute: "2-digit" });
+}
+// How long between a start and end "HH:MM" time, as a short label like "3h"
+// or "1h 30m". Assumes the end time is later the same day unless it's
+// numerically earlier, in which case it's treated as crossing midnight.
+function timeDurationLabel(startTime, endTime) {
+  if (!startTime || !endTime) return "";
+  const [sh, sm] = startTime.split(":").map(Number);
+  const [eh, em] = endTime.split(":").map(Number);
+  if (![sh, sm, eh, em].every(Number.isFinite)) return "";
+  let mins = eh * 60 + em - (sh * 60 + sm);
+  if (mins <= 0) mins += 24 * 60;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+// Builds the full date/time line shown on an event card and in the details
+// modal - weekday + date (and end date, for multi-day events) plus start/end
+// time and the computed duration, wherever each piece is actually set.
+// Everything here is optional except the start date, so this degrades
+// gracefully back to a bare date for events that don't set any of it.
+function eventDateTimeLabel(ev) {
+  const wd = weekdayName(ev.date);
+  let label = wd ? `${wd}, ${ev.date}` : ev.date;
+  if (ev.endDate && ev.endDate !== ev.date) {
+    const endWd = weekdayName(ev.endDate);
+    label += ` – ${endWd ? endWd + ", " : ""}${ev.endDate}`;
+  }
+  if (ev.startTime) {
+    label += ` · ${formatTimeOfDay(ev.startTime)}`;
+    if (ev.endTime) {
+      const dur = timeDurationLabel(ev.startTime, ev.endTime);
+      label += `–${formatTimeOfDay(ev.endTime)}${dur ? ` (${dur})` : ""}`;
+    }
+  }
+  return label;
+}
+// Compact time-only label for an activity row nested under a parent card -
+// the date is already shown once on the parent card, so activities only
+// need their own start/end time (if set).
+function activityTimeLabel(ev) {
+  if (!ev.startTime) return "";
+  if (!ev.endTime) return formatTimeOfDay(ev.startTime);
+  const dur = timeDurationLabel(ev.startTime, ev.endTime);
+  return `${formatTimeOfDay(ev.startTime)}–${formatTimeOfDay(ev.endTime)}${dur ? ` (${dur})` : ""}`;
 }
 // Converts a stored ISO deadline (e.g. "2026-08-20T18:30:00.000Z") back into
 // the "YYYY-MM-DDTHH:mm" local-time format a <input type="datetime-local">
@@ -402,6 +471,24 @@ function renderEventDropdowns() {
   const editSel = document.getElementById("ev-edit-select");
   if (editSel) editSel.innerHTML = upcomingOpts || `<option value="">--</option>`;
 
+  // Deleting has no date lock - every event (new or old, standalone or
+  // parent/activity) is selectable here, newest first.
+  const deleteSel = document.getElementById("ev-delete-select");
+  if (deleteSel) {
+    const prevDeleteValue = deleteSel.value;
+    const deleteOpts = EVENTS_DATA.slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map(
+        (ev) =>
+          `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}${isPastEvent(ev) ? ` — ${t("eventPast")}` : ""}</option>`
+      )
+      .join("");
+    deleteSel.innerHTML = deleteOpts || `<option value="">--</option>`;
+    if (prevDeleteValue && Array.from(deleteSel.options).some((o) => o.value === prevDeleteValue)) {
+      deleteSel.value = prevDeleteValue;
+    }
+  }
+
   populateParentEventOptions();
 }
 // Fills the "Parent event" dropdowns on the Add/Edit event admin forms.
@@ -471,10 +558,13 @@ function capacityBadgeHtml(ev) {
 // before - there's just no separate details page for it).
 function activityRowsHtml(children, isPast) {
   return children
-    .map(
-      (child) => `
+    .map((child) => {
+      const timeLabel = activityTimeLabel(child);
+      return `
       <div class="activity-row" data-child-id="${child.id}">
-        <span class="activity-name">${escapeAttr(eventLabel(child))}</span>
+        <span class="activity-name">${escapeAttr(eventLabel(child))}${
+        timeLabel ? ` <span class="activity-time">${escapeAttr(timeLabel)}</span>` : ""
+      }</span>
         ${capacityBadgeHtml(child)}
         ${
           isPast
@@ -483,8 +573,8 @@ function activityRowsHtml(children, isPast) {
                 "btnRegisterCard"
               )}</button>`
         }
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
 }
 function eventCardHtml(ev, isPast, featured) {
@@ -499,7 +589,7 @@ function eventCardHtml(ev, isPast, featured) {
       <div class="body">
         ${featured ? `<span class="featured-tag">${escapeAttr(t("featuredEventsTitle"))}</span>` : ""}
         <h3 data-action="details">${escapeAttr(eventLabel(ev))}</h3>
-        <div class="meta">${escapeAttr(ev.date)}${ev.sport ? " · " + escapeAttr(ev.sport) : ""} ${
+        <div class="meta">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""} ${
     isParent ? "" : capacityBadgeHtml(ev)
   }</div>
         <div class="snippet">${escapeAttr(truncate(desc, 110))}</div>
@@ -671,7 +761,7 @@ function openEventModal(ev, isPast) {
     <span class="event-badge ${isPast ? "past" : ""}">${isPast ? t("eventPast") : t("eventUpcoming")}</span>
     ${heroPhoto ? `<img class="photo-hero" src="${escapeAttr(heroPhoto)}" alt="" />` : ""}
     <h2>${escapeAttr(eventLabel(ev))}</h2>
-    <div class="meta" style="margin-bottom:12px;">${escapeAttr(ev.date)}${ev.sport ? " · " + escapeAttr(ev.sport) : ""}</div>
+    <div class="meta" style="margin-bottom:12px;">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""}</div>
     ${desc ? `<h3>${t("aboutTitle")}</h3><p class="desc">${escapeAttr(desc)}</p>` : ""}
     ${isPast && recapDesc ? `<h3>${t("recapTitle")}</h3><p class="desc">${escapeAttr(recapDesc)}</p>` : ""}
     ${
@@ -1805,6 +1895,9 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   const nameAr = document.getElementById("ev-name-ar").value.trim();
   const sport = document.getElementById("ev-sport").value.trim();
   const date = document.getElementById("ev-date").value;
+  const endDate = document.getElementById("ev-end-date").value;
+  const startTime = document.getElementById("ev-start-time").value;
+  const endTime = document.getElementById("ev-end-time").value;
   const earlyDeadline = document.getElementById("ev-deadline").value;
   const descriptionEn = document.getElementById("ev-desc-en").value.trim();
   const descriptionAr = document.getElementById("ev-desc-ar").value.trim();
@@ -1823,6 +1916,9 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("nameAr", nameAr);
   fd.append("sport", sport);
   fd.append("date", date);
+  fd.append("endDate", endDate);
+  fd.append("startTime", startTime);
+  fd.append("endTime", endTime);
   fd.append("earlyDeadline", datetimeLocalToIsoOrEmpty(earlyDeadline));
   fd.append("descriptionEn", descriptionEn);
   fd.append("descriptionAr", descriptionAr);
@@ -1841,6 +1937,9 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-desc-ar").value = "";
     document.getElementById("ev-min-capacity").value = "";
     document.getElementById("ev-max-capacity").value = "";
+    document.getElementById("ev-end-date").value = "";
+    document.getElementById("ev-start-time").value = "";
+    document.getElementById("ev-end-time").value = "";
     document.getElementById("ev-parent-event").value = "";
     document.getElementById("ev-allow-multi").checked = false;
     photoInput.value = "";
@@ -1862,6 +1961,9 @@ function populateEditForm(ev) {
   document.getElementById("ev-edit-name-ar").value = ev.nameAr || "";
   document.getElementById("ev-edit-sport").value = ev.sport || "";
   document.getElementById("ev-edit-date").value = ev.date || "";
+  document.getElementById("ev-edit-end-date").value = ev.endDate || "";
+  document.getElementById("ev-edit-start-time").value = ev.startTime || "";
+  document.getElementById("ev-edit-end-time").value = ev.endTime || "";
   document.getElementById("ev-edit-deadline").value = isoToDatetimeLocal(ev.earlyDeadline);
   document.getElementById("ev-edit-desc-en").value = ev.descriptionEn || "";
   document.getElementById("ev-edit-desc-ar").value = ev.descriptionAr || "";
@@ -1904,6 +2006,9 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   const nameAr = document.getElementById("ev-edit-name-ar").value.trim();
   const sport = document.getElementById("ev-edit-sport").value.trim();
   const date = document.getElementById("ev-edit-date").value;
+  const endDate = document.getElementById("ev-edit-end-date").value;
+  const startTime = document.getElementById("ev-edit-start-time").value;
+  const endTime = document.getElementById("ev-edit-end-time").value;
   const earlyDeadline = document.getElementById("ev-edit-deadline").value;
   const descriptionEn = document.getElementById("ev-edit-desc-en").value.trim();
   const descriptionAr = document.getElementById("ev-edit-desc-ar").value.trim();
@@ -1922,6 +2027,9 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("nameAr", nameAr);
   fd.append("sport", sport);
   fd.append("date", date);
+  fd.append("endDate", endDate);
+  fd.append("startTime", startTime);
+  fd.append("endTime", endTime);
   fd.append("earlyDeadline", datetimeLocalToIsoOrEmpty(earlyDeadline));
   fd.append("descriptionEn", descriptionEn);
   fd.append("descriptionAr", descriptionAr);
@@ -1943,6 +2051,31 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
     populateEditForm(saved);
     const sel = document.getElementById("ev-edit-select");
     if (sel && Array.from(sel.options).some((o) => o.value === String(saved.id))) sel.value = String(saved.id);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+document.getElementById("ev-delete-btn").addEventListener("click", async () => {
+  const sel = document.getElementById("ev-delete-select");
+  const msg = document.getElementById("ev-delete-msg");
+  const eventId = sel.value;
+  if (!eventId) return;
+  const ev = EVENTS_DATA.find((e) => e.id === Number(eventId));
+  const label = ev ? `${eventLabel(ev)} — ${ev.date}` : eventId;
+  const regCount = ev ? (ev.confirmedCount || 0) + (ev.waitlistCount || 0) : 0;
+  const warning = regCount
+    ? t("confirmDeleteEventWithRegs").replace("{name}", label).replace("{count}", fmt(regCount))
+    : t("confirmDeleteEvent").replace("{name}", label);
+  if (!confirm(warning)) return;
+  try {
+    await api("/api/events/" + eventId, { method: "DELETE" });
+    showMsg(msg, t("eventDeleted"), true);
+    document.getElementById("ev-edit-fields").classList.add("hidden");
+    document.getElementById("ev-edit-select").value = "";
+    await loadEvents();
+    await loadAdminOverview();
+    await loadAdminDashboard();
   } catch (e) {
     showMsg(msg, e.message, false);
   }

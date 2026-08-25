@@ -284,6 +284,9 @@ function readDb() {
     coverPhoto: "",
     minCapacity: null,
     maxCapacity: null,
+    startTime: null,
+    endTime: null,
+    endDate: null,
     // Sub-activities: an event day (e.g. "Sports Entertainment Day - New
     // Cairo") can have any number of activities nested under it
     // (parentEventId points at the parent). allowMultipleActivities is set
@@ -841,6 +844,32 @@ function parseCapacity(value) {
   if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.floor(n);
 }
+// Parses a time-of-day field (from an <input type="time">, start or end) -
+// "" / undefined -> null (no time set), otherwise a "HH:MM" 24-hour string.
+// Returns undefined on a genuinely invalid value so the caller can reject
+// the request.
+const TIME_FIELD_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+function parseTimeField(value) {
+  if (value === undefined || value === null || value === "") return null;
+  return TIME_FIELD_RE.test(value) ? value : undefined;
+}
+// Parses an "end date" field (from an <input type="date">) - "" / undefined
+// -> null (single-day event, same as the start date), otherwise a
+// "YYYY-MM-DD" string that must be on or after the start date. Returns
+// undefined on a genuinely invalid value so the caller can reject the request.
+const DATE_FIELD_RE = /^\d{4}-\d{2}-\d{2}$/;
+function parseEndDate(value, startDate) {
+  if (value === undefined || value === null || value === "") return null;
+  if (!DATE_FIELD_RE.test(value)) return undefined;
+  if (startDate && value < startDate) return undefined;
+  return value;
+}
+// The date an event is actually over - a multi-day event (endDate set)
+// isn't done until its end date passes, not its start date. Used for the
+// upcoming/past bucketing and the edit-lock check.
+function eventEndDate(ev) {
+  return ev.endDate || ev.date;
+}
 // Does this event currently have any "sub-activities" nested under it? A
 // parent event day (e.g. "Sports Entertainment Day - New Cairo") is just a
 // poster/wrapper once it has children - members register for one of the
@@ -900,6 +929,9 @@ app.post(
       nameAr,
       sport,
       date,
+      endDate,
+      startTime,
+      endTime,
       earlyDeadline,
       descriptionEn,
       descriptionAr,
@@ -917,6 +949,15 @@ app.post(
     if (min !== null && max !== null && min > max) {
       return res.status(400).json({ error: "Minimum capacity can't be greater than maximum capacity" });
     }
+    const parsedStartTime = parseTimeField(startTime);
+    const parsedEndTime = parseTimeField(endTime);
+    if (parsedStartTime === undefined || parsedEndTime === undefined) {
+      return res.status(400).json({ error: "Start/end time must be empty or a valid HH:MM time" });
+    }
+    const parsedEndDate = parseEndDate(endDate, date);
+    if (parsedEndDate === undefined) {
+      return res.status(400).json({ error: "End date must be empty or on/after the event date" });
+    }
     const parentCheck = validateParentEventId(db, null, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     const event = {
@@ -925,6 +966,9 @@ app.post(
       nameAr: nameAr || "",
       sport: sport || "",
       date,
+      endDate: parsedEndDate,
+      startTime: parsedStartTime,
+      endTime: parsedEndTime,
       earlyDeadline: earlyDeadline || null,
       descriptionEn: descriptionEn || "",
       descriptionAr: descriptionAr || "",
@@ -954,7 +998,7 @@ app.put(
     const eventId = Number(req.params.eventId);
     const event = db.events.find((e) => e.id === eventId);
     if (!event) return res.status(404).json({ error: "No such event" });
-    if (event.date < todayStr()) {
+    if (eventEndDate(event) < todayStr()) {
       return res.status(400).json({ error: "This event has already finished and can no longer be edited" });
     }
     const {
@@ -962,6 +1006,9 @@ app.put(
       nameAr,
       sport,
       date,
+      endDate,
+      startTime,
+      endTime,
       earlyDeadline,
       descriptionEn,
       descriptionAr,
@@ -979,12 +1026,24 @@ app.put(
     if (min !== null && max !== null && min > max) {
       return res.status(400).json({ error: "Minimum capacity can't be greater than maximum capacity" });
     }
+    const parsedStartTime = parseTimeField(startTime);
+    const parsedEndTime = parseTimeField(endTime);
+    if (parsedStartTime === undefined || parsedEndTime === undefined) {
+      return res.status(400).json({ error: "Start/end time must be empty or a valid HH:MM time" });
+    }
+    const parsedEndDate = parseEndDate(endDate, date);
+    if (parsedEndDate === undefined) {
+      return res.status(400).json({ error: "End date must be empty or on/after the event date" });
+    }
     const parentCheck = validateParentEventId(db, event, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     event.nameEn = nameEn;
     event.nameAr = nameAr || "";
     event.sport = sport || "";
     event.date = date;
+    event.endDate = parsedEndDate;
+    event.startTime = parsedStartTime;
+    event.endTime = parsedEndTime;
     event.earlyDeadline = earlyDeadline || null;
     event.descriptionEn = descriptionEn || "";
     event.descriptionAr = descriptionAr || "";
@@ -1001,6 +1060,34 @@ app.put(
     });
   }
 );
+
+// Deletes an event outright - unlike editing, this is allowed for both
+// upcoming AND already-finished events (an admin cleaning up a mistaken or
+// duplicate entry shouldn't be blocked just because its date has passed).
+// A parent event with activities still nested under it can't be deleted
+// directly - the activities would be left pointing at a parent that no
+// longer exists, so they (or their own reassignment) need to be handled
+// first. Deleting an event also removes every registration tied to it
+// (cascade) - keeping an orphaned registration around that points at a
+// deleted event would break the dashboard, directory, and My Registrations
+// for whoever was signed up. The response reports how many registrations
+// were removed so the admin UI can show what actually happened.
+app.delete("/api/events/:eventId", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const event = db.events.find((e) => e.id === eventId);
+  if (!event) return res.status(404).json({ error: "No such event" });
+  if (eventHasChildren(db, eventId)) {
+    return res.status(400).json({
+      error: "This event has activities nested under it - delete those first (or reassign them) before deleting it.",
+    });
+  }
+  const removedRegistrations = db.registrations.filter((r) => r.eventId === eventId).length;
+  db.registrations = db.registrations.filter((r) => r.eventId !== eventId);
+  db.events = db.events.filter((e) => e.id !== eventId);
+  writeDb(db);
+  res.json({ ok: true, eventId, removedRegistrations });
+});
 
 // -------------------------------------------------------------------------
 // COMMUNITY (committee news + member spotlights on the landing page)
@@ -1079,7 +1166,7 @@ app.delete("/api/spotlights/:id", requireStaffRole("admin"), (req, res) => {
 app.get("/api/community-stats", (req, res) => {
   const db = readDb();
   const totalMembers = Object.keys(db.members).length;
-  const eventsHeld = db.events.filter((e) => e.date < todayStr()).length;
+  const eventsHeld = db.events.filter((e) => eventEndDate(e) < todayStr()).length;
   const topEarners = Object.keys(db.members)
     .map((membershipNumber) => {
       const snap = balanceSnapshot(db, membershipNumber);

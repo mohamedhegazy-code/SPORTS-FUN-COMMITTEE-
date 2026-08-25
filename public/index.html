@@ -398,6 +398,9 @@
           <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
           <div><label data-i18n="fieldSport">Sport</label><input id="ev-sport" /></div>
           <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
+          <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-end-date" type="date" /></div>
+          <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-start-time" type="time" /></div>
+          <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-end-time" type="time" /></div>
           <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-deadline" type="datetime-local" /></div>
           <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
           <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-min-capacity" type="number" min="0" /></div>
@@ -427,6 +430,9 @@
             <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-edit-name-ar" dir="rtl" /></div>
             <div><label data-i18n="fieldSport">Sport</label><input id="ev-edit-sport" /></div>
             <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
+            <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-edit-end-date" type="date" /></div>
+            <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-edit-start-time" type="time" /></div>
+            <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-edit-end-time" type="time" /></div>
             <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-edit-deadline" type="datetime-local" /></div>
             <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
             <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-edit-min-capacity" type="number" min="0" /></div>
@@ -443,6 +449,15 @@
           <button class="primary" id="ev-edit-save" data-i18n="btnSaveEvent">Save changes</button>
         </div>
         <div class="msg" id="ev-edit-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="adminDeleteEvent">Delete an event</h2>
+        <p class="hint-note" data-i18n="deleteEventHint">Works for both upcoming and already-finished events. Deleting an event also removes every registration tied to it - this can't be undone. A parent event with activities nested under it can't be deleted until those activities are deleted or reassigned first.</p>
+        <label data-i18n="fieldEvent">Event</label>
+        <select id="ev-delete-select"></select>
+        <button class="danger" id="ev-delete-btn" data-i18n="btnDeleteEvent" style="margin-top:10px;">Delete event</button>
+        <div class="msg" id="ev-delete-msg"></div>
       </div>
 
       <div class="card">

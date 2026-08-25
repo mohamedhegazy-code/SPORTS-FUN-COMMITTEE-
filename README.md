@@ -218,6 +218,44 @@ people can actually sign up for underneath it.
   to a parent that has activities under it, for the same reason direct
   registration is blocked — invite them to the specific activity instead.
 
+## Event date, start/end time & multi-day events
+
+Every event (standalone, parent, or activity) can optionally have a start
+time, an end time, and an end date, on top of its required start date —
+shown on the Add/Edit event admin forms right next to the date field.
+
+- **Start time / end time**: plain `HH:MM` time pickers. If only a start
+  time is set, the landing page and details modal show just that (e.g.
+  "Sunday, 2026-09-20 · 5:00 PM"). If both are set, the duration is computed
+  and shown alongside them (e.g. "6:00 PM–9:00 PM (3h)"). Sub-activities show
+  their own time compactly next to their name in the parent card's activity
+  list, since the date is already shown once on the card.
+- **Weekday name**: the event's date is always shown with its weekday
+  ("Sunday, 2026-09-20" / "الأحد، 2026-09-20") — computed on the fly from the
+  date, in whichever language the page is in, so there's no extra admin
+  field for it.
+- **End date (multi-day events)**: optional, for an event that runs across
+  more than one calendar day (e.g. a weekend tournament). Must be on or
+  after the start date. When set, the card and modal show a date range
+  ("Fri, 2026-10-02 – Sat, 2026-10-03"), and the event doesn't move to
+  Annual Activities (and can't be edited) until its *end* date has passed,
+  not its start date. Leave it blank for the normal single-day case — this
+  is fully backward compatible with every event created before this
+  existed.
+
+## Admin: Deleting events
+
+A "Delete an event" card on Admin lets the committee remove an event
+outright — unlike editing, this works for **both upcoming and already
+finished** events, since cleaning up a mistaken or duplicate entry
+shouldn't be blocked by the usual edit-lock. Deleting an event also removes
+every registration tied to it (points, check-ins, waiting-list entries —
+all of it), so the confirmation prompt spells out how many registrations
+will go with it. **This can't be undone.** A parent event that still has
+activities nested under it can't be deleted directly — delete or reassign
+those activities first, so nothing is left pointing at a parent that no
+longer exists.
+
 ## Admin: Event dashboard
 
 A new card on the Admin tab, "Event dashboard," lists every event
