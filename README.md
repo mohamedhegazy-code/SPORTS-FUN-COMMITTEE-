@@ -271,6 +271,27 @@ in a dropdown or admin table. The **admin "Add an event" and "Edit an
 event" forms** also list the Arabic Name and Arabic Description fields
 before their English counterparts, matching the display order.
 
+## Admin: sub-tabs & icons
+
+The Admin section is organized into six sub-tabs so committee members
+aren't scrolling through one long page of ~19 cards to find a specific
+tool: **Overview** (the stats strip + Event dashboard), **Events** (Add,
+Edit, Delete, and Enter results), **Members** (import/export/invite,
+Member directory, Reset a member's password), **Points & Rewards**
+(points visibility, redemption requests, points rules, redemption
+ladder), **Content & Chat** (support chat, post news, community
+spotlights), and **Settings** (branding, staff & admin accounts, change
+my password). The sub-tab bar sticks to the top of the screen while
+scrolling through a tab's cards, and the last tab an admin had open is
+remembered per-browser (via `sessionStorage`) so it's still there after
+navigating away and back. The **Points & Rewards** and **Content & Chat**
+tabs also carry a small badge — mirroring the pending-redemptions count
+and the unread-support-chat count — so it's obvious at a glance when
+something in that group needs attention, without opening it. Every card
+also got a small icon next to its title purely for faster visual
+scanning; this and the sub-tabs are cosmetic/organizational only — no
+admin functionality, field, or endpoint changed.
+
 ## Admin: Event dashboard
 
 A new card on the Admin tab, "Event dashboard," lists every event

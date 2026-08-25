@@ -280,298 +280,339 @@
     </div>
 
     <div id="admin-panel" class="hidden">
-      <div class="card">
-        <h2 data-i18n="adminOverview">Overview</h2>
-        <div class="stat-row" id="admin-stats"></div>
+      <div class="admin-tabs" id="admin-tabs" role="tablist">
+        <button class="admin-tab active" type="button" data-admin-tab="overview" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span data-i18n="adminTabOverview">Overview</span>
+        </button>
+        <button class="admin-tab" type="button" data-admin-tab="events" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v3M14 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span data-i18n="adminTabEvents">Events</span>
+        </button>
+        <button class="admin-tab" type="button" data-admin-tab="members" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7.2" cy="6.5" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.3 16c.6-2.9 2.5-4.4 4.9-4.4s4.3 1.5 4.9 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14.3" cy="7" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M13 11.9c1.9.1 3.4 1.5 3.9 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <span data-i18n="adminTabMembers">Members</span>
+        </button>
+        <button class="admin-tab" type="button" data-admin-tab="points" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5l2.2 4.6 5 .7-3.6 3.6.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.6 5-.7L10 2.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <span data-i18n="adminTabPoints">Points &amp; Rewards</span>
+          <span id="admin-tab-badge-points" class="admin-tab-badge hidden">0</span>
+        </button>
+        <button class="admin-tab" type="button" data-admin-tab="content" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 4.5h14v9H8.5L4.5 16.5v-3H3v-9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span data-i18n="adminTabContent">Content &amp; Chat</span>
+          <span id="admin-tab-badge-content" class="admin-tab-badge hidden">0</span>
+        </button>
+        <button class="admin-tab" type="button" data-admin-tab="settings" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3.3v1.8M10 14.9v1.8M16.7 10h-1.8M5.1 10H3.3M14.7 5.3l-1.3 1.3M6.6 13.4l-1.3 1.3M14.7 14.7l-1.3-1.3M6.6 6.6L5.3 5.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span data-i18n="adminTabSettings">Settings</span>
+        </button>
       </div>
 
-      <div class="card">
-        <h2 data-i18n="brandingTitle">Branding</h2>
-        <p class="section-sub" data-i18n="brandingIntro">Set your colors and logo — changes apply across the landing page and every other page, for everyone, right away.</p>
-        <div class="grid-2">
-          <div><label data-i18n="fieldPrimaryColor">Primary color</label><input type="color" id="theme-primary" /></div>
-          <div><label data-i18n="fieldAccentColor">Accent color</label><input type="color" id="theme-accent" /></div>
+      <div class="admin-tab-panel" data-admin-panel="overview">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.5 16.5h15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 16V10.5M10 16V4M15 16V12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span data-i18n="adminOverview">Overview</span></h2>
+          <div class="stat-row" id="admin-stats"></div>
         </div>
-        <div style="margin-top:12px;">
-          <label data-i18n="fieldLogo">Logo</label>
-          <div id="theme-logo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="theme-logo-preview" alt="" /></div>
-          <input type="file" id="theme-logo-file" accept="image/*" />
-        </div>
-        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="primary" id="theme-save-btn" data-i18n="btnSaveBranding">Save branding</button>
-          <button class="secondary hidden" id="theme-remove-logo-btn" data-i18n="btnRemoveLogo">Remove logo</button>
-          <button class="secondary" id="theme-reset-btn" data-i18n="btnResetBranding">Reset to defaults</button>
-        </div>
-        <div class="msg" id="theme-msg"></div>
-      </div>
 
-      <div class="card">
-        <h2 data-i18n="adminDashboardTitle">Event dashboard</h2>
-        <p class="section-sub" data-i18n="adminDashboardIntro">Registrations, waiting list, and attendance for every event, newest first.</p>
-        <div id="admin-dashboard-table"></div>
-        <div id="admin-waitlist-panel" class="hidden" style="margin-top:16px;">
-          <h3 id="admin-waitlist-title" style="margin-top:0;"></h3>
-          <div id="admin-waitlist-list"></div>
-          <div class="msg" id="admin-waitlist-msg"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminMembersTitle">Members</h2>
-        <p class="section-sub" data-i18n="adminMembersIntro">Import your existing member list, export it as a backup, and invite members directly to an event without waiting for them to sign up themselves.</p>
-
-        <div class="grid-2" style="align-items:end;">
-          <div>
-            <label data-i18n="fieldImportFile">Import members (.xlsx)</label>
-            <input type="file" id="members-import-file" accept=".xlsx,.xls" />
-          </div>
-          <div>
-            <button class="secondary" id="members-import-btn" data-i18n="btnImportMembers">Import file</button>
-            <button class="secondary" id="members-export-btn" data-i18n="btnExportMembers">Export members (.xlsx)</button>
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="1.4" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 8h15M2.5 12.5h15" stroke="currentColor" stroke-width="1.2"/></svg><span data-i18n="adminDashboardTitle">Event dashboard</span></h2>
+          <p class="section-sub" data-i18n="adminDashboardIntro">Registrations, waiting list, and attendance for every event, newest first.</p>
+          <div id="admin-dashboard-table"></div>
+          <div id="admin-waitlist-panel" class="hidden" style="margin-top:16px;">
+            <h3 id="admin-waitlist-title" style="margin-top:0;"></h3>
+            <div id="admin-waitlist-list"></div>
+            <div class="msg" id="admin-waitlist-msg"></div>
           </div>
         </div>
-        <p class="hint-note" data-i18n="importFormatHint">Columns expected: Membership Number, Name, Phone (optional), Family Group (optional). Existing membership numbers get updated; new ones are added.</p>
-        <div class="msg" id="members-import-msg"></div>
-
-        <h3 style="margin-top:18px;" data-i18n="inviteToEventTitle">Invite members to an event</h3>
-        <div class="grid-2">
-          <div>
-            <label data-i18n="fieldEvent">Event</label>
-            <select id="members-invite-event"></select>
-          </div>
-          <div>
-            <input id="members-search" type="text" placeholder="Search by name, membership number, or phone" />
-          </div>
-        </div>
-        <div id="members-table"></div>
-        <button class="primary" id="members-invite-btn" style="margin-top:10px;" data-i18n="btnInviteSelected">Invite selected members</button>
-        <div class="msg" id="members-invite-msg"></div>
       </div>
 
-      <div class="card">
-        <h2 data-i18n="directoryTitle">Member directory</h2>
-        <p class="section-sub" data-i18n="directoryIntro">Every member, in one place: contact details, points balance, family members, and their full registration history.</p>
-        <input id="directory-search" type="text" placeholder="Search by name, membership number, or phone" style="margin-bottom:10px;" />
-        <div id="directory-table"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminPointsToggleTitle">Points system visibility</h2>
-        <p class="section-sub" data-i18n="adminPointsToggleIntro">Turn the points system on or off for members. Points still accumulate in the background either way — this only controls what members can see (their balance, the Redemption Ladder tab, and points mentions on registration).</p>
-        <label class="checkbox-row">
-          <input type="checkbox" id="settings-points-visible" />
-          <span data-i18n="pointsVisibleLabel">Show points &amp; Redemption Ladder to members</span>
-        </label>
-        <div class="msg" id="settings-msg"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminEditRules">Points rules</h2>
-        <p class="warn-note" data-i18n="rulesWarning">Warning: points are calculated live, not frozen when earned. Changing these values immediately changes the point value of every past registration too, not just future ones.</p>
-        <div class="grid-2">
-          <div><label data-i18n="fieldParticipation">Participation points</label><input id="rules-participation" type="number" min="0" step="1" /></div>
-          <div><label data-i18n="fieldEarlyBonus">Early-registration bonus</label><input id="rules-early-bonus" type="number" min="0" step="1" /></div>
-        </div>
-        <h3 style="margin-top:14px;" data-i18n="fieldPositionBonus">Position bonus points</h3>
-        <div class="grid-2" id="rules-position-grid">
-          <div><label data-i18n="place1">1st place</label><input id="rules-pos-1" type="number" min="0" step="1" /></div>
-          <div><label data-i18n="place2">2nd place</label><input id="rules-pos-2" type="number" min="0" step="1" /></div>
-          <div><label data-i18n="place3">3rd place</label><input id="rules-pos-3" type="number" min="0" step="1" /></div>
-          <div><label data-i18n="place4">4th place</label><input id="rules-pos-4" type="number" min="0" step="1" /></div>
-          <div><label data-i18n="place5">5th place</label><input id="rules-pos-5" type="number" min="0" step="1" /></div>
-          <div><label data-i18n="place6">6th place</label><input id="rules-pos-6" type="number" min="0" step="1" /></div>
-        </div>
-        <button class="primary" id="rules-save" data-i18n="btnSaveRules">Save points rules</button>
-        <div class="msg" id="rules-msg"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminEditLadder">Redemption ladder</h2>
-        <p class="warn-note" data-i18n="rulesWarning">Warning: points are calculated live, not frozen when earned. Changing these values immediately changes the point value of every past registration too, not just future ones.</p>
-        <div id="ladder-edit-list"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminAddEvent">Add an event</h2>
-        <div class="grid-2">
-          <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
-          <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
-          <div><label data-i18n="fieldSport">Sport</label><input id="ev-sport" /></div>
-          <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
-          <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-end-date" type="date" /></div>
-          <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-start-time" type="time" /></div>
-          <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-end-time" type="time" /></div>
-          <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-deadline" type="datetime-local" /></div>
-          <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
-          <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-min-capacity" type="number" min="0" /></div>
-          <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-max-capacity" type="number" min="0" /></div>
-          <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-parent-event"></select></div>
-        </div>
-        <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
-        <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
-        <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
-        <label data-i18n="fieldDescAr">Description (AR)</label>
-        <textarea id="ev-desc-ar" dir="rtl" rows="3"></textarea>
-        <label data-i18n="fieldDescEn">Description (EN)</label>
-        <textarea id="ev-desc-en" rows="3"></textarea>
-        <button class="primary" id="ev-submit" data-i18n="btnAddEvent">Add event</button>
-        <div class="msg" id="ev-msg"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminEditEvent">Edit an event</h2>
-        <p class="hint-note" data-i18n="editEventHint">You can edit an event's details any time before its date has passed. Once an event finishes, its details lock — only the after-event recap below can still be added.</p>
-        <label data-i18n="fieldEvent">Event</label>
-        <select id="ev-edit-select"></select>
-        <button class="secondary" id="ev-edit-load" style="margin-top:10px;" data-i18n="btnLoadEvent">Load event</button>
-        <div id="ev-edit-fields" class="hidden" style="margin-top:14px;">
+      <div class="admin-tab-panel hidden" data-admin-panel="events">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.8v6.4M6.8 10h6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span data-i18n="adminAddEvent">Add an event</span></h2>
           <div class="grid-2">
-            <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-edit-name-ar" dir="rtl" /></div>
-            <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
-            <div><label data-i18n="fieldSport">Sport</label><input id="ev-edit-sport" /></div>
-            <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
-            <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-edit-end-date" type="date" /></div>
-            <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-edit-start-time" type="time" /></div>
-            <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-edit-end-time" type="time" /></div>
-            <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-edit-deadline" type="datetime-local" /></div>
-            <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
-            <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-edit-min-capacity" type="number" min="0" /></div>
-            <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-edit-max-capacity" type="number" min="0" /></div>
-            <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-edit-parent-event"></select></div>
+            <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
+            <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
+            <div><label data-i18n="fieldSport">Sport</label><input id="ev-sport" /></div>
+            <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
+            <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-end-date" type="date" /></div>
+            <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-start-time" type="time" /></div>
+            <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-end-time" type="time" /></div>
+            <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-deadline" type="datetime-local" /></div>
+            <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
+            <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-min-capacity" type="number" min="0" /></div>
+            <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-max-capacity" type="number" min="0" /></div>
+            <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-parent-event"></select></div>
           </div>
-          <p class="hint-note" id="ev-edit-capacity-status"></p>
+          <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
           <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
-          <label class="checkbox-row"><input type="checkbox" id="ev-edit-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
+          <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
           <label data-i18n="fieldDescAr">Description (AR)</label>
-          <textarea id="ev-edit-desc-ar" dir="rtl" rows="3"></textarea>
+          <textarea id="ev-desc-ar" dir="rtl" rows="3"></textarea>
           <label data-i18n="fieldDescEn">Description (EN)</label>
-          <textarea id="ev-edit-desc-en" rows="3"></textarea>
-          <button class="primary" id="ev-edit-save" data-i18n="btnSaveEvent">Save changes</button>
+          <textarea id="ev-desc-en" rows="3"></textarea>
+          <button class="primary" id="ev-submit" data-i18n="btnAddEvent">Add event</button>
+          <div class="msg" id="ev-msg"></div>
         </div>
-        <div class="msg" id="ev-edit-msg"></div>
-      </div>
 
-      <div class="card">
-        <h2 data-i18n="adminDeleteEvent">Delete an event</h2>
-        <p class="hint-note" data-i18n="deleteEventHint">Works for both upcoming and already-finished events. Deleting an event also removes every registration tied to it - this can't be undone. A parent event with activities nested under it can't be deleted until those activities are deleted or reassigned first.</p>
-        <label data-i18n="fieldEvent">Event</label>
-        <select id="ev-delete-select"></select>
-        <button class="danger" id="ev-delete-btn" data-i18n="btnDeleteEvent" style="margin-top:10px;">Delete event</button>
-        <div class="msg" id="ev-delete-msg"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminPostNews">Post committee news</h2>
-        <p class="hint-note" data-i18n="postNewsHint">Short announcements that show on the Events landing page under "Committee News" — e.g. schedule changes, new sport added, general updates.</p>
-        <div class="grid-2">
-          <div><label data-i18n="fieldNewsTitleEn">Title (EN)</label><input id="news-title-en" /></div>
-          <div><label data-i18n="fieldNewsTitleAr">Title (AR)</label><input id="news-title-ar" dir="rtl" /></div>
-        </div>
-        <label data-i18n="fieldNewsBodyEn">Body (EN)</label>
-        <textarea id="news-body-en" rows="3"></textarea>
-        <label data-i18n="fieldNewsBodyAr">Body (AR)</label>
-        <textarea id="news-body-ar" dir="rtl" rows="3"></textarea>
-        <label data-i18n="fieldNewsPhoto">Photo (optional)</label>
-        <input id="news-photo" type="file" accept="image/*" />
-        <button class="primary" id="news-submit" data-i18n="btnPostNews">Post news</button>
-        <div class="msg" id="news-msg"></div>
-        <div id="news-admin-list" style="margin-top:16px;"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminSpotlights">Community spotlights</h2>
-        <p class="hint-note" data-i18n="spotlightAdminHint">Feature a member on the Events landing page under "Community Spotlight" — a photo and a short note about them.</p>
-        <div class="grid-2">
-          <div><label data-i18n="fieldSpotlightName">Member's name</label><input id="spotlight-name" placeholder="e.g. Sara Ahmed" /></div>
-          <div><label data-i18n="fieldSpotlightPhoto">Photo (optional)</label><input id="spotlight-photo" type="file" accept="image/*" /></div>
-        </div>
-        <label data-i18n="fieldSpotlightBlurbEn">About them (EN)</label>
-        <textarea id="spotlight-blurb-en" rows="2"></textarea>
-        <label data-i18n="fieldSpotlightBlurbAr">About them (AR)</label>
-        <textarea id="spotlight-blurb-ar" dir="rtl" rows="2"></textarea>
-        <button class="primary" id="spotlight-submit" data-i18n="btnAddSpotlight">Add spotlight</button>
-        <div class="msg" id="spotlight-msg"></div>
-        <div id="spotlight-admin-list" style="margin-top:16px;"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminResults">Enter event results</h2>
-        <label data-i18n="fieldEvent">Event</label>
-        <select id="res-event"></select>
-        <button class="secondary" id="res-load" style="margin-top:10px;" data-i18n="btnLoadRegistrations">Load registrations</button>
-        <div id="res-table-wrap" style="margin-top:14px;overflow-x:auto;"></div>
-        <div id="res-recap-fields" class="hidden" style="margin-top:14px;">
-          <h3 data-i18n="recapSectionTitle">After-event recap (optional)</h3>
-          <p class="warn-note" data-i18n="recapNote">Add a short write-up and a few photos once the event is done — this is what shows on the Annual Activities page once the event moves there automatically.</p>
-          <label data-i18n="fieldRecapDescEn">Recap write-up (EN)</label>
-          <textarea id="res-recap-desc-en" rows="3"></textarea>
-          <label data-i18n="fieldRecapDescAr">Recap write-up (AR)</label>
-          <textarea id="res-recap-desc-ar" dir="rtl" rows="3"></textarea>
-          <label data-i18n="fieldRecapPhotos">Recap photos (up to 10)</label>
-          <input id="res-recap-photos" type="file" accept="image/*" multiple />
-        </div>
-        <button class="primary hidden" id="res-save" data-i18n="btnSaveResults">Save results</button>
-        <div class="msg" id="res-msg"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminRedemptions">Redemption requests</h2>
-        <div id="redemptions-table-wrap" style="overflow-x:auto;"></div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="adminChatTitle">Member support chat</h2>
-        <p style="color:var(--muted);font-size:0.85rem;" data-i18n="adminChatIntro">Messages from members land here. Pick a conversation to read and reply.</p>
-        <div id="chat-threads-list"></div>
-        <div id="chat-thread-panel" class="hidden" style="margin-top:14px;">
-          <h3 id="chat-thread-panel-title" style="margin-bottom:8px;"></h3>
-          <div class="chat-thread" id="admin-chat-thread"></div>
-          <div class="chat-compose">
-            <textarea id="admin-chat-input" rows="2" placeholder="Type a reply..."></textarea>
-            <button class="primary" id="admin-chat-send" data-i18n="btnSend">Send</button>
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M13.4 3.3a1.8 1.8 0 0 1 2.5 2.5L6.6 15.1l-3.4.8.8-3.4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span data-i18n="adminEditEvent">Edit an event</span></h2>
+          <p class="hint-note" data-i18n="editEventHint">You can edit an event's details any time before its date has passed. Once an event finishes, its details lock — only the after-event recap below can still be added.</p>
+          <label data-i18n="fieldEvent">Event</label>
+          <select id="ev-edit-select"></select>
+          <button class="secondary" id="ev-edit-load" style="margin-top:10px;" data-i18n="btnLoadEvent">Load event</button>
+          <div id="ev-edit-fields" class="hidden" style="margin-top:14px;">
+            <div class="grid-2">
+              <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-edit-name-ar" dir="rtl" /></div>
+              <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
+              <div><label data-i18n="fieldSport">Sport</label><input id="ev-edit-sport" /></div>
+              <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
+              <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-edit-end-date" type="date" /></div>
+              <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-edit-start-time" type="time" /></div>
+              <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-edit-end-time" type="time" /></div>
+              <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-edit-deadline" type="datetime-local" /></div>
+              <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
+              <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-edit-min-capacity" type="number" min="0" /></div>
+              <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-edit-max-capacity" type="number" min="0" /></div>
+              <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-edit-parent-event"></select></div>
+            </div>
+            <p class="hint-note" id="ev-edit-capacity-status"></p>
+            <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
+            <label class="checkbox-row"><input type="checkbox" id="ev-edit-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
+            <label data-i18n="fieldDescAr">Description (AR)</label>
+            <textarea id="ev-edit-desc-ar" dir="rtl" rows="3"></textarea>
+            <label data-i18n="fieldDescEn">Description (EN)</label>
+            <textarea id="ev-edit-desc-en" rows="3"></textarea>
+            <button class="primary" id="ev-edit-save" data-i18n="btnSaveEvent">Save changes</button>
           </div>
-          <div class="msg" id="admin-chat-msg"></div>
+          <div class="msg" id="ev-edit-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6.5 4h7v3.2a3.5 3.5 0 0 1-7 0V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 10.7v2.8M7.7 16.3h4.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminResults">Enter event results</span></h2>
+          <label data-i18n="fieldEvent">Event</label>
+          <select id="res-event"></select>
+          <button class="secondary" id="res-load" style="margin-top:10px;" data-i18n="btnLoadRegistrations">Load registrations</button>
+          <div id="res-table-wrap" style="margin-top:14px;overflow-x:auto;"></div>
+          <div id="res-recap-fields" class="hidden" style="margin-top:14px;">
+            <h3 data-i18n="recapSectionTitle">After-event recap (optional)</h3>
+            <p class="warn-note" data-i18n="recapNote">Add a short write-up and a few photos once the event is done — this is what shows on the Annual Activities page once the event moves there automatically.</p>
+            <label data-i18n="fieldRecapDescEn">Recap write-up (EN)</label>
+            <textarea id="res-recap-desc-en" rows="3"></textarea>
+            <label data-i18n="fieldRecapDescAr">Recap write-up (AR)</label>
+            <textarea id="res-recap-desc-ar" dir="rtl" rows="3"></textarea>
+            <label data-i18n="fieldRecapPhotos">Recap photos (up to 10)</label>
+            <input id="res-recap-photos" type="file" accept="image/*" multiple />
+          </div>
+          <button class="primary hidden" id="res-save" data-i18n="btnSaveResults">Save results</button>
+          <div class="msg" id="res-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 6h12M8 6V4.3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M5.5 6l.7 9.3a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L14.5 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="adminDeleteEvent">Delete an event</span></h2>
+          <p class="hint-note" data-i18n="deleteEventHint">Works for both upcoming and already-finished events. Deleting an event also removes every registration tied to it - this can't be undone. A parent event with activities nested under it can't be deleted until those activities are deleted or reassigned first.</p>
+          <label data-i18n="fieldEvent">Event</label>
+          <select id="ev-delete-select"></select>
+          <button class="danger" id="ev-delete-btn" data-i18n="btnDeleteEvent" style="margin-top:10px;">Delete event</button>
+          <div class="msg" id="ev-delete-msg"></div>
         </div>
       </div>
 
-      <div class="card">
-        <h2 data-i18n="adminStaffAccounts">Staff &amp; admin accounts</h2>
-        <div id="staff-accounts-table-wrap" style="overflow-x:auto;margin-bottom:14px;"></div>
-        <div class="grid-2">
-          <div><label data-i18n="fieldUsername">Username</label><input id="sa-username" /></div>
-          <div><label data-i18n="fieldFullName">Full name</label><input id="sa-name" /></div>
-          <div><label data-i18n="fieldPassword">Password</label><input id="sa-password" type="password" placeholder="At least 6 characters" /></div>
-          <div>
-            <label data-i18n="fieldRole">Role</label>
-            <select id="sa-role">
-              <option value="staff" data-i18n="roleStaff">Staff (gate scanner only)</option>
-              <option value="admin" data-i18n="roleAdmin">Admin (full access)</option>
-            </select>
+      <div class="admin-tab-panel hidden" data-admin-panel="members">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8" cy="7" r="2.8" stroke="currentColor" stroke-width="1.4"/><path d="M3 16c.6-3 2.5-4.6 5-4.6s4.4 1.6 5 4.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M14.5 6.5h3M16 5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminMembersTitle">Members</span></h2>
+          <p class="section-sub" data-i18n="adminMembersIntro">Import your existing member list, export it as a backup, and invite members directly to an event without waiting for them to sign up themselves.</p>
+
+          <div class="grid-2" style="align-items:end;">
+            <div>
+              <label data-i18n="fieldImportFile">Import members (.xlsx)</label>
+              <input type="file" id="members-import-file" accept=".xlsx,.xls" />
+            </div>
+            <div>
+              <button class="secondary" id="members-import-btn" data-i18n="btnImportMembers">Import file</button>
+              <button class="secondary" id="members-export-btn" data-i18n="btnExportMembers">Export members (.xlsx)</button>
+            </div>
+          </div>
+          <p class="hint-note" data-i18n="importFormatHint">Columns expected: Membership Number, Name, Phone (optional), Family Group (optional). Existing membership numbers get updated; new ones are added.</p>
+          <div class="msg" id="members-import-msg"></div>
+
+          <h3 style="margin-top:18px;" data-i18n="inviteToEventTitle">Invite members to an event</h3>
+          <div class="grid-2">
+            <div>
+              <label data-i18n="fieldEvent">Event</label>
+              <select id="members-invite-event"></select>
+            </div>
+            <div>
+              <input id="members-search" type="text" placeholder="Search by name, membership number, or phone" />
+            </div>
+          </div>
+          <div id="members-table"></div>
+          <button class="primary" id="members-invite-btn" style="margin-top:10px;" data-i18n="btnInviteSelected">Invite selected members</button>
+          <div class="msg" id="members-invite-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="1.4" stroke="currentColor" stroke-width="1.4"/><circle cx="7.3" cy="8" r="1.6" stroke="currentColor" stroke-width="1.2"/><path d="M4.8 12.8c.4-1.6 1.4-2.4 2.5-2.4s2.1.8 2.5 2.4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M12 7.5h3.3M12 10h3.3M12 12.5h3.3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg><span data-i18n="directoryTitle">Member directory</span></h2>
+          <p class="section-sub" data-i18n="directoryIntro">Every member, in one place: contact details, points balance, family members, and their full registration history.</p>
+          <input id="directory-search" type="text" placeholder="Search by name, membership number, or phone" style="margin-bottom:10px;" />
+          <div id="directory-table"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="6.3" cy="10" r="3.2" stroke="currentColor" stroke-width="1.4"/><path d="M9 10h8M14 10v2.3M16.3 10v2.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminResetMemberPassword">Reset a member's password</span></h2>
+          <p class="hint-note" data-i18n="resetMemberPasswordHint">For when a member forgets their password and contacts the committee. Enter their membership number and set a new temporary password, then let them know it directly.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldMembership">Membership number</label><input id="rp-membership" placeholder="e.g. 10234" /></div>
+            <div><label data-i18n="fieldNewPassword">New password</label><input id="rp-password" type="password" placeholder="At least 6 characters" /></div>
+          </div>
+          <button class="primary" id="rp-submit" data-i18n="btnResetPassword">Reset password</button>
+          <div class="msg" id="rp-msg"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden" data-admin-panel="points">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2 10s2.8-5 8-5 8 5 8 5-2.8 5-8 5-8-5-8-5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.3" stroke="currentColor" stroke-width="1.4"/></svg><span data-i18n="adminPointsToggleTitle">Points system visibility</span></h2>
+          <p class="section-sub" data-i18n="adminPointsToggleIntro">Turn the points system on or off for members. Points still accumulate in the background either way — this only controls what members can see (their balance, the Redemption Ladder tab, and points mentions on registration).</p>
+          <label class="checkbox-row">
+            <input type="checkbox" id="settings-points-visible" />
+            <span data-i18n="pointsVisibleLabel">Show points &amp; Redemption Ladder to members</span>
+          </label>
+          <div class="msg" id="settings-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.5 8.5h15v7a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-7z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2.5 8.5l2.2-4.5a1 1 0 0 1 .9-.6h8.8a1 1 0 0 1 .9.6l2.2 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 8.5v8" stroke="currentColor" stroke-width="1.2"/></svg><span data-i18n="adminRedemptions">Redemption requests</span></h2>
+          <div id="redemptions-table-wrap" style="overflow-x:auto;"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="7" cy="6" r="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="13" cy="10" r="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="9" cy="14" r="1.5" stroke="currentColor" stroke-width="1.4"/></svg><span data-i18n="adminEditRules">Points rules</span></h2>
+          <p class="warn-note" data-i18n="rulesWarning">Warning: points are calculated live, not frozen when earned. Changing these values immediately changes the point value of every past registration too, not just future ones.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldParticipation">Participation points</label><input id="rules-participation" type="number" min="0" step="1" /></div>
+            <div><label data-i18n="fieldEarlyBonus">Early-registration bonus</label><input id="rules-early-bonus" type="number" min="0" step="1" /></div>
+          </div>
+          <h3 style="margin-top:14px;" data-i18n="fieldPositionBonus">Position bonus points</h3>
+          <div class="grid-2" id="rules-position-grid">
+            <div><label data-i18n="place1">1st place</label><input id="rules-pos-1" type="number" min="0" step="1" /></div>
+            <div><label data-i18n="place2">2nd place</label><input id="rules-pos-2" type="number" min="0" step="1" /></div>
+            <div><label data-i18n="place3">3rd place</label><input id="rules-pos-3" type="number" min="0" step="1" /></div>
+            <div><label data-i18n="place4">4th place</label><input id="rules-pos-4" type="number" min="0" step="1" /></div>
+            <div><label data-i18n="place5">5th place</label><input id="rules-pos-5" type="number" min="0" step="1" /></div>
+            <div><label data-i18n="place6">6th place</label><input id="rules-pos-6" type="number" min="0" step="1" /></div>
+          </div>
+          <button class="primary" id="rules-save" data-i18n="btnSaveRules">Save points rules</button>
+          <div class="msg" id="rules-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 2.5v15M14 2.5v15M6 6h8M6 10h8M6 14h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminEditLadder">Redemption ladder</span></h2>
+          <p class="warn-note" data-i18n="rulesWarning">Warning: points are calculated live, not frozen when earned. Changing these values immediately changes the point value of every past registration too, not just future ones.</p>
+          <div id="ladder-edit-list"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden" data-admin-panel="content">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 4.5h14v9H8.5L4.5 16.5v-3H3v-9z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span data-i18n="adminChatTitle">Member support chat</span></h2>
+          <p style="color:var(--muted);font-size:0.85rem;" data-i18n="adminChatIntro">Messages from members land here. Pick a conversation to read and reply.</p>
+          <div id="chat-threads-list"></div>
+          <div id="chat-thread-panel" class="hidden" style="margin-top:14px;">
+            <h3 id="chat-thread-panel-title" style="margin-bottom:8px;"></h3>
+            <div class="chat-thread" id="admin-chat-thread"></div>
+            <div class="chat-compose">
+              <textarea id="admin-chat-input" rows="2" placeholder="Type a reply..."></textarea>
+              <button class="primary" id="admin-chat-send" data-i18n="btnSend">Send</button>
+            </div>
+            <div class="msg" id="admin-chat-msg"></div>
           </div>
         </div>
-        <button class="primary" id="sa-submit" data-i18n="btnAddStaff">Add account</button>
-        <div class="msg" id="sa-msg"></div>
-      </div>
 
-      <div class="card">
-        <h2 data-i18n="adminResetMemberPassword">Reset a member's password</h2>
-        <p class="hint-note" data-i18n="resetMemberPasswordHint">For when a member forgets their password and contacts the committee. Enter their membership number and set a new temporary password, then let them know it directly.</p>
-        <div class="grid-2">
-          <div><label data-i18n="fieldMembership">Membership number</label><input id="rp-membership" placeholder="e.g. 10234" /></div>
-          <div><label data-i18n="fieldNewPassword">New password</label><input id="rp-password" type="password" placeholder="At least 6 characters" /></div>
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 8.5v3l3 .6v3.4a1 1 0 0 0 1.7.7l1.3-1.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 8.2l9-3.7v11l-9-3.7z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M17 8.3a2.2 2.2 0 0 1 0 3.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><span data-i18n="adminPostNews">Post committee news</span></h2>
+          <p class="hint-note" data-i18n="postNewsHint">Short announcements that show on the Events landing page under "Committee News" — e.g. schedule changes, new sport added, general updates.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldNewsTitleEn">Title (EN)</label><input id="news-title-en" /></div>
+            <div><label data-i18n="fieldNewsTitleAr">Title (AR)</label><input id="news-title-ar" dir="rtl" /></div>
+          </div>
+          <label data-i18n="fieldNewsBodyEn">Body (EN)</label>
+          <textarea id="news-body-en" rows="3"></textarea>
+          <label data-i18n="fieldNewsBodyAr">Body (AR)</label>
+          <textarea id="news-body-ar" dir="rtl" rows="3"></textarea>
+          <label data-i18n="fieldNewsPhoto">Photo (optional)</label>
+          <input id="news-photo" type="file" accept="image/*" />
+          <button class="primary" id="news-submit" data-i18n="btnPostNews">Post news</button>
+          <div class="msg" id="news-msg"></div>
+          <div id="news-admin-list" style="margin-top:16px;"></div>
         </div>
-        <button class="primary" id="rp-submit" data-i18n="btnResetPassword">Reset password</button>
-        <div class="msg" id="rp-msg"></div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.7l2.1 4.4 4.8.7-3.5 3.4.8 4.8L10 13.7l-4.2 2.3.8-4.8-3.5-3.4 4.8-.7L10 2.7z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span data-i18n="adminSpotlights">Community spotlights</span></h2>
+          <p class="hint-note" data-i18n="spotlightAdminHint">Feature a member on the Events landing page under "Community Spotlight" — a photo and a short note about them.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldSpotlightName">Member's name</label><input id="spotlight-name" placeholder="e.g. Sara Ahmed" /></div>
+            <div><label data-i18n="fieldSpotlightPhoto">Photo (optional)</label><input id="spotlight-photo" type="file" accept="image/*" /></div>
+          </div>
+          <label data-i18n="fieldSpotlightBlurbEn">About them (EN)</label>
+          <textarea id="spotlight-blurb-en" rows="2"></textarea>
+          <label data-i18n="fieldSpotlightBlurbAr">About them (AR)</label>
+          <textarea id="spotlight-blurb-ar" dir="rtl" rows="2"></textarea>
+          <button class="primary" id="spotlight-submit" data-i18n="btnAddSpotlight">Add spotlight</button>
+          <div class="msg" id="spotlight-msg"></div>
+          <div id="spotlight-admin-list" style="margin-top:16px;"></div>
+        </div>
       </div>
 
-      <div class="card">
-        <h2 data-i18n="changePasswordTitle">Change my password</h2>
-        <label data-i18n="fieldOldPassword">Current password</label>
-        <input id="cp-old" type="password" />
-        <label data-i18n="fieldNewPassword">New password</label>
-        <input id="cp-new" type="password" placeholder="At least 6 characters" />
-        <button class="primary" id="cp-submit" data-i18n="btnChangePassword">Change password</button>
-        <div class="msg" id="cp-msg"></div>
+      <div class="admin-tab-panel hidden" data-admin-panel="settings">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3a7 7 0 1 0 0 14h1.2a1.6 1.6 0 0 0 1.2-2.7 1.6 1.6 0 0 1 1.2-2.7H15a2 2 0 0 0 2-2A7 7 0 0 0 10 3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="6.7" cy="8.3" r="1" fill="currentColor"/><circle cx="9.3" cy="6" r="1" fill="currentColor"/><circle cx="12.7" cy="7" r="1" fill="currentColor"/></svg><span data-i18n="brandingTitle">Branding</span></h2>
+          <p class="section-sub" data-i18n="brandingIntro">Set your colors and logo — changes apply across the landing page and every other page, for everyone, right away.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldPrimaryColor">Primary color</label><input type="color" id="theme-primary" /></div>
+            <div><label data-i18n="fieldAccentColor">Accent color</label><input type="color" id="theme-accent" /></div>
+          </div>
+          <div style="margin-top:12px;">
+            <label data-i18n="fieldLogo">Logo</label>
+            <div id="theme-logo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="theme-logo-preview" alt="" /></div>
+            <input type="file" id="theme-logo-file" accept="image/*" />
+          </div>
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="primary" id="theme-save-btn" data-i18n="btnSaveBranding">Save branding</button>
+            <button class="secondary hidden" id="theme-remove-logo-btn" data-i18n="btnRemoveLogo">Remove logo</button>
+            <button class="secondary" id="theme-reset-btn" data-i18n="btnResetBranding">Reset to defaults</button>
+          </div>
+          <div class="msg" id="theme-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.8l6 2.2v4.3c0 4-2.6 6.9-6 7.9-3.4-1-6-3.9-6-7.9V5l6-2.2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.3 10l1.9 1.9L13 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="adminStaffAccounts">Staff &amp; admin accounts</span></h2>
+          <div id="staff-accounts-table-wrap" style="overflow-x:auto;margin-bottom:14px;"></div>
+          <div class="grid-2">
+            <div><label data-i18n="fieldUsername">Username</label><input id="sa-username" /></div>
+            <div><label data-i18n="fieldFullName">Full name</label><input id="sa-name" /></div>
+            <div><label data-i18n="fieldPassword">Password</label><input id="sa-password" type="password" placeholder="At least 6 characters" /></div>
+            <div>
+              <label data-i18n="fieldRole">Role</label>
+              <select id="sa-role">
+                <option value="staff" data-i18n="roleStaff">Staff (gate scanner only)</option>
+                <option value="admin" data-i18n="roleAdmin">Admin (full access)</option>
+              </select>
+            </div>
+          </div>
+          <button class="primary" id="sa-submit" data-i18n="btnAddStaff">Add account</button>
+          <div class="msg" id="sa-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.4"/><path d="M6.7 9V6.5a3.3 3.3 0 0 1 6.6 0V9" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="12.7" r="1.1" fill="currentColor"/></svg><span data-i18n="changePasswordTitle">Change my password</span></h2>
+          <label data-i18n="fieldOldPassword">Current password</label>
+          <input id="cp-old" type="password" />
+          <label data-i18n="fieldNewPassword">New password</label>
+          <input id="cp-new" type="password" placeholder="At least 6 characters" />
+          <button class="primary" id="cp-submit" data-i18n="btnChangePassword">Change password</button>
+          <div class="msg" id="cp-msg"></div>
+        </div>
       </div>
     </div>
   </section>

@@ -457,6 +457,7 @@ function updateUIForSession() {
   document.getElementById("admin-denied").classList.toggle("hidden", !isStaff || isAdmin);
   document.getElementById("admin-panel").classList.toggle("hidden", !isAdmin);
   if (isAdmin) {
+    initAdminTabs();
     loadAdminOverview();
     loadAdminDashboard();
     loadAdminMembers();
@@ -1412,18 +1413,26 @@ async function refreshOpenAdminChatThread() {
 }
 async function updateAdminChatBadge() {
   const badge = document.getElementById("admin-chat-badge");
+  const tabBadge = document.getElementById("admin-tab-badge-content");
   if (!badge) return;
   if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || CURRENT_SESSION.staff.role !== "admin") {
     badge.classList.add("hidden");
+    if (tabBadge) tabBadge.classList.add("hidden");
     return;
   }
   try {
     const { count } = await api("/api/staff/chats/unread-count");
     if (count > 0) {
-      badge.textContent = count > 9 ? "9+" : String(count);
+      const text = count > 9 ? "9+" : String(count);
+      badge.textContent = text;
       badge.classList.remove("hidden");
+      if (tabBadge) {
+        tabBadge.textContent = text;
+        tabBadge.classList.remove("hidden");
+      }
     } else {
       badge.classList.add("hidden");
+      if (tabBadge) tabBadge.classList.add("hidden");
     }
   } catch (e) {
     /* ignore */
@@ -1493,6 +1502,52 @@ async function loadAdminOverview() {
     <div class="stat"><div class="n">${stats.totalCheckedIn}</div><div class="l">${t("statCheckedIn")}</div></div>
     <div class="stat"><div class="n">${stats.pendingRedemptions}</div><div class="l">${t("statPending")}</div></div>
   `;
+  const pointsBadge = document.getElementById("admin-tab-badge-points");
+  if (pointsBadge) {
+    if (stats.pendingRedemptions > 0) {
+      pointsBadge.textContent = stats.pendingRedemptions > 9 ? "9+" : String(stats.pendingRedemptions);
+      pointsBadge.classList.remove("hidden");
+    } else {
+      pointsBadge.classList.add("hidden");
+    }
+  }
+}
+
+// ---------------------------------------------------------- admin: sub-tabs --
+// The Admin section groups its ~19 cards into a handful of sub-tabs (Overview,
+// Events, Members, Points & Rewards, Content & Chat, Settings) so committee
+// members aren't scrolling through one very long page to find a specific
+// tool. Tab state (which one is showing) is remembered per-browser via
+// sessionStorage so switching the site language or navigating away and back
+// doesn't reset it mid-task.
+let ADMIN_TABS_WIRED = false;
+function initAdminTabs() {
+  if (ADMIN_TABS_WIRED) return;
+  ADMIN_TABS_WIRED = true;
+  document.querySelectorAll(".admin-tab").forEach((btn) => {
+    btn.addEventListener("click", () => switchAdminTab(btn.dataset.adminTab));
+  });
+  let saved = "overview";
+  try {
+    saved = sessionStorage.getItem("adminActiveTab") || "overview";
+  } catch (e) {
+    /* ignore - sessionStorage unavailable, default to overview */
+  }
+  if (!document.querySelector(`.admin-tab[data-admin-tab="${saved}"]`)) saved = "overview";
+  switchAdminTab(saved);
+}
+function switchAdminTab(tabKey) {
+  document.querySelectorAll(".admin-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.adminTab === tabKey);
+  });
+  document.querySelectorAll(".admin-tab-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.adminPanel !== tabKey);
+  });
+  try {
+    sessionStorage.setItem("adminActiveTab", tabKey);
+  } catch (e) {
+    /* ignore - non-fatal, tab just won't be remembered on next visit */
+  }
 }
 
 // ---------------------------------------------------------- admin: settings --
