@@ -8,7 +8,10 @@ let MEMBERS_DATA = []; // admin: full member roster, for the Members card (impor
 // Admin-controlled feature toggle: whether the points system (balance,
 // Redemption Ladder tab, points mentions on registration) is shown to
 // members. Points still accumulate server-side regardless.
-let SETTINGS = { pointsVisibleToMembers: true };
+let SETTINGS = {
+  pointsVisibleToMembers: true,
+  theme: { primaryColor: "#8B0000", primaryColorDark: "#650000", accentColor: "#C9A227", logoUrl: "" },
+};
 function pointsVisible() {
   return !!(SETTINGS && SETTINGS.pointsVisibleToMembers);
 }
@@ -198,6 +201,53 @@ function applySettingsToUI() {
   if (ladderBtn) ladderBtn.classList.toggle("hidden", !show);
   const toggle = document.getElementById("settings-points-visible");
   if (toggle) toggle.checked = show;
+  applyThemeToUI();
+}
+
+// Branding: colors are just CSS custom properties, so overriding them at
+// runtime re-themes every page at once (header, buttons, badges, ladder,
+// hero banners - anything already built on var(--red)/var(--gold)). The
+// logo is a plain <img> shown in the header whenever one is set.
+function applyThemeToUI() {
+  const theme = (SETTINGS && SETTINGS.theme) || {};
+  const root = document.documentElement.style;
+  if (theme.primaryColor) root.setProperty("--red", theme.primaryColor);
+  if (theme.primaryColorDark) root.setProperty("--red-dark", theme.primaryColorDark);
+  if (theme.accentColor) root.setProperty("--gold", theme.accentColor);
+  const logo = document.getElementById("site-logo");
+  if (logo) {
+    if (theme.logoUrl) {
+      logo.src = theme.logoUrl;
+      logo.classList.remove("hidden");
+    } else {
+      logo.removeAttribute("src");
+      logo.classList.add("hidden");
+    }
+  }
+  populateThemeAdminForm();
+}
+
+// Keeps the admin's color pickers/logo preview in sync with server truth -
+// runs every time settings are (re)loaded, not just when the Admin tab is
+// first opened, so it never shows a stale value after e.g. a language switch.
+function populateThemeAdminForm() {
+  const primaryInput = document.getElementById("theme-primary");
+  const accentInput = document.getElementById("theme-accent");
+  if (!primaryInput || !accentInput) return; // admin panel not in the DOM yet
+  const theme = (SETTINGS && SETTINGS.theme) || {};
+  primaryInput.value = theme.primaryColor || "#8B0000";
+  accentInput.value = theme.accentColor || "#C9A227";
+  const previewWrap = document.getElementById("theme-logo-preview-wrap");
+  const preview = document.getElementById("theme-logo-preview");
+  const removeBtn = document.getElementById("theme-remove-logo-btn");
+  if (theme.logoUrl) {
+    preview.src = theme.logoUrl;
+    previewWrap.classList.remove("hidden");
+    removeBtn.classList.remove("hidden");
+  } else {
+    previewWrap.classList.add("hidden");
+    removeBtn.classList.add("hidden");
+  }
 }
 
 // --------------------------------------------------------------- session --
@@ -1195,14 +1245,67 @@ document.getElementById("settings-points-visible").addEventListener("change", as
   const msg = document.getElementById("settings-msg");
   const wanted = e.target.checked;
   try {
-    SETTINGS = await api("/api/settings", {
+    // This endpoint only returns pointsVisibleToMembers, not theme - merge
+    // rather than replace so the branding half of SETTINGS isn't wiped out.
+    const result = await api("/api/settings", {
       method: "PUT",
       body: JSON.stringify({ pointsVisibleToMembers: wanted }),
     });
+    SETTINGS = { ...SETTINGS, ...result };
     applySettingsToUI();
     showMsg(msg, t("settingsSaved"), true);
   } catch (err) {
     e.target.checked = !wanted; // revert the checkbox if the save failed
+    showMsg(msg, err.message, false);
+  }
+});
+
+// ----------------------------------------------------------- admin: branding --
+document.getElementById("theme-save-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("theme-msg");
+  const fd = new FormData();
+  fd.append("primaryColor", document.getElementById("theme-primary").value);
+  fd.append("accentColor", document.getElementById("theme-accent").value);
+  const fileInput = document.getElementById("theme-logo-file");
+  if (fileInput.files[0]) fd.append("logo", fileInput.files[0]);
+  try {
+    const theme = await api("/api/settings/theme", { method: "PUT", body: fd });
+    SETTINGS = { ...SETTINGS, theme };
+    fileInput.value = "";
+    applyThemeToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+});
+
+document.getElementById("theme-remove-logo-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("theme-msg");
+  const fd = new FormData();
+  fd.append("removeLogo", "true");
+  try {
+    const theme = await api("/api/settings/theme", { method: "PUT", body: fd });
+    SETTINGS = { ...SETTINGS, theme };
+    applyThemeToUI();
+    showMsg(msg, t("logoRemoved"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+});
+
+document.getElementById("theme-reset-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("theme-msg");
+  const fd = new FormData();
+  fd.append("primaryColor", "#8B0000");
+  fd.append("accentColor", "#C9A227");
+  fd.append("removeLogo", "true");
+  try {
+    const theme = await api("/api/settings/theme", { method: "PUT", body: fd });
+    SETTINGS = { ...SETTINGS, theme };
+    document.getElementById("theme-logo-file").value = "";
+    applyThemeToUI();
+    showMsg(msg, t("themeReset"), true);
+  } catch (err) {
     showMsg(msg, err.message, false);
   }
 });

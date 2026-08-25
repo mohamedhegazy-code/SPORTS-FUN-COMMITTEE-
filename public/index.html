@@ -9,9 +9,12 @@
 <body>
 
 <header class="top">
-  <div>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <img id="site-logo" class="hidden" alt="" />
+    <div>
     <h1 data-i18n="appTitle">Ahlawy — Online Registration &amp; Points</h1>
     <div class="sub" data-i18n="appSub">Al Ahly Club · Sports Entertainment Committee — Fifth Settlement</div>
+    </div>
   </div>
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
     <div id="session-badge" class="hidden" style="font-size:0.82rem;color:#fff;display:flex;align-items:center;gap:8px;">
@@ -280,6 +283,26 @@
       <div class="card">
         <h2 data-i18n="adminOverview">Overview</h2>
         <div class="stat-row" id="admin-stats"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="brandingTitle">Branding</h2>
+        <p class="section-sub" data-i18n="brandingIntro">Set your colors and logo — changes apply across the landing page and every other page, for everyone, right away.</p>
+        <div class="grid-2">
+          <div><label data-i18n="fieldPrimaryColor">Primary color</label><input type="color" id="theme-primary" /></div>
+          <div><label data-i18n="fieldAccentColor">Accent color</label><input type="color" id="theme-accent" /></div>
+        </div>
+        <div style="margin-top:12px;">
+          <label data-i18n="fieldLogo">Logo</label>
+          <div id="theme-logo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="theme-logo-preview" alt="" /></div>
+          <input type="file" id="theme-logo-file" accept="image/*" />
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="primary" id="theme-save-btn" data-i18n="btnSaveBranding">Save branding</button>
+          <button class="secondary hidden" id="theme-remove-logo-btn" data-i18n="btnRemoveLogo">Remove logo</button>
+          <button class="secondary" id="theme-reset-btn" data-i18n="btnResetBranding">Reset to defaults</button>
+        </div>
+        <div class="msg" id="theme-msg"></div>
       </div>
 
       <div class="card">

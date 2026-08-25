@@ -68,6 +68,42 @@ const uploadEventPhoto = multer({
   },
 });
 
+// ------------------------------------------------------------- branding ---
+// Admin-set logo, stored on disk the same way event photos are (served back
+// out via the static /public mount).
+const BRANDING_UPLOADS_DIR = path.join(__dirname, "public", "uploads", "branding");
+fs.mkdirSync(BRANDING_UPLOADS_DIR, { recursive: true });
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+const brandingLogoStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, BRANDING_UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const safeExt = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"].includes(ext) ? ext : ".png";
+    cb(null, `logo-${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+  },
+});
+const uploadLogo = multer({
+  storage: brandingLogoStorage,
+  limits: { fileSize: 3 * 1024 * 1024 }, // 3MB is plenty for a logo
+  fileFilter: (req, file, cb) => {
+    if (!/^image\//.test(file.mimetype)) return cb(new Error("Only image files are allowed"));
+    cb(null, true);
+  },
+});
+// Derives the darker shade used for gradients/hover states from a single
+// admin-picked primary color, so the admin only ever has to choose one
+// "primary" swatch instead of two - mirrors how --red/--red-dark were two
+// hand-picked shades of the same color in the original stylesheet.
+function darkenHex(hex, factor = 0.72) {
+  const m = HEX_COLOR_RE.exec(hex);
+  if (!m) return hex;
+  const num = parseInt(hex.slice(1), 16);
+  const channel = (shift) => Math.round(((num >> shift) & 255) * factor);
+  const toHex = (n) => n.toString(16).padStart(2, "0");
+  return `#${toHex(channel(16))}${toHex(channel(8))}${toHex(channel(0))}`;
+}
+
 // -------------------------------------------------------- member import ---
 // Members are imported/exported as .xlsx (not saved to disk - parsed straight
 // from memory, since the file itself doesn't need to persist anywhere).
@@ -221,6 +257,14 @@ function readDb() {
   // server-side either way; this only controls what members see.
   db.settings = db.settings || {};
   if (typeof db.settings.pointsVisibleToMembers !== "boolean") db.settings.pointsVisibleToMembers = true;
+  // Branding: admin-set primary/accent colors and an optional logo, applied
+  // across every page (they're just CSS custom properties overridden at
+  // runtime). Defaults match the original hardcoded styles.css values, so a
+  // deploy that's never touched this setting looks identical to before.
+  db.settings.theme = db.settings.theme || {};
+  if (!HEX_COLOR_RE.test(db.settings.theme.primaryColor || "")) db.settings.theme.primaryColor = "#8B0000";
+  if (!HEX_COLOR_RE.test(db.settings.theme.accentColor || "")) db.settings.theme.accentColor = "#C9A227";
+  if (typeof db.settings.theme.logoUrl !== "string") db.settings.theme.logoUrl = "";
   return db;
 }
 function writeDb(db) {
@@ -1624,9 +1668,20 @@ app.get("/api/admin/directory", requireStaffRole("admin"), (req, res) => {
 // -------------------------------------------------------------------------
 // Public so the frontend can decide what to render before anyone logs in
 // (e.g. whether to show the Redemption Ladder tab at all).
+// The dark shade is derived, never stored - one less thing for the admin
+// to pick, and it always stays in sync with whatever primary color is set.
+function themePayload(db) {
+  return {
+    primaryColor: db.settings.theme.primaryColor,
+    primaryColorDark: darkenHex(db.settings.theme.primaryColor),
+    accentColor: db.settings.theme.accentColor,
+    logoUrl: db.settings.theme.logoUrl,
+  };
+}
+
 app.get("/api/settings", (req, res) => {
   const db = readDb();
-  res.json({ pointsVisibleToMembers: db.settings.pointsVisibleToMembers });
+  res.json({ pointsVisibleToMembers: db.settings.pointsVisibleToMembers, theme: themePayload(db) });
 });
 
 app.put("/api/settings", requireStaffRole("admin"), (req, res) => {
@@ -1638,6 +1693,32 @@ app.put("/api/settings", requireStaffRole("admin"), (req, res) => {
   db.settings.pointsVisibleToMembers = pointsVisibleToMembers;
   writeDb(db);
   res.json({ pointsVisibleToMembers: db.settings.pointsVisibleToMembers });
+});
+
+// Colors + logo, applied everywhere at once (they're just CSS custom
+// properties overridden at runtime on every page - see applyThemeToUI() in
+// app.js). Accepts multipart so the logo file and the two color fields can
+// be saved together in one request; a request with no file just updates
+// the colors and leaves whatever logo is already set alone. removeLogo="true"
+// clears the logo back to the plain text header without needing a new file.
+app.put("/api/settings/theme", requireStaffRole("admin"), uploadLogo.single("logo"), (req, res) => {
+  const db = req.db;
+  const { primaryColor, accentColor, removeLogo } = req.body;
+  if (primaryColor !== undefined) {
+    if (!HEX_COLOR_RE.test(primaryColor)) return res.status(400).json({ error: "Primary color must be a hex color like #8B0000" });
+    db.settings.theme.primaryColor = primaryColor;
+  }
+  if (accentColor !== undefined) {
+    if (!HEX_COLOR_RE.test(accentColor)) return res.status(400).json({ error: "Accent color must be a hex color like #C9A227" });
+    db.settings.theme.accentColor = accentColor;
+  }
+  if (req.file) {
+    db.settings.theme.logoUrl = `/uploads/branding/${req.file.filename}`;
+  } else if (removeLogo === "true") {
+    db.settings.theme.logoUrl = "";
+  }
+  writeDb(db);
+  res.json(themePayload(db));
 });
 
 // Turns multer upload errors (file too big, wrong type, etc.) into a JSON

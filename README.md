@@ -315,6 +315,22 @@ automatically), not inside `data/db.json` — keeps the JSON store small.
 Back up that `uploads` folder alongside `db.json` if you want event photos
 included in your backups.
 
+## Admin: Branding (colors & logo)
+
+A "Branding" card near the top of the Admin tab lets the committee set a
+primary color, an accent color, and a logo. All three apply everywhere
+at once — the header, hero banner, buttons, badges, tab underline, the
+Redemption Ladder — because the whole app is already built on three CSS
+custom properties (`--red`, `--red-dark`, `--gold`); changing them at
+runtime re-themes every page, including the public landing page, without
+touching any file. The darker shade used for gradients/hover states is
+computed automatically from the primary color, so there's only ever two
+colors to pick. "Reset to defaults" puts it back to the original
+maroon-and-gold and removes the logo. Since the landing page needs the
+right colors and logo before anyone logs in, this is read from the
+already-public `/api/settings` endpoint (same one the points-visibility
+toggle uses) — no auth required to read it, only to change it.
+
 ## Editing the points system
 
 Admins can change the point values and the redemption ladder directly from

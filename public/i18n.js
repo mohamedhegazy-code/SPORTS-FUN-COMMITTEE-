@@ -313,6 +313,18 @@ const I18N = {
     noRegistrationsYet: "No registrations yet.",
     btnDetails: "Details",
     btnHideDetails: "Hide details",
+
+    // Admin: branding
+    brandingTitle: "Branding",
+    brandingIntro: "Set your colors and logo — changes apply across the landing page and every other page, for everyone, right away.",
+    fieldPrimaryColor: "Primary color",
+    fieldAccentColor: "Accent color",
+    fieldLogo: "Logo",
+    btnSaveBranding: "Save branding",
+    btnRemoveLogo: "Remove logo",
+    btnResetBranding: "Reset to defaults",
+    logoRemoved: "Logo removed.",
+    themeReset: "Branding reset to the original colors, logo removed.",
   },
   ar: {
     appTitle: "أهلاوي — التسجيل الإلكتروني ونظام النقاط",
@@ -628,6 +640,18 @@ const I18N = {
     noRegistrationsYet: "لا توجد تسجيلات بعد.",
     btnDetails: "التفاصيل",
     btnHideDetails: "إخفاء التفاصيل",
+
+    // الهوية البصرية (المسؤول)
+    brandingTitle: "الهوية البصرية",
+    brandingIntro: "اضبط ألوانك وشعارك — تُطبَّق التغييرات على الصفحة الرئيسية وكل صفحة أخرى، للجميع، فوراً.",
+    fieldPrimaryColor: "اللون الأساسي",
+    fieldAccentColor: "اللون الثانوي",
+    fieldLogo: "الشعار",
+    btnSaveBranding: "حفظ الهوية البصرية",
+    btnRemoveLogo: "إزالة الشعار",
+    btnResetBranding: "إعادة التعيين للافتراضي",
+    logoRemoved: "تمت إزالة الشعار.",
+    themeReset: "تمت إعادة الهوية البصرية للألوان الأصلية، وتمت إزالة الشعار.",
   },
 };
 

@@ -36,6 +36,8 @@ header.top {
 
 header.top h1 { margin: 0; font-size: 1.25rem; }
 header.top .sub { font-size: 0.8rem; opacity: 0.85; margin-top: 2px; }
+#site-logo { max-height: 44px; max-width: 140px; object-fit: contain; }
+#theme-logo-preview { max-height: 48px; max-width: 160px; object-fit: contain; display: block; border: 1px solid var(--border); border-radius: 6px; padding: 4px; background: #fff; }
 
 .lang-toggle {
   display: flex;
@@ -129,6 +131,7 @@ input, select, textarea {
 }
 textarea { resize: vertical; }
 input[type="file"] { padding: 6px 8px; }
+input[type="color"] { width: 64px; height: 40px; padding: 4px; cursor: pointer; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
 
 button.primary {
