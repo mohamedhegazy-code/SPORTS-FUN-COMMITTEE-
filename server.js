@@ -1796,13 +1796,27 @@ app.get("/api/admin/members/export", requireStaffRole("admin"), (req, res) => {
 
 // Bulk-imports members from an .xlsx file. Expected columns (case-insensitive,
 // any order): "Membership Number", "Name", "Phone" (optional), "Family Group"
-// (optional) - matching the export above. A row whose membership number
+// (optional) - matching the export above. Header cells are also tolerant of
+// stray leading/trailing quote characters (straight or curly) - some
+// club-exported sheets literally bake a `"Membership Number"` string,
+// quotes and all, into the header cell, which would otherwise silently fail
+// to match and skip every row with "Missing membership number or name".
+//
+// Al Ahly's real membership numbers are apparently issued per FAMILY, not
+// per person - the same number can legitimately appear on several rows with
+// different names. Rather than let later rows silently overwrite earlier
+// ones under the same membership number (the previous behavior), rows are
+// grouped by membership number first: the first row for a given number
+// becomes/updates that primary member's own profile (same as before), and
+// any additional rows sharing that number become dependents on that primary
+// member's account (matched/deduped by name so re-importing the same file
+// doesn't create duplicate dependents). A row whose membership number
 // already exists updates that member's name/phone/family group in place;
-// their password and dependents are never touched by import. A brand-new
-// membership number gets a fresh, password-less profile - that person (or
-// the admin, on their behalf) turns it into a real login later by signing up
-// with that same membership number, which claims the profile instead of
-// overwriting it (see /api/auth/signup).
+// their password and existing dependents are never removed by import. A
+// brand-new membership number gets a fresh, password-less profile - that
+// person (or the admin, on their behalf) turns it into a real login later by
+// signing up with that same membership number, which claims the profile
+// instead of overwriting it (see /api/auth/signup).
 app.post(
   "/api/admin/members/import",
   requireStaffRole("admin"),
@@ -1821,7 +1835,12 @@ app.post(
 
     const pick = (row, keys) => {
       for (const key of Object.keys(row)) {
-        if (keys.includes(key.trim().toLowerCase())) return String(row[key]).trim();
+        const normalizedKey = key
+          .trim()
+          .toLowerCase()
+          .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+          .trim();
+        if (keys.includes(normalizedKey)) return String(row[key]).trim();
       }
       return "";
     };
@@ -1830,6 +1849,12 @@ app.post(
     const created = [];
     const updated = [];
     const errors = [];
+    const dependentsAdded = [];
+    const dependentsSkipped = [];
+
+    // Group parsed rows by membership number, preserving file order, before
+    // touching the database at all.
+    const groups = new Map(); // membershipNumber -> [{ name, phone, familyGroup, rowNum }]
     rows.forEach((row, i) => {
       const membershipNumber = pick(row, ["membership number", "membershipnumber", "membership no", "id"]);
       const name = pick(row, ["name"]);
@@ -1841,26 +1866,56 @@ app.post(
         errors.push({ row: rowNum, reason: "Missing membership number or name" });
         return;
       }
+      if (!groups.has(membershipNumber)) groups.set(membershipNumber, []);
+      groups.get(membershipNumber).push({ name, phone, familyGroup, rowNum });
+    });
+
+    groups.forEach((groupRows, membershipNumber) => {
+      const [primaryRow, ...dependentRows] = groupRows;
       const existing = db.members[membershipNumber];
+      let member;
       if (existing) {
-        existing.name = name;
-        if (phone) existing.phone = phone;
-        if (familyGroup) existing.familyGroup = familyGroup;
-        updated.push({ membershipNumber, name });
+        existing.name = primaryRow.name;
+        if (primaryRow.phone) existing.phone = primaryRow.phone;
+        if (primaryRow.familyGroup) existing.familyGroup = primaryRow.familyGroup;
+        member = existing;
+        updated.push({ membershipNumber, name: primaryRow.name });
       } else {
-        db.members[membershipNumber] = {
+        member = {
           membershipNumber,
-          name,
-          familyGroup: familyGroup || "",
-          phone: phone || "",
+          name: primaryRow.name,
+          familyGroup: primaryRow.familyGroup || "",
+          phone: primaryRow.phone || "",
           passwordHash: null,
           dependents: [],
         };
-        created.push({ membershipNumber, name });
+        db.members[membershipNumber] = member;
+        created.push({ membershipNumber, name: primaryRow.name });
       }
+
+      member.dependents = member.dependents || [];
+      dependentRows.forEach((row) => {
+        const nameKey = row.name.trim().toLowerCase();
+        if (nameKey === member.name.trim().toLowerCase()) {
+          // A repeated row for the primary member themselves (e.g. their row
+          // appears twice in the sheet) - not a separate family member, so
+          // don't create a duplicate dependent that's just a copy of them.
+          dependentsSkipped.push({ membershipNumber, name: row.name, reason: "Matches the primary member's own name" });
+          return;
+        }
+        const alreadyExists = member.dependents.some((d) => d.name.trim().toLowerCase() === nameKey);
+        if (alreadyExists) {
+          dependentsSkipped.push({ membershipNumber, name: row.name, reason: "Already a dependent on this account" });
+          return;
+        }
+        const dependent = { id: db.nextIds.dependent++, name: row.name };
+        member.dependents.push(dependent);
+        dependentsAdded.push({ membershipNumber, name: row.name, primaryName: member.name });
+      });
     });
+
     writeDb(db);
-    res.json({ created, updated, errors, totalRows: rows.length });
+    res.json({ created, updated, errors, dependentsAdded, dependentsSkipped, totalRows: rows.length });
   }
 );
 

@@ -404,12 +404,27 @@ time:
   number, name, phone, family group) as an Excel file — useful as a
   backup, or as a starting point for a file you'll edit and re-import.
 - **Import members (.xlsx)** reads an Excel file with those same four
-  columns (column order doesn't matter, and header matching is
-  case-insensitive; Phone and Family Group are optional). A membership
-  number that already exists gets its name/phone/family group updated in
-  place — it never touches that member's password or family members. A
-  brand-new membership number gets a fresh profile with no password set
-  yet.
+  columns (column order doesn't matter, header matching is
+  case-insensitive, and stray quote marks around a header — e.g. a cell
+  literally containing `"Membership Number"` — are tolerated too; Phone
+  and Family Group are optional). A membership number that already exists
+  gets its name/phone/family group updated in place — it never touches
+  that member's password or family members. A brand-new membership number
+  gets a fresh profile with no password set yet.
+- **Rows that share one membership number become a family.** Some clubs
+  (Al Ahly included) issue a single membership number per family rather
+  than per person, so a real member list can have several rows with the
+  same number and different names. The import handles this: the *first*
+  row for a given number becomes/updates that primary member's own
+  profile, and any further rows sharing that number are added as
+  dependents on their account (matched by name, so re-importing the same
+  file never creates duplicate dependents, and a row that just repeats the
+  primary member's own name is skipped rather than added as a dependent of
+  themselves). The result message reports all of it — added, updated,
+  dependents added, and anything skipped, each with a reason next to it
+  (e.g. which row was missing a required column) rather than just a bare
+  count, so a header mismatch or a bad row is easy to diagnose from the
+  message alone.
 - A member imported this way **doesn't have a password yet**, so they
   can't log in immediately. They (or the committee, on their behalf)
   "claim" the profile later by using the normal Register/Sign-up screen

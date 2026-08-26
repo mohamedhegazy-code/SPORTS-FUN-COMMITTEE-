@@ -212,7 +212,7 @@ button.secondary {
   font-size: 0.85rem;
 }
 
-.msg { margin-top: 14px; padding: 10px 12px; border-radius: 7px; font-size: 0.88rem; display: none; }
+.msg { margin-top: 14px; padding: 10px 12px; border-radius: 7px; font-size: 0.88rem; display: none; white-space: pre-line; }
 .msg.show { display: block; }
 .msg.ok { background: #e6f4ea; color: var(--green); border: 1px solid #b7e0c3; }
 .msg.err { background: #fdeaea; color: #a12626; border: 1px solid #f3bcbc; }

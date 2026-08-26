@@ -1980,11 +1980,23 @@ document.getElementById("members-import-btn").addEventListener("click", async ()
   fd.append("file", file);
   try {
     const result = await api("/api/admin/members/import", { method: "POST", body: fd });
-    showMsg(
-      msg,
-      `${t("importedLabel")}: ${fmt(result.created.length)} ${t("addedLabel")}, ${fmt(result.updated.length)} ${t("updatedLabel")}, ${fmt(result.errors.length)} ${t("skippedLabel")}.`,
-      true
-    );
+    const dependentsAdded = result.dependentsAdded || [];
+    const dependentsSkipped = result.dependentsSkipped || [];
+    const lines = [
+      `${t("importedLabel")}: ${fmt(result.created.length)} ${t("addedLabel")}, ${fmt(result.updated.length)} ${t("updatedLabel")}, ${fmt(dependentsAdded.length)} ${t("dependentsAddedLabel")}, ${fmt(result.errors.length)} ${t("skippedLabel")}.`,
+    ];
+    // Show *why* rows were skipped instead of just a bare count - a bare
+    // count gave no way to diagnose e.g. a header-name mismatch (see the
+    // "0 added, 0 updated, 34 skipped" bug report this came from).
+    if (result.errors.length) {
+      const shown = result.errors.slice(0, 5).map((e) => `${t("rowLabel")} ${e.row}: ${e.reason}`);
+      lines.push(shown.join(" · "));
+      if (result.errors.length > 5) lines.push(`+${fmt(result.errors.length - 5)} ${t("moreLabel")}`);
+    }
+    if (dependentsSkipped.length) {
+      lines.push(`${fmt(dependentsSkipped.length)} ${t("dependentsSkippedLabel")}`);
+    }
+    showMsg(msg, lines.join("\n"), result.errors.length === 0);
     fileInput.value = "";
     await loadAdminMembers();
     loadAdminOverview();
