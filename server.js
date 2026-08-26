@@ -1472,15 +1472,11 @@ app.get("/api/registrations", requireStaffRole("admin"), (req, res) => {
 // -------------------------------------------------------------------------
 // CHECK-IN (staff/admin only)
 // -------------------------------------------------------------------------
-// Staff-only: scan a member's QR code at the event entrance. This is what
-// actually awards their points (participation + early bonus + position
-// bonus once results are in) - registering alone earns nothing.
-app.post("/api/checkin", requireStaffRole("staff"), async (req, res) => {
-  const db = req.db;
-  const { code } = req.body;
-  const { reg, error } = parseAndVerify(db, code);
-  if (error) return res.status(400).json({ error });
-
+// Shared by both check-in paths (QR scan and the manual roster button) so
+// "already checked in" / waitlisted / points-awarded logic can't drift
+// between them. Mutates reg and persists on success; the caller just maps
+// the returned {status, body} onto the HTTP response.
+function performCheckIn(db, reg) {
   const event = db.events.find((e) => e.id === reg.eventId);
   const member = publicMember(db.members[reg.membershipNumber]);
   // The person actually walking through the gate might be a family member
@@ -1489,36 +1485,88 @@ app.post("/api/checkin", requireStaffRole("staff"), async (req, res) => {
   const attendeeName = reg.dependentName || member.name;
 
   if (reg.checkedIn) {
-    return res.status(409).json({
-      error: "Already checked in",
-      checkedInAt: reg.checkInAt,
-      member,
-      attendeeName,
-      event,
-    });
+    return {
+      status: 409,
+      body: { error: "Already checked in", checkedInAt: reg.checkInAt, member, attendeeName, event },
+    };
   }
   if (reg.waitlisted) {
-    return res.status(409).json({
-      error: "This registration is on the waiting list, not a confirmed spot - promote it from the Admin dashboard first if there's room",
-      member,
-      attendeeName,
-      event,
-    });
+    return {
+      status: 409,
+      body: {
+        error: "This registration is on the waiting list, not a confirmed spot - promote it from the Admin dashboard first if there's room",
+        member,
+        attendeeName,
+        event,
+      },
+    };
   }
 
   reg.checkedIn = true;
   reg.checkInAt = new Date().toISOString();
   writeDb(db);
 
-  res.json({
-    success: true,
-    member,
-    attendeeName,
-    event,
-    checkedInAt: reg.checkInAt,
-    pointsAwarded: registrationPoints(db, reg),
-    earlyRegistration: reg.earlyRegistration,
-  });
+  return {
+    status: 200,
+    body: {
+      success: true,
+      member,
+      attendeeName,
+      event,
+      checkedInAt: reg.checkInAt,
+      pointsAwarded: registrationPoints(db, reg),
+      earlyRegistration: reg.earlyRegistration,
+    },
+  };
+}
+
+// Staff-only: scan a member's QR code at the event entrance. This is what
+// actually awards their points (participation + early bonus + position
+// bonus once results are in) - registering alone earns nothing.
+app.post("/api/checkin", requireStaffRole("staff"), async (req, res) => {
+  const db = req.db;
+  const { code } = req.body;
+  const { reg, error } = parseAndVerify(db, code);
+  if (error) return res.status(400).json({ error });
+  const result = performCheckIn(db, reg);
+  res.status(result.status).json(result.body);
+});
+
+// Staff-only: the roster behind the "missed the QR code" manual check-in
+// list next to the scanner. Includes waitlisted registrations too (shown,
+// not checkable - performCheckIn rejects those the same way the QR path
+// does) so staff see the full picture at the gate, not just who's eligible.
+app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const roster = db.registrations
+    .filter((r) => r.eventId === eventId)
+    .map((r) => {
+      const member = db.members[r.membershipNumber];
+      return {
+        registrationId: r.id,
+        attendeeName: r.dependentName || (member ? member.name : r.membershipNumber),
+        membershipNumber: r.membershipNumber,
+        checkedIn: !!r.checkedIn,
+        checkInAt: r.checkInAt,
+        waitlisted: !!r.waitlisted,
+      };
+    })
+    .sort((a, b) => a.attendeeName.localeCompare(b.attendeeName));
+  res.json(roster);
+});
+
+// Staff-only: manual check-in by picking a row on that roster, for a member
+// who couldn't show their QR code (lost phone, dead battery, screenshot
+// didn't save, etc). Same rules and same points-award path as the QR scan -
+// only the lookup (registrationId instead of a signed QR payload) differs.
+app.post("/api/checkin/manual", requireStaffRole("staff"), (req, res) => {
+  const db = req.db;
+  const registrationId = Number(req.body.registrationId);
+  const reg = db.registrations.find((r) => r.id === registrationId);
+  if (!reg) return res.status(404).json({ error: "Registration not found" });
+  const result = performCheckIn(db, reg);
+  res.status(result.status).json(result.body);
 });
 
 // admin: enter finishing positions after an event, and optionally attach the

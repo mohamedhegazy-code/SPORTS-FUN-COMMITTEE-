@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ahlawy — Live Results</title>
+<!-- Standalone "big screen" display: no login, no nav chrome, meant to be
+     left open on a TV/projector at the venue. Reuses i18n.js (plain data +
+     a t() helper, no DOM dependency) for translated labels, but does NOT
+     load app.js - this page has its own small render/refresh loop instead,
+     since app.js assumes a whole different set of DOM elements exist. -->
+<script src="/i18n.js"></script>
+<style>
+  :root {
+    --red: #8b0000;
+    --red-dark: #5c0000;
+    --gold: #c9a227;
+    --bg: #1a1a1a;
+    --card-bg: #ffffff;
+    --muted: #8a8a8a;
+    --border: #e2ddd2;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    /* Deliberately no height:100% here - this page's whole point is
+       showing a bracket that can be much taller than one screen, and
+       height:100% on both html and body (combined with any overflow-x
+       override) traps document.documentElement.scrollHeight at exactly
+       the viewport height, silently clipping everything below the fold
+       with no way to scroll to it. min-height keeps the background fill
+       flush to the viewport on short pages without that trap. */
+    min-height: 100%;
+    background: var(--bg);
+    color: #222;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  }
+  .screen-header {
+    background: linear-gradient(135deg, var(--red), var(--red-dark));
+    color: #fff;
+    padding: 28px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .screen-header img { max-height: 64px; }
+  .screen-header .titles { flex: 1; min-width: 240px; }
+  .screen-header h1 { margin: 0; font-size: 2.4rem; line-height: 1.25; }
+  .screen-header .sub { font-size: 1.2rem; opacity: 0.9; margin-top: 6px; }
+  .screen-header .live {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 1.1rem; opacity: 0.9;
+  }
+  .live-dot {
+    width: 12px; height: 12px; border-radius: 50%; background: #4ade80;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .screen-body { padding: 40px 48px 80px; max-width: 1600px; margin: 0 auto; }
+  .badges { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 28px; }
+  .badge-pill {
+    background: rgba(255,255,255,0.12); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35);
+    padding: 6px 18px; border-radius: 999px; font-size: 1rem; font-weight: 600;
+  }
+  .winner-banner {
+    background: linear-gradient(135deg, var(--gold), #a8811a);
+    color: #2b2200; border-radius: 20px; padding: 32px 40px;
+    margin-bottom: 36px; text-align: center;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+  }
+  .winner-banner .trophy { font-size: 3rem; }
+  .winner-banner .name { font-size: 2.6rem; font-weight: 800; margin: 6px 0; }
+  .winner-banner .label { font-size: 1.1rem; opacity: 0.85; text-transform: uppercase; letter-spacing: 1px; }
+  .section-title {
+    color: #fff; font-size: 1.6rem; font-weight: 700; margin: 36px 0 18px;
+  }
+  .standings-card, .groups-grid, .bracket-wrap {
+    background: var(--card-bg); border-radius: 16px; padding: 24px 28px;
+  }
+  .standings-card table, .group-card table { width: 100%; border-collapse: collapse; font-size: 1.25rem; }
+  .standings-card th, .standings-card td, .group-card th, .group-card td {
+    padding: 10px 12px; text-align: start; border-bottom: 1px solid var(--border);
+  }
+  .standings-card tr:first-child td { font-weight: 800; color: var(--red); font-size: 1.4rem; }
+  .groups-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; background: none; padding: 0; }
+  .group-card { background: var(--card-bg); border-radius: 16px; padding: 22px 24px; }
+  .group-card h3 { margin: 0 0 12px; color: var(--red); font-size: 1.4rem; }
+  .group-match { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: 1.1rem; }
+  .group-match:last-child { border-bottom: none; }
+  .group-match .result { color: var(--muted); font-weight: 600; }
+  .group-match.decided .result { color: var(--red); }
+  .bracket-wrap { overflow-x: auto; }
+  .bracket-rounds { display: flex; gap: 32px; min-width: max-content; }
+  .bracket-round { min-width: 260px; }
+  .bracket-round h4 { color: var(--red); font-size: 1.3rem; margin: 0 0 14px; text-align: center; }
+  .bracket-match { border: 2px solid var(--border); border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+  .bracket-slot { padding: 12px 16px; font-size: 1.15rem; font-weight: 600; border-bottom: 1px solid var(--border); }
+  .bracket-slot:last-of-type { border-bottom: none; }
+  .bracket-slot.winner { background: #fff4d6; color: var(--red); }
+  .bracket-footer { padding: 8px 16px; font-size: 0.95rem; color: var(--muted); background: #faf8f3; }
+  .empty-state, .picker { color: #fff; text-align: center; padding: 80px 20px; }
+  .empty-state h2 { font-size: 1.8rem; }
+  .picker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 32px; }
+  .picker-card {
+    background: var(--card-bg); border-radius: 16px; padding: 26px; text-align: start;
+    text-decoration: none; color: #222; display: block;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .picker-card h3 { margin: 0 0 8px; color: var(--red); font-size: 1.35rem; }
+  .picker-card .meta { color: var(--muted); font-size: 0.95rem; }
+  .lang-ar { display: block; }
+  .lang-en { display: block; font-size: 0.72em; color: var(--muted); font-weight: 400; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="screen-header">
+    <img id="screen-logo" class="hidden" alt="" />
+    <div class="titles">
+      <h1 id="screen-title">Ahlawy — Live Results</h1>
+      <div class="sub" id="screen-subtitle"></div>
+    </div>
+    <div class="live"><span class="live-dot"></span><span id="screen-updated"></span></div>
+  </div>
+  <div class="screen-body" id="screen-body">
+    <div class="empty-state"><h2>Loading…</h2></div>
+  </div>
+
+<script src="/screen.js"></script>
+</body>
+</html>

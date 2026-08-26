@@ -97,6 +97,17 @@ scanners just "type" the decoded text + Enter — the `/api/checkin` endpoint
 already accepts raw scanned text, so it's a matter of wiring a text input
 instead of the camera loop).
 
+**Manual check-in**, right below the scanner on the same tab, is the
+fallback for a member who can't show a working QR code (lost phone, dead
+battery, screenshot didn't save). Staff pick the event, search the roster
+by name or membership number, and tap "Check in" on the right row — same
+rules and same points award as the QR path (both share one
+`performCheckIn` function server-side), just a different way to look the
+registration up. `GET /api/staff/events/:eventId/roster` (staff-role) lists
+everyone registered for an event (including waitlisted, shown but not
+checkable); `POST /api/checkin/manual` (staff-role, `{ registrationId }`)
+does the actual check-in.
+
 ## Confirmations, "My Registrations" & family members (dependents)
 
 **Booking confirmation.** The moment a member registers, they see an
@@ -344,6 +355,44 @@ in, and an attendance rate (checked-in ÷ registered). It's meant as the
 one place to see "is this event filling up, and did the people who signed
 up actually show up" without cross-referencing the registrations list by
 hand.
+
+## Admin: per-event hub (attendance, tournament & results in one place)
+
+Every row on the Event dashboard has a **Manage** button that opens that
+event's hub — a single panel for everything an admin or staff member needs
+to run the event, instead of hunting across separate cards:
+
+- **Attendance**, right at the top: the same search-and-check-in roster as
+  the Gate Scanner's manual check-in (they share the same rendering code
+  and the same `/api/staff/events/:eventId/roster` /
+  `/api/checkin/manual` endpoints), plus quick attendance stats
+  (registered / checked-in / waitlisted).
+- **Tournament**, below that: if the event has a tournament, a live
+  summary of its current standings or bracket progress with a **Manage
+  tournament** shortcut that jumps straight to the Admin → Events tab with
+  that event's Tournament card already loaded. If it doesn't have one yet,
+  shortcuts to set one up or to use the plain "Enter event results" tool
+  instead.
+
+The hub deliberately reuses the existing tournament/results tools via
+these "jump to" shortcuts rather than re-implementing bracket editing a
+second time — one editor for tournament data, with the hub as a fast way
+to get to it from the event you're actually looking at.
+
+## Big screen / live results display
+
+Each event's tournament can be shown on a TV or projector at the venue via
+a plain URL: `/screen.html?event=<id>` (add `&lang=en` for English; it
+defaults to Arabic/RTL). It's a standalone page — no login, no app nav —
+styled in large, high-contrast text for viewing from across a room:
+current standings with a gold winner banner once the tournament is
+decided, or the live groups/bracket while it's still in progress. It
+polls for fresh data every 15 seconds on its own, so once it's open on a
+screen at the venue nobody has to touch it again as results come in.
+
+Visiting `/screen.html` with no `?event=` shows a picker grid of every
+event that currently has a tournament, so venue staff can find the right
+link without needing to know event IDs by heart.
 
 ## Admin: Members — import, export & inviting to an event
 

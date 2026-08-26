@@ -580,6 +580,21 @@ function renderEventDropdowns() {
     }
   }
 
+  // Manual check-in roster (Gate Scanner tab): same "any event with its own
+  // registrations" filter as the tournament dropdown above.
+  const checkinSel = document.getElementById("checkin-event-select");
+  if (checkinSel) {
+    const prevCheckinValue = checkinSel.value;
+    const checkinOpts = EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
+      .join("");
+    checkinSel.innerHTML = checkinOpts || `<option value="">--</option>`;
+    if (prevCheckinValue && Array.from(checkinSel.options).some((o) => o.value === prevCheckinValue)) {
+      checkinSel.value = prevCheckinValue;
+    }
+  }
+
   populateParentEventOptions();
 }
 // Fills the "Parent event" dropdowns on the Add/Edit event admin forms.
@@ -1705,13 +1720,14 @@ function renderAdminDashboardTable(rows) {
         <td>${waitlistCell}</td>
         <td class="num">${fmt(r.checkedInCount)}</td>
         <td>${attendance}</td>
+        <td><button class="secondary small" data-hub-event="${r.eventId}" data-hub-label="${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}">${t("btnManageEvent")}</button></td>
       </tr>`;
     })
     .join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
       <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colRegistrations")}</th>
-      <th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th>
+      <th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th><th></th>
     </tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
@@ -1719,6 +1735,9 @@ function renderAdminDashboardTable(rows) {
     btn.addEventListener("click", () =>
       openAdminWaitlist(Number(btn.dataset.waitlistEvent), btn.dataset.waitlistLabel)
     );
+  });
+  wrap.querySelectorAll("[data-hub-event]").forEach((btn) => {
+    btn.addEventListener("click", () => openAdminEventHub(Number(btn.dataset.hubEvent), btn.dataset.hubLabel));
   });
 }
 async function openAdminWaitlist(eventId, eventLabelText) {
@@ -1758,6 +1777,133 @@ async function openAdminWaitlist(eventId, eventLabelText) {
     });
   } catch (e) {
     list.innerHTML = `<p class="dashboard-empty-note">${escapeAttr(e.message)}</p>`;
+  }
+}
+
+// ---------------------------------------------- admin: per-event "manage" hub --
+// Opened from the "Manage" button on each Event dashboard row - one place to
+// see attendance and check people in (reusing the same roster/manual-checkin
+// endpoints as the Gate Scanner tab, via the shared rosterTableHtml above),
+// and a tournament/winners summary with a one-click jump into the full
+// Tournament card (or the manual results tool, if there's no tournament) for
+// that same event. Deliberately does NOT duplicate the tournament rendering
+// engine itself - the "Manage tournament" jump reuses the existing Events-tab
+// Tournament card rather than re-implementing seeding/results here too.
+let HUB_EVENT_ID = null;
+let HUB_ROSTER = [];
+document.getElementById("admin-hub-close").addEventListener("click", () => {
+  document.getElementById("admin-event-hub-panel").classList.add("hidden");
+  HUB_EVENT_ID = null;
+});
+document.getElementById("hub-checkin-search").addEventListener("input", () => {
+  const wrap = document.getElementById("hub-checkin-wrap");
+  const query = (document.getElementById("hub-checkin-search").value || "").trim().toLowerCase();
+  wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query);
+});
+document.getElementById("hub-checkin-wrap").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-checkin-reg]");
+  if (!btn) return;
+  btn.disabled = true;
+  const msg = document.getElementById("hub-checkin-msg");
+  try {
+    const result = await api("/api/checkin/manual", {
+      method: "POST",
+      body: JSON.stringify({ registrationId: Number(btn.dataset.checkinReg) }),
+    });
+    showMsg(msg, `${result.attendeeName} — ${t("scanSuccess")} (+${fmt(result.pointsAwarded)} ${t("scanPointsAwarded")})`, true);
+    await loadHubRoster(true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+    btn.disabled = false;
+  }
+});
+
+async function openAdminEventHub(eventId, label) {
+  HUB_EVENT_ID = eventId;
+  document.getElementById("admin-waitlist-panel").classList.add("hidden");
+  const panel = document.getElementById("admin-event-hub-panel");
+  panel.classList.remove("hidden");
+  document.getElementById("admin-hub-title").textContent = label;
+  document.getElementById("hub-checkin-search").value = "";
+  document.getElementById("hub-checkin-msg").textContent = "";
+  document.getElementById("admin-hub-stats").innerHTML = "";
+  document.getElementById("admin-hub-tournament-summary").innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
+  await Promise.all([loadHubRoster(), loadHubTournamentSummary()]);
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+async function loadHubRoster(preserveMsg) {
+  const wrap = document.getElementById("hub-checkin-wrap");
+  const msg = document.getElementById("hub-checkin-msg");
+  if (!preserveMsg && msg) msg.textContent = "";
+  wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
+  try {
+    HUB_ROSTER = await api("/api/staff/events/" + HUB_EVENT_ID + "/roster");
+    const query = (document.getElementById("hub-checkin-search").value || "").trim().toLowerCase();
+    wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query);
+    const checkedIn = HUB_ROSTER.filter((r) => r.checkedIn).length;
+    const confirmed = HUB_ROSTER.filter((r) => !r.waitlisted).length;
+    document.getElementById("admin-hub-stats").innerHTML = `
+      <span class="tourn-summary-badge">${fmt(confirmed)} ${t("colRegistrations")}</span>
+      <span class="tourn-summary-badge">${fmt(checkedIn)} / ${fmt(confirmed)} ${t("colCheckedIn")}</span>
+    `;
+  } catch (e) {
+    wrap.innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
+  }
+}
+async function loadHubTournamentSummary() {
+  const wrap = document.getElementById("admin-hub-tournament-summary");
+  try {
+    const data = await api("/api/admin/tournaments/" + HUB_EVENT_ID);
+    if (!data.tournament) {
+      wrap.innerHTML = `
+        <p class="hint-note">${t("hubNoTournament")}</p>
+        <button class="secondary small" id="hub-goto-tournament">${t("btnSetUpTournament")}</button>
+        <button class="secondary small" id="hub-goto-results">${t("btnEnterResults")}</button>
+      `;
+    } else {
+      const tn = data.tournament;
+      const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
+      const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+      const statusLabel = tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress");
+      const standingsHtml = tn.standings
+        ? `<table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${tn.standings
+            .map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`)
+            .join("")}</tbody></table>`
+        : `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
+      wrap.innerHTML = `
+        <div class="tourn-summary">
+          <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+          <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+          <span class="tourn-summary-badge">${escapeAttr(statusLabel)}</span>
+        </div>
+        ${standingsHtml}
+        <button class="secondary small" id="hub-goto-tournament" style="margin-top:8px;">${t("btnManageTournament")}</button>
+      `;
+    }
+    const gotoTourn = document.getElementById("hub-goto-tournament");
+    if (gotoTourn) gotoTourn.addEventListener("click", () => jumpToTournamentCard(HUB_EVENT_ID));
+    const gotoResults = document.getElementById("hub-goto-results");
+    if (gotoResults) gotoResults.addEventListener("click", () => jumpToResultsCard(HUB_EVENT_ID));
+  } catch (e) {
+    wrap.innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
+  }
+}
+function jumpToTournamentCard(eventId) {
+  switchAdminTab("events");
+  const sel = document.getElementById("tourn-event-select");
+  if (sel && Array.from(sel.options).some((o) => o.value === String(eventId))) {
+    sel.value = String(eventId);
+    document.getElementById("tourn-load").click();
+    sel.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+function jumpToResultsCard(eventId) {
+  switchAdminTab("events");
+  const sel = document.getElementById("res-event");
+  if (sel && Array.from(sel.options).some((o) => o.value === String(eventId))) {
+    sel.value = String(eventId);
+    document.getElementById("res-load").click();
+    sel.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 }
 
@@ -3272,6 +3418,102 @@ async function handleScannedCode(data) {
     SCAN_BUSY = false;
   }, 2500);
 }
+
+// --------------------------------------------------- manual check-in (gate) --
+// Beside the QR scanner: a searchable roster of everyone registered for the
+// selected event, with a one-click Check in button, for a member who
+// couldn't show a working QR code (lost phone, dead battery, screenshot
+// didn't save, etc). Uses /api/checkin/manual, which shares the exact same
+// performCheckIn logic (and therefore the same points-award behavior) as
+// the QR path server-side - see server.js.
+let CHECKIN_ROSTER = [];
+document.getElementById("checkin-event-select").addEventListener("change", () => loadCheckinRoster());
+document.getElementById("checkin-search").addEventListener("input", renderCheckinRoster);
+
+// preserveMsg=true skips clearing #checkin-roster-msg - used when this is
+// called right after a successful manual check-in to refresh the roster
+// without immediately wiping the "Checked in" confirmation that was just
+// shown (a plain reload clears it before the fetch even resolves, which
+// otherwise makes the confirmation flash and disappear).
+async function loadCheckinRoster(preserveMsg) {
+  const eventId = document.getElementById("checkin-event-select").value;
+  const wrap = document.getElementById("checkin-roster-wrap");
+  const msg = document.getElementById("checkin-roster-msg");
+  if (!preserveMsg && msg) msg.textContent = "";
+  if (!eventId) {
+    CHECKIN_ROSTER = [];
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
+  try {
+    CHECKIN_ROSTER = await api("/api/staff/events/" + eventId + "/roster");
+    renderCheckinRoster();
+  } catch (e) {
+    wrap.innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
+  }
+}
+function renderCheckinRoster() {
+  const wrap = document.getElementById("checkin-roster-wrap");
+  if (!wrap) return;
+  if (!CHECKIN_ROSTER.length) {
+    wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("checkinRosterEmpty"))}</p>`;
+    return;
+  }
+  const query = (document.getElementById("checkin-search").value || "").trim().toLowerCase();
+  wrap.innerHTML = rosterTableHtml(CHECKIN_ROSTER, query);
+}
+// Shared by the Gate Scanner's manual check-in list and the per-event Admin
+// hub's attendance section, so the two never drift - one row shape, one set
+// of status/action rules. Pure function (no DOM reads/writes) so it's safe
+// to call from either context; the caller wires its own data-checkin-reg
+// click delegation on whatever container it rendered into.
+function rosterTableHtml(roster, query) {
+  const filtered = roster.filter(
+    (r) => !query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)
+  );
+  if (!filtered.length) {
+    return `<p style="color:var(--muted);">${escapeAttr(t("checkinNoMatches"))}</p>`;
+  }
+  return `<table><tbody>${filtered
+    .map((r) => {
+      let status, action;
+      if (r.waitlisted) {
+        status = `<span class="capacity-badge waitlist">${t("waitlistLabel")}</span>`;
+        action = "";
+      } else if (r.checkedIn) {
+        const time = r.checkInAt ? new Date(r.checkInAt).toLocaleString() : "";
+        status = `<span class="badge Approved">${t("scanSuccess")}</span><br/><small style="color:var(--muted);">${escapeAttr(time)}</small>`;
+        action = "";
+      } else {
+        status = "";
+        action = `<button class="secondary small" data-checkin-reg="${r.registrationId}">${t("btnCheckIn")}</button>`;
+      }
+      return `<tr>
+        <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
+        <td>${status}</td>
+        <td>${action}</td>
+      </tr>`;
+    })
+    .join("")}</tbody></table>`;
+}
+document.getElementById("checkin-roster-wrap").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-checkin-reg]");
+  if (!btn) return;
+  btn.disabled = true;
+  const msg = document.getElementById("checkin-roster-msg");
+  try {
+    const result = await api("/api/checkin/manual", {
+      method: "POST",
+      body: JSON.stringify({ registrationId: Number(btn.dataset.checkinReg) }),
+    });
+    showMsg(msg, `${result.attendeeName} — ${t("scanSuccess")} (+${fmt(result.pointsAwarded)} ${t("scanPointsAwarded")})`, true);
+    await loadCheckinRoster(true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+    btn.disabled = false;
+  }
+});
 
 // ------------------------------------------------------------------- init --
 (async function init() {

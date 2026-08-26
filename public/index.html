@@ -278,6 +278,16 @@
         </div>
         <div class="msg" id="scan-result-msg" style="margin-top:16px;font-size:1rem;"></div>
       </div>
+
+      <div class="card">
+        <h2 data-i18n="manualCheckinTitle">Manual check-in</h2>
+        <p style="color:var(--muted);font-size:0.85rem;" data-i18n="manualCheckinIntro">For a member who couldn't show their QR code — find their name below and check them in directly.</p>
+        <label data-i18n="fieldEvent">Event</label>
+        <select id="checkin-event-select"></select>
+        <input id="checkin-search" type="text" placeholder="Search by name or membership number" style="margin-top:10px;" />
+        <div id="checkin-roster-wrap" style="margin-top:12px;max-height:420px;overflow-y:auto;"></div>
+        <div class="msg" id="checkin-roster-msg"></div>
+      </div>
     </div>
   </section>
 
@@ -340,6 +350,21 @@
             <h3 id="admin-waitlist-title" style="margin-top:0;"></h3>
             <div id="admin-waitlist-list"></div>
             <div class="msg" id="admin-waitlist-msg"></div>
+          </div>
+          <div id="admin-event-hub-panel" class="hidden" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <h3 id="admin-hub-title" style="margin:0;"></h3>
+              <button class="secondary small" id="admin-hub-close" data-i18n="btnClose">Close</button>
+            </div>
+            <div class="tourn-summary" id="admin-hub-stats" style="margin-top:10px;"></div>
+
+            <h4 style="margin-top:18px;" data-i18n="hubAttendanceTitle">Attendance &amp; check-in</h4>
+            <input id="hub-checkin-search" type="text" placeholder="Search by name or membership number" />
+            <div id="hub-checkin-wrap" style="margin-top:10px;max-height:320px;overflow-y:auto;"></div>
+            <div class="msg" id="hub-checkin-msg"></div>
+
+            <h4 style="margin-top:18px;" data-i18n="hubTournamentTitle">Tournament &amp; winners</h4>
+            <div id="admin-hub-tournament-summary"></div>
           </div>
         </div>
       </div>
