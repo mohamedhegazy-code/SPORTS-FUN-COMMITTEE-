@@ -292,6 +292,48 @@ also got a small icon next to its title purely for faster visual
 scanning; this and the sub-tabs are cosmetic/organizational only — no
 admin functionality, field, or endpoint changed.
 
+## Tournaments (group stage & knockout brackets)
+
+Any event can run a tournament — group stage, straight knockout, or a
+group stage that feeds into a knockout bracket — from the **Tournament**
+card on the Admin → Events tab. Setting one up is admin-only; everyone can
+watch it on the public **Tournaments** nav tab once it exists.
+
+- **Mode, per event:** an admin picks **Individuals** (each registrant is
+  one entrant) or **Teams** (registrants are grouped into named teams
+  first, via a simple "type a team name next to each person" sheet —
+  everyone with the same name, trimmed and case-insensitive, becomes one
+  team; leave it blank to sit that person out). Events register
+  individuals either way; team mode is just how the bracket groups them.
+- **Format:** knockout only, or group stage (choose how many groups and
+  how many advance from each) that automatically seeds a knockout bracket
+  once every group match has a result.
+- **Seeding:** one click randomizes the draw; the ↑/↓ arrows next to each
+  entrant let the admin fine-tune it by hand afterward (e.g. keep two
+  clubmates apart) before generating the bracket. Every reorder saves
+  immediately.
+- **Byes:** if the entrant count isn't a power of two, the extra bracket
+  slots are byes that resolve themselves the moment the bracket is
+  generated — no admin action needed for those.
+- **Results & standings:** group matches are recorded win/loss/draw (3/1/0
+  points, ties broken by seed order); knockout matches are recorded by
+  picking the winner. Once the final is decided, final standings are
+  computed automatically — 1st, 2nd, and both semifinal losers tied for
+  3rd (there's no third-place playoff or goal-difference tiebreaker; this
+  is a deliberate simplification).
+- **Points integration:** a one-click "Award points to standings" writes
+  each entrant's finishing rank onto their registration(s) — the exact
+  same `position` field the existing manual "Enter event results" tool
+  uses, so the usual position-bonus points rules apply automatically. Team
+  mode writes the same rank to every member of that team. It can be
+  re-run if a result gets corrected afterward.
+- **Public bracket page:** the **Tournaments** nav tab lists every event
+  that has one and shows a read-only version of its groups/bracket/
+  standings — no login needed. An event's card (and its "more details"
+  popup) shows a **View Tournament** button once a tournament exists for
+  it, and the tournament page links back to the event's details — the two
+  are cross-linked in both directions.
+
 ## Admin: Event dashboard
 
 A new card on the Admin tab, "Event dashboard," lists every event
@@ -543,7 +585,17 @@ A few defensive measures beyond the basics:
 - **Security headers** via `helmet`, with a custom Content-Security-Policy
   that still allows what this app actually needs: inline `style="..."`
   attributes (used throughout the HTML) and `data:` image URIs (how QR
-  codes render). Everything else defaults to same-origin only.
+  codes render). Everything else defaults to same-origin only — notably
+  `script-src` has **no** `unsafe-inline`, so an `onclick="..."` attribute
+  on any dynamically-injected element is silently blocked by the browser
+  (it fails closed with no visible error besides a CSP warning in the
+  console). Every button rendered into `innerHTML` must instead be wired
+  via `addEventListener`, either directly or — for a container whose
+  content gets re-rendered often, like the tournament card or the
+  redemptions/staff-accounts tables — via one delegated listener attached
+  once to the container, dispatching off a `data-*-action` attribute on
+  the clicked element. Search the codebase for `data-tourn-action` for a
+  worked example of the pattern.
 - **Session cookie** is `httpOnly`, `sameSite: "lax"`, and `secure` exactly
   when the request itself arrived over HTTPS (`req.secure`) — so it's
   HTTPS-only on the real deployment without breaking local development

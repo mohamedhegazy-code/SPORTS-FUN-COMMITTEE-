@@ -240,6 +240,20 @@ function switchTab(view) {
   // opened, so any admin edit made elsewhere shows up without a full page
   // reload.
   if (view === "events" || view === "annual") loadEvents();
+  if (view === "tournaments") {
+    // A direct deep-link (goToEventTournament) sets this so we open that one
+    // tournament's detail straight away, skipping the list load entirely -
+    // otherwise the list load's own async refresh (refreshTournamentEventIds
+    // awaits a fetch) can resolve afterward and flip the view back to the
+    // list out from under the detail page that was just opened.
+    if (PENDING_TOURNAMENT_EVENT_ID != null) {
+      const id = PENDING_TOURNAMENT_EVENT_ID;
+      PENDING_TOURNAMENT_EVENT_ID = null;
+      openPublicTournament(id);
+    } else {
+      loadPublicTournamentsList();
+    }
+  }
   if (view === "mypoints" && CURRENT_SESSION && CURRENT_SESSION.type === "member") loadMyChat();
   if (view === "admin" && CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin") {
     loadChatThreadsList();
@@ -489,6 +503,7 @@ document.getElementById("session-logout").addEventListener("click", async () => 
 // --------------------------------------------------------------- loading --
 async function loadEvents() {
   EVENTS_DATA = await api("/api/events");
+  await refreshTournamentEventIds();
   renderEventDropdowns();
   renderEventsGrid();
   renderAnnualGrid();
@@ -547,6 +562,21 @@ function renderEventDropdowns() {
     deleteSel.innerHTML = deleteOpts || `<option value="">--</option>`;
     if (prevDeleteValue && Array.from(deleteSel.options).some((o) => o.value === prevDeleteValue)) {
       deleteSel.value = prevDeleteValue;
+    }
+  }
+
+  // Tournament: any event that isn't itself a parent-with-children (which
+  // has no direct registrations of its own to run a tournament from),
+  // upcoming or past.
+  const tournSel = document.getElementById("tourn-event-select");
+  if (tournSel) {
+    const prevTournValue = tournSel.value;
+    const tournOpts = EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev))
+      .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
+      .join("");
+    tournSel.innerHTML = tournOpts || `<option value="">--</option>`;
+    if (prevTournValue && Array.from(tournSel.options).some((o) => o.value === prevTournValue)) {
+      tournSel.value = prevTournValue;
     }
   }
 
@@ -663,6 +693,7 @@ function eventCardHtml(ev, isPast, featured) {
         <div class="actions">
           <button class="secondary" data-action="details">${t("btnMoreDetails")}</button>
           ${isPast || isParent ? "" : `<button class="primary" data-action="register">${t("btnRegisterCard")}</button>`}
+          ${TOURNAMENT_EVENT_IDS.has(ev.id) ? `<button class="secondary" data-action="view-tournament">${t("btnViewTournament")}</button>` : ""}
         </div>
       </div>
     </div>`;
@@ -679,6 +710,11 @@ function wireEventCardButtons(grid, events, isPast) {
     card.querySelectorAll('[data-action="register-child"]').forEach((btn) => {
       const child = EVENTS_DATA.find((e) => e.id === Number(btn.dataset.childId));
       if (child) btn.addEventListener("click", () => startRegisterFlow(child));
+    });
+    const tournBtn = card.querySelector('[data-action="view-tournament"]');
+    if (tournBtn) tournBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      goToEventTournament(ev.id);
     });
   });
 }
@@ -822,6 +858,7 @@ function openEventModal(ev, isPast) {
     ${heroPhoto ? `<img class="photo-hero" src="${escapeAttr(heroPhoto)}" alt="" />` : ""}
     <h2>${eventNameHtml(ev)}</h2>
     <div class="meta" style="margin-bottom:12px;">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""}</div>
+    ${TOURNAMENT_EVENT_IDS.has(ev.id) ? `<button class="secondary" id="modal-view-tournament-btn" style="margin-bottom:10px;">${t("btnViewTournament")}</button>` : ""}
     ${hasDesc ? `<h3>${t("aboutTitle")}</h3><p class="desc">${eventDescHtml(ev)}</p>` : ""}
     ${isPast && hasRecapDesc ? `<h3>${t("recapTitle")}</h3><p class="desc">${eventRecapDescHtml(ev)}</p>` : ""}
     ${
@@ -858,10 +895,23 @@ function openEventModal(ev, isPast) {
       });
     });
   }
+  const tournBtn = document.getElementById("modal-view-tournament-btn");
+  if (tournBtn) tournBtn.addEventListener("click", () => goToEventTournament(ev.id));
   document.getElementById("event-modal").classList.remove("hidden");
 }
 function closeEventModal() {
   document.getElementById("event-modal").classList.add("hidden");
+}
+// Cross-link from an event's card/modal straight into its tournament's
+// bracket on the public Tournaments tab - and the reverse link back lives on
+// that tournament's detail view (see renderPublicTournamentBody). See the
+// PENDING_TOURNAMENT_EVENT_ID check in switchTab() for why this is a queued
+// flag rather than calling openPublicTournament() directly here.
+let PENDING_TOURNAMENT_EVENT_ID = null;
+function goToEventTournament(eventId) {
+  closeEventModal();
+  PENDING_TOURNAMENT_EVENT_ID = eventId;
+  switchTab("tournaments");
 }
 document.getElementById("event-modal-close").addEventListener("click", closeEventModal);
 document.getElementById("event-modal").addEventListener("click", (e) => {
@@ -2397,6 +2447,574 @@ document.getElementById("res-save").addEventListener("click", async () => {
   }
 });
 
+// ------------------------------------------------------ admin: tournament --
+// Generates a group stage and/or knockout bracket from an event's confirmed
+// registrations (or from teams the admin groups them into), and can push
+// the final standings straight into that event's points via the same
+// reg.position field Enter Event Results uses. All state lives server-side
+// (db.tournaments) - these globals just hold the last-loaded snapshot so
+// the UI doesn't have to refetch after every click.
+let TOURNAMENT_EVENT_ID = null;
+let TOURNAMENT_DATA = null;
+let TOURNAMENT_REGISTRATIONS = [];
+
+document.getElementById("tourn-load").addEventListener("click", () => {
+  const eventId = document.getElementById("tourn-event-select").value;
+  if (eventId) loadTournamentPanel(eventId);
+});
+
+// Delegated once on the static #tourn-body wrapper (its innerHTML is
+// replaced on every render, but the element itself never is) - inline
+// onclick="" attributes are blocked by this app's CSP (script-src has no
+// 'unsafe-inline'), so every button injected by the render* functions below
+// carries data-tourn-action (+ any data-* args) instead and is dispatched
+// from here.
+document.getElementById("tourn-body").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-tourn-action]");
+  if (!btn) return;
+  const action = btn.dataset.tournAction;
+  if (action === "delete-tournament") deleteTournament();
+  else if (action === "create-tournament") createTournament();
+  else if (action === "save-teams") saveTournamentTeams();
+  else if (action === "move-entrant") moveTournamentEntrant(btn.dataset.entrantId, Number(btn.dataset.dir));
+  else if (action === "randomize-seed") randomizeTournamentSeed();
+  else if (action === "generate-tournament") generateTournament();
+  else if (action === "group-result")
+    recordTournamentGroupResult(Number(btn.dataset.matchId), btn.dataset.winnerId === undefined ? null : btn.dataset.winnerId);
+  else if (action === "generate-knockout") generateTournamentKnockout();
+  else if (action === "knockout-result")
+    recordTournamentKnockoutResult(Number(btn.dataset.roundIndex), Number(btn.dataset.matchId), btn.dataset.winnerId);
+  else if (action === "award-points") awardTournamentPoints();
+});
+document.getElementById("tourn-body").addEventListener("change", (e) => {
+  if (e.target.id === "tourn-format") toggleTournamentGroupFields();
+});
+
+async function loadTournamentPanel(eventId) {
+  TOURNAMENT_EVENT_ID = Number(eventId);
+  const msg = document.getElementById("tourn-msg");
+  if (msg) msg.textContent = "";
+  try {
+    const data = await api("/api/admin/tournaments/" + eventId);
+    TOURNAMENT_DATA = data.tournament;
+    TOURNAMENT_REGISTRATIONS = data.registrations || [];
+    renderTournamentBody();
+  } catch (e) {
+    document.getElementById("tourn-body").innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
+  }
+}
+
+function renderTournamentBody() {
+  const body = document.getElementById("tourn-body");
+  if (!body) return;
+  if (!TOURNAMENT_DATA) {
+    body.innerHTML = renderTournamentCreateForm();
+    return;
+  }
+  let inner = "";
+  if (TOURNAMENT_DATA.status === "team-setup") inner = renderTournamentTeamSetup();
+  else if (TOURNAMENT_DATA.status === "seeding") inner = renderTournamentSeeding();
+  else if (TOURNAMENT_DATA.status === "groups") inner = renderTournamentGroups();
+  else if (TOURNAMENT_DATA.status === "knockout") inner = renderTournamentBracket();
+  else if (TOURNAMENT_DATA.status === "completed") inner = renderTournamentBracket() + renderTournamentStandings();
+  const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
+  const formatLabel = TOURNAMENT_DATA.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+  body.innerHTML = `
+    <div class="tourn-summary">
+      <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+      <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+      <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
+    </div>
+    ${inner}
+  `;
+}
+
+function renderTournamentCreateForm() {
+  const count = TOURNAMENT_REGISTRATIONS.length;
+  return `
+    <p class="hint-note">${t("tournamentEntrantCountHint").replace("{count}", count)}</p>
+    <div class="grid-2">
+      <div>
+        <label>${t("fieldTournamentMode")}</label>
+        <select id="tourn-mode">
+          <option value="individual">${t("tournamentModeIndividual")}</option>
+          <option value="team">${t("tournamentModeTeam")}</option>
+        </select>
+      </div>
+      <div>
+        <label>${t("fieldTournamentFormat")}</label>
+        <select id="tourn-format">
+          <option value="knockout">${t("tournamentFormatKnockout")}</option>
+          <option value="groups">${t("tournamentFormatGroups")}</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2" id="tourn-group-fields" style="display:none;">
+      <div><label>${t("fieldNumGroups")}</label><input id="tourn-num-groups" type="number" min="2" value="2" /></div>
+      <div><label>${t("fieldAdvancePerGroup")}</label><input id="tourn-advance-per-group" type="number" min="1" value="2" /></div>
+    </div>
+    <button class="primary" style="margin-top:10px;" data-tourn-action="create-tournament">${t("btnCreateTournament")}</button>
+  `;
+}
+function toggleTournamentGroupFields() {
+  const format = document.getElementById("tourn-format").value;
+  document.getElementById("tourn-group-fields").style.display = format === "groups" ? "grid" : "none";
+}
+async function createTournament() {
+  const msg = document.getElementById("tourn-msg");
+  const mode = document.getElementById("tourn-mode").value;
+  const format = document.getElementById("tourn-format").value;
+  const body = { mode, format };
+  if (format === "groups") {
+    body.numGroups = Number(document.getElementById("tourn-num-groups").value);
+    body.advancePerGroup = Number(document.getElementById("tourn-advance-per-group").value);
+  }
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "POST", body: JSON.stringify(body) });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, t("tournamentCreated"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+async function deleteTournament() {
+  if (!confirm(t("confirmDeleteTournament"))) return;
+  const msg = document.getElementById("tourn-msg");
+  try {
+    await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "DELETE" });
+    TOURNAMENT_DATA = null;
+    showMsg(msg, t("tournamentDeleted"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+// Team mode only: a plain text-input-per-registrant sheet rather than
+// drag-and-drop - deliberately simple. Registrants sharing the exact same
+// (trimmed, case-insensitive) team name become one team; anyone left blank
+// sits out the tournament.
+function renderTournamentTeamSetup() {
+  const rows = TOURNAMENT_REGISTRATIONS.map(
+    (r) => `<tr>
+      <td>${escapeAttr(r.label)}</td>
+      <td><input type="text" class="tourn-team-name" data-reg-id="${r.id}" placeholder="${escapeAttr(t("teamNamePlaceholder"))}" /></td>
+    </tr>`
+  ).join("");
+  return `
+    <p class="hint-note">${t("teamSetupHint")}</p>
+    <table><thead><tr><th>${t("colName")}</th><th>${t("colTeam")}</th></tr></thead><tbody>${rows}</tbody></table>
+    <button class="primary" style="margin-top:10px;" data-tourn-action="save-teams">${t("btnSaveTeams")}</button>
+  `;
+}
+async function saveTournamentTeams() {
+  const msg = document.getElementById("tourn-msg");
+  const groups = {};
+  Array.from(document.querySelectorAll(".tourn-team-name")).forEach((inp) => {
+    const name = inp.value.trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!groups[key]) groups[key] = { name, memberIds: [] };
+    groups[key].memberIds.push(Number(inp.dataset.regId));
+  });
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/teams", {
+      method: "PUT",
+      body: JSON.stringify({ teams: Object.values(groups) }),
+    });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, t("teamsSaved"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+// Seeding: the order here becomes group placement or bracket seeding once
+// generated. Randomize gives a fair draw in one click; the arrows let the
+// admin place specific entrants by hand afterward (e.g. keep club rivals
+// apart). Every reorder saves immediately so there's nothing to lose track of.
+function renderTournamentSeeding() {
+  const entrants = TOURNAMENT_DATA.entrants;
+  const order = TOURNAMENT_DATA.seedOrder;
+  const rows = order
+    .map((id, i) => {
+      const e = entrants.find((x) => x.id === id);
+      return `<div class="tourn-seed-row">
+        <span class="tourn-seed-num">${i + 1}</span>
+        <span class="tourn-seed-label">${escapeAttr(e ? e.label : id)}</span>
+        <span class="tourn-seed-actions">
+          <button class="secondary small" ${i === 0 ? "disabled" : ""} data-tourn-action="move-entrant" data-entrant-id="${escapeAttr(id)}" data-dir="-1">↑</button>
+          <button class="secondary small" ${i === order.length - 1 ? "disabled" : ""} data-tourn-action="move-entrant" data-entrant-id="${escapeAttr(id)}" data-dir="1">↓</button>
+        </span>
+      </div>`;
+    })
+    .join("");
+  const genLabel = TOURNAMENT_DATA.format === "groups" ? t("btnGenerateGroups") : t("btnGenerateBracket");
+  return `
+    <p class="hint-note">${t("seedingHint")}</p>
+    <div class="tourn-seed-list">${rows}</div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="secondary" data-tourn-action="randomize-seed">${t("btnRandomize")}</button>
+      <button class="primary" data-tourn-action="generate-tournament">${escapeAttr(genLabel)}</button>
+    </div>
+  `;
+}
+async function moveTournamentEntrant(entrantId, dir) {
+  const order = TOURNAMENT_DATA.seedOrder.slice();
+  const idx = order.indexOf(entrantId);
+  const newIdx = idx + dir;
+  if (idx === -1 || newIdx < 0 || newIdx >= order.length) return;
+  [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+  await saveTournamentSeedOrder(order);
+}
+async function randomizeTournamentSeed() {
+  const order = TOURNAMENT_DATA.seedOrder.slice();
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  await saveTournamentSeedOrder(order);
+}
+async function saveTournamentSeedOrder(order) {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/seed-order", {
+      method: "PUT",
+      body: JSON.stringify({ seedOrder: order }),
+    });
+    TOURNAMENT_DATA = data.tournament;
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+async function generateTournament() {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/generate", { method: "POST" });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, t("tournamentGenerated"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+function renderTournamentGroups() {
+  const groupsHtml = TOURNAMENT_DATA.groups
+    .map((g, gi) => {
+      const standingsRows = g.standings
+        .map((s, i) => `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.points}</td></tr>`)
+        .join("");
+      const matchesHtml = g.matches
+        .map((m) => {
+          if (m.result) {
+            const resultText =
+              m.result.winnerId === null
+                ? t("matchDraw")
+                : `${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
+            return `<div class="tourn-match decided"><span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)}</span><span class="tourn-match-result">${resultText}</span></div>`;
+          }
+          return `<div class="tourn-match">
+            <span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)}</span>
+            <span class="tourn-match-actions">
+              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.a)}">${escapeAttr(m.aLabel)} ${t("wins")}</button>
+              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.b)}">${escapeAttr(m.bLabel)} ${t("wins")}</button>
+              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}">${t("btnDraw")}</button>
+            </span>
+          </div>`;
+        })
+        .join("");
+      return `<div class="tourn-group">
+        <h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>
+        <table><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colPoints")}</th></tr></thead><tbody>${standingsRows}</tbody></table>
+        <div class="tourn-matches">${matchesHtml}</div>
+      </div>`;
+    })
+    .join("");
+  const undecided = TOURNAMENT_DATA.groups.reduce((sum, g) => sum + g.matches.filter((m) => !m.result).length, 0);
+  return `
+    <div class="tourn-groups-grid">${groupsHtml}</div>
+    <div style="margin-top:14px;">
+      ${undecided > 0 ? `<p class="hint-note">${t("groupsRemainingHint").replace("{count}", undecided)}</p>` : ""}
+      <button class="primary" ${undecided > 0 ? "disabled" : ""} data-tourn-action="generate-knockout">${t("btnGenerateKnockout")}</button>
+    </div>
+  `;
+}
+async function recordTournamentGroupResult(matchId, winnerId) {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/group-result", {
+      method: "PUT",
+      body: JSON.stringify({ matchId, winnerId }),
+    });
+    TOURNAMENT_DATA = data.tournament;
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+async function generateTournamentKnockout() {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/generate-knockout", { method: "POST" });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, t("knockoutGenerated"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+function renderTournamentBracket() {
+  const rounds = TOURNAMENT_DATA.knockout.rounds;
+  const roundsHtml = rounds
+    .map((round, ri) => {
+      const isFinal = ri === rounds.length - 1;
+      const isSemi = ri === rounds.length - 2;
+      const roundLabel = isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
+      const matchesHtml = round
+        .map((m) => {
+          const aLabel = m.aLabel || t("tbd");
+          const bLabel = m.bLabel || t("tbd");
+          let footer;
+          if (m.bye) {
+            footer = `<div class="tourn-bracket-result">${t("byeLabel")}</div>`;
+          } else if (m.winnerId) {
+            const winnerLabel = m.winnerId === m.a ? m.aLabel : m.bLabel;
+            footer = `<div class="tourn-bracket-result">${escapeAttr(winnerLabel)} ${t("wins")}${m.score ? " (" + escapeAttr(m.score) + ")" : ""}</div>`;
+          } else if (m.a && m.b) {
+            footer = `<div class="tourn-bracket-actions">
+              <button data-tourn-action="knockout-result" data-round-index="${ri}" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.a)}">${escapeAttr(m.aLabel)}</button>
+              <button data-tourn-action="knockout-result" data-round-index="${ri}" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.b)}">${escapeAttr(m.bLabel)}</button>
+            </div>`;
+          } else {
+            footer = `<div class="tourn-bracket-pending">${t("waitingOnPreviousRound")}</div>`;
+          }
+          return `<div class="tourn-bracket-match">
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}</div>
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}</div>
+            ${footer}
+          </div>`;
+        })
+        .join("");
+      return `<div class="tourn-bracket-round"><h4>${escapeAttr(roundLabel)}</h4>${matchesHtml}</div>`;
+    })
+    .join("");
+  return `<div class="tourn-bracket">${roundsHtml}</div>`;
+}
+async function recordTournamentKnockoutResult(roundIndex, matchId, winnerId) {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/knockout-result", {
+      method: "PUT",
+      body: JSON.stringify({ roundIndex, matchId, winnerId }),
+    });
+    TOURNAMENT_DATA = data.tournament;
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+function renderTournamentStandings() {
+  const rows = TOURNAMENT_DATA.standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`).join("");
+  const awardedNote = TOURNAMENT_DATA.pointsAwardedAt
+    ? `<p class="hint-note">${t("pointsAwardedOn")} ${escapeAttr(new Date(TOURNAMENT_DATA.pointsAwardedAt).toLocaleString())}</p>`
+    : "";
+  return `
+    <h4 style="margin-top:18px;">${t("finalStandingsTitle")}</h4>
+    <table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${rows}</tbody></table>
+    ${awardedNote}
+    <button class="primary" style="margin-top:10px;" data-tourn-action="award-points">${TOURNAMENT_DATA.pointsAwardedAt ? t("btnReAwardPoints") : t("btnAwardPoints")}</button>
+  `;
+}
+async function awardTournamentPoints() {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/award-points", { method: "POST" });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, t("pointsAwarded").replace("{count}", data.updated), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+// =====================================================================
+// PUBLIC TOURNAMENTS PAGE - read-only bracket/group/standings viewer, no
+// login required. Reuses the same CSS classes as the admin tournament card
+// (.tourn-bracket, .tourn-groups-grid, etc. - see styles.css) but renders
+// no action controls, since members can only look, not record results.
+// =====================================================================
+let PUBLIC_TOURNAMENTS_LIST = [];
+// Which event ids currently have a tournament - kept in sync via
+// refreshTournamentEventIds() (called from loadEvents(), so it's already
+// fresh by the time event cards/modals render) so the Events/Annual views
+// can show a "View Tournament" link without a separate round trip per card.
+let TOURNAMENT_EVENT_IDS = new Set();
+async function refreshTournamentEventIds() {
+  PUBLIC_TOURNAMENTS_LIST = await api("/api/tournaments").catch(() => []);
+  TOURNAMENT_EVENT_IDS = new Set(PUBLIC_TOURNAMENTS_LIST.map((tn) => tn.eventId));
+}
+
+async function loadPublicTournamentsList() {
+  await refreshTournamentEventIds();
+  document.getElementById("tourn-public-detail").classList.add("hidden");
+  document.getElementById("tourn-public-list").classList.remove("hidden");
+  renderPublicTournamentsList();
+}
+function renderPublicTournamentsList() {
+  const grid = document.getElementById("tourn-public-list");
+  const empty = document.getElementById("tourn-public-empty");
+  if (!grid) return;
+  empty.classList.toggle("hidden", PUBLIC_TOURNAMENTS_LIST.length > 0);
+  grid.innerHTML = PUBLIC_TOURNAMENTS_LIST.map((tn) => {
+    const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
+    const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+    const statusLabel = tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress");
+    return `
+    <div class="event-card" data-event-id="${tn.eventId}">
+      <div class="body">
+        <h3>${eventNameHtml(tn)}</h3>
+        <div class="meta">${escapeAttr(tn.date || "")}${tn.sport ? " &middot; " + escapeAttr(tn.sport) : ""}</div>
+        <div class="tourn-summary" style="margin-top:8px;">
+          <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+          <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+          <span class="tourn-summary-badge">${escapeAttr(statusLabel)}</span>
+        </div>
+        <div class="actions" style="margin-top:10px;">
+          <button class="secondary" data-action="view-tournament">${t("btnViewTournament")}</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+  grid.querySelectorAll(".event-card").forEach((card) => {
+    const eventId = Number(card.dataset.eventId);
+    card.querySelectorAll('[data-action="view-tournament"], h3').forEach((el) => {
+      el.addEventListener("click", () => openPublicTournament(eventId));
+    });
+  });
+}
+document.getElementById("tourn-public-back").addEventListener("click", () => {
+  document.getElementById("tourn-public-detail").classList.add("hidden");
+  document.getElementById("tourn-public-list").classList.remove("hidden");
+});
+async function openPublicTournament(eventId) {
+  const wrap = document.getElementById("tourn-public-detail-body");
+  document.getElementById("tourn-public-list").classList.add("hidden");
+  document.getElementById("tourn-public-detail").classList.remove("hidden");
+  wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
+  try {
+    const data = await api("/api/tournaments/" + eventId);
+    wrap.innerHTML = renderPublicTournamentBody(data.tournament, eventId);
+    const backBtn = document.getElementById("tourn-public-view-event-btn");
+    if (backBtn) {
+      backBtn.addEventListener("click", () => {
+        const ev = EVENTS_DATA.find((e) => e.id === eventId);
+        if (ev) openEventModal(ev, isPastEvent(ev));
+      });
+    }
+  } catch (e) {
+    wrap.innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
+  }
+}
+function renderPublicTournamentBody(tn, eventId) {
+  if (!tn) return `<p style="color:var(--muted);">${escapeAttr(t("tournPublicEmpty"))}</p>`;
+  const meta = PUBLIC_TOURNAMENTS_LIST.find((x) => x.eventId === eventId);
+  const ev = EVENTS_DATA.find((e) => e.id === eventId);
+  const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
+  const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+  let inner = "";
+  if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
+    inner = `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
+  } else if (tn.status === "groups") {
+    inner = renderPublicGroups(tn.groups);
+  } else if (tn.status === "knockout") {
+    inner = renderPublicBracket(tn.knockout);
+  } else if (tn.status === "completed") {
+    inner = (tn.format === "groups" ? renderPublicGroups(tn.groups) : "") + renderPublicBracket(tn.knockout) + renderPublicStandings(tn.standings);
+  }
+  return `
+    ${meta ? `<h3 style="margin-top:0;">${eventNameHtml(meta)}</h3>` : ""}
+    <div class="tourn-summary">
+      <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+      <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+      ${ev ? `<button class="secondary small" id="tourn-public-view-event-btn" style="margin-inline-start:auto;">${t("btnViewEventDetails")}</button>` : ""}
+    </div>
+    ${inner}
+  `;
+}
+function renderPublicGroups(groups) {
+  const groupsHtml = (groups || [])
+    .map((g, gi) => {
+      const standingsRows = g.standings
+        .map((s, i) => `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.points}</td></tr>`)
+        .join("");
+      const matchesHtml = g.matches
+        .map((m) => {
+          const resultText = !m.result
+            ? t("matchNotYetPlayed")
+            : m.result.winnerId === null
+            ? t("matchDraw")
+            : `${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
+          return `<div class="tourn-match${m.result ? " decided" : ""}"><span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)}</span><span class="tourn-match-result">${resultText}</span></div>`;
+        })
+        .join("");
+      return `<div class="tourn-group">
+        <h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>
+        <table><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colPoints")}</th></tr></thead><tbody>${standingsRows}</tbody></table>
+        <div class="tourn-matches">${matchesHtml}</div>
+      </div>`;
+    })
+    .join("");
+  return `<div class="tourn-groups-grid">${groupsHtml}</div>`;
+}
+function renderPublicBracket(knockout) {
+  if (!knockout) return "";
+  const rounds = knockout.rounds;
+  const roundsHtml = rounds
+    .map((round, ri) => {
+      const isFinal = ri === rounds.length - 1;
+      const isSemi = ri === rounds.length - 2;
+      const roundLabel = isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
+      const matchesHtml = round
+        .map((m) => {
+          const aLabel = m.aLabel || t("tbd");
+          const bLabel = m.bLabel || t("tbd");
+          let footer;
+          if (m.bye) {
+            footer = `<div class="tourn-bracket-result">${t("byeLabel")}</div>`;
+          } else if (m.winnerId) {
+            const winnerLabel = m.winnerId === m.a ? m.aLabel : m.bLabel;
+            footer = `<div class="tourn-bracket-result">${escapeAttr(winnerLabel)} ${t("wins")}${m.score ? " (" + escapeAttr(m.score) + ")" : ""}</div>`;
+          } else {
+            footer = `<div class="tourn-bracket-pending">${t("waitingOnPreviousRound")}</div>`;
+          }
+          return `<div class="tourn-bracket-match">
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}</div>
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}</div>
+            ${footer}
+          </div>`;
+        })
+        .join("");
+      return `<div class="tourn-bracket-round"><h4>${escapeAttr(roundLabel)}</h4>${matchesHtml}</div>`;
+    })
+    .join("");
+  return `<div class="tourn-bracket">${roundsHtml}</div>`;
+}
+function renderPublicStandings(standings) {
+  if (!standings) return "";
+  const rows = standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`).join("");
+  return `
+    <h4 style="margin-top:18px;">${t("finalStandingsTitle")}</h4>
+    <table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${rows}</tbody></table>
+  `;
+}
+
 async function loadRedemptionsTable() {
   const wrap = document.getElementById("redemptions-table-wrap");
   const list = await api("/api/redemptions");
@@ -2419,9 +3037,9 @@ async function loadRedemptionsTable() {
         <td>${r.approvalLevel}</td>
         <td><span class="badge ${r.status}">${r.status}</span>${r.approvedBy ? `<br/><small style="color:var(--muted);">${r.approvedBy}</small>` : ""}</td>
         <td>
-          ${r.status === "Pending" ? `<button class="secondary" onclick="setRedemptionStatus(${r.id},'Approved')">${t("approve")}</button>
-          <button class="secondary" onclick="setRedemptionStatus(${r.id},'Rejected')">${t("reject")}</button>` : ""}
-          ${r.status === "Approved" ? `<button class="secondary" onclick="setRedemptionStatus(${r.id},'Fulfilled')">${t("fulfill")}</button>` : ""}
+          ${r.status === "Pending" ? `<button class="secondary" data-redemption-action="Approved" data-redemption-id="${r.id}">${t("approve")}</button>
+          <button class="secondary" data-redemption-action="Rejected" data-redemption-id="${r.id}">${t("reject")}</button>` : ""}
+          ${r.status === "Approved" ? `<button class="secondary" data-redemption-action="Fulfilled" data-redemption-id="${r.id}">${t("fulfill")}</button>` : ""}
         </td>
       </tr>`
         )
@@ -2429,6 +3047,16 @@ async function loadRedemptionsTable() {
     </tbody>
   </table>`;
 }
+// Delegated once on the static wrapper (never replaced itself, only its
+// innerHTML is) so it keeps working across every re-render of the table -
+// inline onclick="" attributes are blocked by this app's CSP (script-src has
+// no 'unsafe-inline'), so every dynamically-injected button must be wired
+// this way instead.
+document.getElementById("redemptions-table-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-redemption-action]");
+  if (!btn) return;
+  setRedemptionStatus(Number(btn.dataset.redemptionId), btn.dataset.redemptionAction);
+});
 async function setRedemptionStatus(id, status) {
   await api(`/api/redemptions/${id}/status`, {
     method: "POST",
@@ -2454,7 +3082,7 @@ async function loadStaffAccountsTable() {
         <td>${
           CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.username === s.username
             ? ""
-            : `<button class="secondary" onclick="removeStaffAccount('${s.username}')">${t("btnRemove")}</button>`
+            : `<button class="secondary" data-remove-staff="${escapeAttr(s.username)}">${t("btnRemove")}</button>`
         }</td>
       </tr>`
         )
@@ -2462,6 +3090,11 @@ async function loadStaffAccountsTable() {
     </tbody>
   </table>`;
 }
+document.getElementById("staff-accounts-table-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-remove-staff]");
+  if (!btn) return;
+  removeStaffAccount(btn.dataset.removeStaff);
+});
 async function removeStaffAccount(username) {
   if (!confirm(t("confirmRemoveStaff"))) return;
   try {

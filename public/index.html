@@ -34,6 +34,7 @@
   <span class="tab-wrap"><button class="tab-btn" data-view="mypoints" data-i18n="tabMyPoints">Member Profile</button><span id="mp-chat-badge" class="tab-badge hidden">0</span></span>
   <button class="tab-btn" id="tab-ladder-btn" data-view="ladder" data-i18n="tabLadder">Redemption Ladder</button>
   <button class="tab-btn" data-view="annual" data-i18n="tabAnnual">Annual Activities</button>
+  <button class="tab-btn" data-view="tournaments" data-i18n="tabTournaments">Tournaments</button>
   <button class="tab-btn" data-view="scan" data-i18n="tabScan">Gate Scanner</button>
   <span class="tab-wrap"><button class="tab-btn" data-view="admin" data-i18n="tabAdmin">Admin</button><span id="admin-chat-badge" class="tab-badge hidden">0</span></span>
 </nav>
@@ -236,6 +237,22 @@
     <div class="event-grid" id="annual-grid"></div>
   </section>
 
+  <!-- ============================= TOURNAMENTS (public bracket viewer) ============================= -->
+  <section id="view-tournaments" class="view">
+    <div class="card">
+      <h2 data-i18n="tournPublicTitle">Tournaments</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="tournPublicIntro">Live brackets, group standings and winners for events running a tournament.</p>
+    </div>
+    <div class="card" id="tourn-public-empty">
+      <p style="color:var(--muted);" data-i18n="tournPublicEmpty">No tournaments yet.</p>
+    </div>
+    <div class="event-grid" id="tourn-public-list"></div>
+    <div class="card hidden" id="tourn-public-detail">
+      <button class="secondary small" id="tourn-public-back" data-i18n="btnBackToTournaments">&larr; Back to tournaments</button>
+      <div id="tourn-public-detail-body" style="margin-top:14px;"></div>
+    </div>
+  </section>
+
   <!-- ============================= SCAN (staff gate scanner) ============================= -->
   <section id="view-scan" class="view">
     <div class="card admin-lock" id="scan-lock">
@@ -406,6 +423,16 @@
           </div>
           <button class="primary hidden" id="res-save" data-i18n="btnSaveResults">Save results</button>
           <div class="msg" id="res-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3h12v3.5a5.5 5.5 0 0 1-6 5.5 5.5 5.5 0 0 1-6-5.5V3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M4 4H2a1 1 0 0 0-1 1.2c.4 1.6 1.5 2.7 3.4 2.9M16 4h2a1 1 0 0 1 1 1.2c-.4 1.6-1.5 2.7-3.4 2.9" stroke="currentColor" stroke-width="1.2"/><path d="M10 12v3M7.5 17.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8.3 14.5h3.4l.5 3H7.8l.5-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span data-i18n="adminTournamentTitle">Tournament</span></h2>
+          <p class="section-sub" data-i18n="adminTournamentIntro">Generate a group stage and/or knockout bracket from an event's registrations (or from teams you group them into), run it through to a winner, and optionally feed the final standings straight into that event's points.</p>
+          <label data-i18n="fieldEvent">Event</label>
+          <select id="tourn-event-select"></select>
+          <button class="secondary" id="tourn-load" style="margin-top:10px;" data-i18n="btnLoadTournament">Load</button>
+          <div id="tourn-body" style="margin-top:16px;"></div>
+          <div class="msg" id="tourn-msg"></div>
         </div>
 
         <div class="card">

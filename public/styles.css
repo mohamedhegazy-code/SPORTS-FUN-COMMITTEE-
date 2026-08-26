@@ -535,6 +535,60 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 .activity-row .activity-time { font-weight: 400; color: var(--muted); font-size: 0.78rem; }
 .activity-row .capacity-badge { margin: 0; }
 button.secondary.small { padding: 5px 10px; font-size: 0.75rem; }
+button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
+
+/* -------------------------------------------------------------- tournament -- */
+.tourn-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.tourn-summary-badge {
+  background: #fff9ec; border: 1px solid var(--gold); color: var(--red-dark);
+  font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+}
+.tourn-seed-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tourn-seed-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); background: #fff;
+}
+.tourn-seed-row:last-child { border-bottom: none; }
+.tourn-seed-num { font-weight: 700; color: var(--gold); min-width: 22px; }
+.tourn-seed-label { flex: 1; font-size: 0.9rem; }
+.tourn-seed-actions { display: flex; gap: 4px; }
+.tourn-seed-actions button { padding: 3px 9px; font-size: 0.75rem; }
+
+.tourn-groups-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.tourn-group { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: #fff; }
+.tourn-group h4 { margin: 0 0 8px; font-size: 0.88rem; color: var(--red-dark); }
+.tourn-group table { width: 100%; font-size: 0.82rem; margin-bottom: 10px; }
+.tourn-group th, .tourn-group td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+[dir="rtl"] .tourn-group th, [dir="rtl"] .tourn-group td { text-align: right; }
+.tourn-matches { display: flex; flex-direction: column; gap: 6px; }
+.tourn-match {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: 0.82rem; padding: 6px 0; border-top: 1px dashed var(--border); flex-wrap: wrap;
+}
+.tourn-match-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.tourn-match-actions button { padding: 3px 8px; font-size: 0.72rem; }
+.tourn-match-result { color: var(--red); font-weight: 600; }
+.tourn-match.decided { color: var(--muted); }
+
+.tourn-bracket { display: flex; gap: 22px; overflow-x: auto; padding-bottom: 8px; }
+.tourn-bracket-round { display: flex; flex-direction: column; justify-content: space-around; gap: 16px; min-width: 190px; }
+.tourn-bracket-round h4 { font-size: 0.78rem; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; text-align: center; }
+.tourn-bracket-match {
+  border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden;
+}
+.tourn-bracket-slot { padding: 7px 10px; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.tourn-bracket-slot:last-of-type { border-bottom: none; }
+.tourn-bracket-slot.winner { font-weight: 700; color: var(--red); background: #fff9ec; }
+.tourn-bracket-actions { display: flex; border-top: 1px solid var(--border); }
+.tourn-bracket-actions button {
+  flex: 1; border: none; border-radius: 0; background: #fff; color: var(--red);
+  padding: 6px 4px; font-size: 0.72rem; cursor: pointer; border-inline-start: 1px solid var(--border);
+}
+.tourn-bracket-actions button:first-child { border-inline-start: none; }
+.tourn-bracket-actions button:hover { background: #fdf3e3; }
+.tourn-bracket-result, .tourn-bracket-pending {
+  padding: 6px 10px; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border); text-align: center;
+}
 
 .lang-ar, .lang-en { display: block; }
 .lang-ar { direction: rtl; }

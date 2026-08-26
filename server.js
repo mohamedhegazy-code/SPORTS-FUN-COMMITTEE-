@@ -313,6 +313,12 @@ function readDb() {
   db.newsPosts = db.newsPosts || [];
   db.nextIds.spotlight = db.nextIds.spotlight || 1;
   db.spotlights = db.spotlights || [];
+  // Tournaments: at most one per event, generates a group stage and/or
+  // knockout bracket from that event's confirmed registrations (or from
+  // teams the admin groups them into). See the "TOURNAMENTS" section below
+  // for the full data model and bracket-math helpers.
+  db.nextIds.tournament = db.nextIds.tournament || 1;
+  db.tournaments = db.tournaments || [];
   // Global feature toggles the admin controls - currently just whether the
   // points system is surfaced to members at all. Points still accumulate
   // server-side either way; this only controls what members see.
@@ -1978,6 +1984,523 @@ app.put("/api/settings/theme", requireStaffRole("admin"), uploadLogo.single("log
   }
   writeDb(db);
   res.json(themePayload(db));
+});
+
+// -------------------------------------------------------------------------
+// TOURNAMENTS
+// -------------------------------------------------------------------------
+// At most one tournament per event. It generates either a knockout bracket
+// directly, or a round-robin group stage that feeds a knockout bracket,
+// from that event's confirmed registrations - either one entrant per
+// registration ("individual" mode) or admin-defined teams grouping several
+// registrations together ("team" mode, for sports like football where the
+// event registers individual members but the tournament is played by
+// teams). Data shape:
+//
+//   { id, eventId, mode: "individual"|"team", format: "knockout"|"groups",
+//     numGroups, advancePerGroup,        // only meaningful when format=groups
+//     teams: [{ id, name, memberIds: [registrationId,...] }],  // team mode only
+//     seedOrder: [entrantId,...],        // admin-controlled order, used to
+//                                        // seed groups or the bracket
+//     nextMatchId,
+//     groups: [{ entrantIds:[...], matches:[{id,a,b,result}] }] | null,
+//     knockout: { rounds: [ [{id,a,b,winnerId,score,bye}, ...], ... ] } | null,
+//     standings: [{entrantId, rank}] | null,   // set once knockout completes
+//     pointsAwardedAt: isoString | null,
+//     status: "setup"|"team-setup"|"seeding"|"groups"|"knockout"|"completed" }
+//
+// An "entrant" is either one registration (individual mode: entrant id is
+// "reg" + registrationId) or one team (team mode: entrant id is the team's
+// own id). Either way an entrant maps to one or more registrationIds, which
+// is what lets the "award points" step reuse the exact same reg.position
+// field (and therefore the exact same points math) as the existing manual
+// Enter Event Results feature.
+
+function findTournament(db, eventId) {
+  return db.tournaments.find((t) => t.eventId === eventId);
+}
+
+// Individual-mode entrants are derived live from current registrations
+// (not stored) so someone registering or being removed after tournament
+// creation is automatically reflected. Team-mode entrants ARE stored (teams
+// are a manual grouping the admin defines once).
+function tournamentEntrants(db, t) {
+  if (t.mode === "team") {
+    return t.teams.map((team) => ({ id: team.id, label: team.name, registrationIds: team.memberIds }));
+  }
+  return db.registrations
+    .filter((r) => r.eventId === t.eventId && !r.waitlisted)
+    .map((r) => {
+      const member = db.members[r.membershipNumber];
+      return {
+        id: "reg" + r.id,
+        label: r.dependentName || (member ? member.name : "Member"),
+        registrationIds: [r.id],
+      };
+    });
+}
+
+// Keeps seedOrder in sync with whatever tournamentEntrants() currently
+// returns: entrants still present keep their relative order, newly-appeared
+// entrants are appended, entrants no longer present are dropped. Mutates
+// t.seedOrder and returns the (possibly unchanged) entrant list.
+function reconcileSeedOrder(db, t) {
+  const entrants = tournamentEntrants(db, t);
+  const ids = new Set(entrants.map((e) => e.id));
+  const kept = t.seedOrder.filter((id) => ids.has(id));
+  const keptSet = new Set(kept);
+  const appended = entrants.map((e) => e.id).filter((id) => !keptSet.has(id));
+  t.seedOrder = [...kept, ...appended];
+  return entrants;
+}
+
+function nextPowerOfTwo(n) {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
+// The standard single-elimination "sports bracket" seeding order: returns
+// an array of length `size` holding seed numbers 1..size in bracket-slot
+// order, arranged so seed 1 and seed 2 can only meet in the final, seeds
+// 1-4 can't meet before the semifinal, and so on.
+function bracketSeedSlots(size) {
+  let seeds = [1];
+  while (seeds.length < size) {
+    const n = seeds.length * 2;
+    const next = [];
+    for (const s of seeds) next.push(s, n + 1 - s);
+    seeds = next;
+  }
+  return seeds;
+}
+
+// Writes a decided match's winner into the next round's slot. If this was
+// the final round's match, computes and stores final standings instead.
+function propagateKnockoutWinner(t, roundIndex, matchIndex, winnerId) {
+  const rounds = t.knockout.rounds;
+  const match = rounds[roundIndex][matchIndex];
+  match.winnerId = winnerId;
+  const nextRound = rounds[roundIndex + 1];
+  if (!nextRound) {
+    computeFinalStandings(t);
+    return;
+  }
+  const nextMatch = nextRound[Math.floor(matchIndex / 2)];
+  if (matchIndex % 2 === 0) nextMatch.a = winnerId;
+  else nextMatch.b = winnerId;
+}
+
+function computeFinalStandings(t) {
+  const rounds = t.knockout.rounds;
+  const final = rounds[rounds.length - 1][0];
+  const standings = [];
+  if (final.winnerId) standings.push({ entrantId: final.winnerId, rank: 1 });
+  const runnerUp = final.a === final.winnerId ? final.b : final.a;
+  if (runnerUp) standings.push({ entrantId: runnerUp, rank: 2 });
+  // The round right before the final is always the semifinal round (two
+  // matches feeding the final's two slots), whatever the bracket's overall
+  // depth - both losers there are conventionally tied for 3rd/4th, since
+  // this app doesn't play a separate third-place match.
+  if (rounds.length >= 2) {
+    for (const m of rounds[rounds.length - 2]) {
+      const loser = m.a === m.winnerId ? m.b : m.a;
+      if (loser && loser !== final.winnerId && loser !== runnerUp) standings.push({ entrantId: loser, rank: 3 });
+    }
+  }
+  t.standings = standings;
+  t.status = "completed";
+}
+
+// Builds a fresh knockout bracket from an ordered entrant-id list (index 0
+// = the top seed). Entrant counts that aren't a power of two get byes,
+// placed per the standard seeding above; byes are resolved immediately.
+function buildKnockoutRounds(t, orderedEntrantIds) {
+  const n = orderedEntrantIds.length;
+  const size = nextPowerOfTwo(n);
+  const slots = bracketSeedSlots(size);
+  const numRounds = Math.log2(size);
+  const round0 = [];
+  for (let i = 0; i < size; i += 2) {
+    const seedA = slots[i];
+    const seedB = slots[i + 1];
+    const a = seedA <= n ? orderedEntrantIds[seedA - 1] : null;
+    const b = seedB <= n ? orderedEntrantIds[seedB - 1] : null;
+    const match = { id: t.nextMatchId++, a, b, winnerId: null, score: "", bye: false };
+    if (a && !b) {
+      match.winnerId = a;
+      match.bye = true;
+    } else if (b && !a) {
+      match.winnerId = b;
+      match.bye = true;
+    }
+    round0.push(match);
+  }
+  const rounds = [round0];
+  let prevCount = round0.length;
+  for (let r = 1; r < numRounds; r++) {
+    const roundMatches = [];
+    for (let i = 0; i < prevCount / 2; i++) {
+      roundMatches.push({ id: t.nextMatchId++, a: null, b: null, winnerId: null, score: "", bye: false });
+    }
+    rounds.push(roundMatches);
+    prevCount = roundMatches.length;
+  }
+  t.knockout = { rounds };
+  t.status = "knockout";
+  // Propagate round-0 byes forward. A later round's match is only ever a
+  // bye itself if BOTH its feeders were byes, which the loop below reaches
+  // naturally on its next iteration since propagateKnockoutWinner is called
+  // for every round-0 bye in slot order.
+  round0.forEach((m, i) => {
+    if (m.bye) propagateKnockoutWinner(t, 0, i, m.winnerId);
+  });
+}
+
+function buildGroups(t, orderedEntrantIds, numGroups) {
+  const groups = Array.from({ length: numGroups }, () => ({ entrantIds: [], matches: [] }));
+  orderedEntrantIds.forEach((id, i) => groups[i % numGroups].entrantIds.push(id));
+  for (const g of groups) {
+    for (let i = 0; i < g.entrantIds.length; i++) {
+      for (let j = i + 1; j < g.entrantIds.length; j++) {
+        g.matches.push({ id: t.nextMatchId++, a: g.entrantIds[i], b: g.entrantIds[j], result: null });
+      }
+    }
+  }
+  t.groups = groups;
+  t.status = "groups";
+}
+
+// 3 points for a win, 1 each for a draw, 0 for a loss - ties broken by each
+// entrant's position in the tournament's seed order (stable, not goal
+// difference or head-to-head, which this app doesn't track).
+function computeGroupStandings(group, seedOrder) {
+  const pts = {};
+  group.entrantIds.forEach((id) => (pts[id] = 0));
+  for (const m of group.matches) {
+    if (!m.result) continue;
+    if (m.result.winnerId === null) {
+      pts[m.a] += 1;
+      pts[m.b] += 1;
+    } else {
+      pts[m.result.winnerId] += 3;
+    }
+  }
+  return [...group.entrantIds]
+    .sort((a, b) => (pts[b] !== pts[a] ? pts[b] - pts[a] : seedOrder.indexOf(a) - seedOrder.indexOf(b)))
+    .map((id) => ({ entrantId: id, points: pts[id] }));
+}
+
+// Serializes a tournament for the client, resolving entrant ids to display
+// labels along the way so the frontend never has to cross-reference.
+function serializeTournament(db, t) {
+  const entrants = reconcileSeedOrder(db, t);
+  const labelOf = (id) => {
+    const e = entrants.find((x) => x.id === id);
+    return e ? e.label : t.mode === "team" ? "(removed team)" : "(no longer registered)";
+  };
+  const groups = t.groups
+    ? t.groups.map((g) => ({
+        entrantIds: g.entrantIds,
+        standings: computeGroupStandings(g, t.seedOrder).map((s) => ({ ...s, label: labelOf(s.entrantId) })),
+        matches: g.matches.map((m) => ({ ...m, aLabel: labelOf(m.a), bLabel: labelOf(m.b) })),
+      }))
+    : null;
+  const knockout = t.knockout
+    ? {
+        rounds: t.knockout.rounds.map((round) =>
+          round.map((m) => ({
+            ...m,
+            aLabel: m.a ? labelOf(m.a) : null,
+            bLabel: m.b ? labelOf(m.b) : null,
+          }))
+        ),
+      }
+    : null;
+  return {
+    id: t.id,
+    eventId: t.eventId,
+    mode: t.mode,
+    format: t.format,
+    numGroups: t.numGroups,
+    advancePerGroup: t.advancePerGroup,
+    status: t.status,
+    teams: t.teams,
+    entrants,
+    seedOrder: t.seedOrder,
+    groups,
+    knockout,
+    standings: t.standings ? t.standings.map((s) => ({ ...s, label: labelOf(s.entrantId) })) : null,
+    pointsAwardedAt: t.pointsAwardedAt,
+  };
+}
+
+// Public: lightweight list of every event that has a tournament, for the
+// public Tournaments nav tab. Kept separate from serializeTournament (which
+// resolves the full bracket/groups) since the listing page only needs enough
+// to render one row per event - the full detail is fetched afterward via
+// GET /api/tournaments/:eventId once a member picks one.
+app.get("/api/tournaments", (req, res) => {
+  const db = readDb();
+  const list = (db.tournaments || [])
+    .map((t) => {
+      const ev = db.events.find((e) => e.id === t.eventId);
+      if (!ev) return null;
+      return {
+        eventId: t.eventId,
+        nameEn: ev.nameEn,
+        nameAr: ev.nameAr,
+        sport: ev.sport,
+        date: ev.date,
+        mode: t.mode,
+        format: t.format,
+        status: t.status,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  res.json(list);
+});
+
+app.get("/api/tournaments/:eventId", (req, res) => {
+  const db = readDb();
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.json({ tournament: null });
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+app.get("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const t = findTournament(db, eventId);
+  const registrations = db.registrations
+    .filter((r) => r.eventId === eventId && !r.waitlisted)
+    .map((r) => {
+      const member = db.members[r.membershipNumber];
+      return { id: r.id, label: r.dependentName || (member ? member.name : "Member") };
+    });
+  if (!t) return res.json({ tournament: null, registrations });
+  res.json({ tournament: serializeTournament(db, t), registrations });
+});
+
+app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const event = db.events.find((e) => e.id === eventId);
+  if (!event) return res.status(404).json({ error: "No such event" });
+  if (findTournament(db, eventId)) {
+    return res.status(400).json({ error: "This event already has a tournament - delete it first to start over" });
+  }
+  const { mode, format } = req.body;
+  if (mode !== "individual" && mode !== "team") return res.status(400).json({ error: "mode must be 'individual' or 'team'" });
+  if (format !== "knockout" && format !== "groups") return res.status(400).json({ error: "format must be 'knockout' or 'groups'" });
+  let numGroups = null;
+  let advancePerGroup = null;
+  if (format === "groups") {
+    numGroups = Number(req.body.numGroups);
+    advancePerGroup = Number(req.body.advancePerGroup);
+    if (!Number.isInteger(numGroups) || numGroups < 2) return res.status(400).json({ error: "numGroups must be a whole number of at least 2" });
+    if (!Number.isInteger(advancePerGroup) || advancePerGroup < 1) return res.status(400).json({ error: "advancePerGroup must be a whole number of at least 1" });
+  }
+  const t = {
+    id: db.nextIds.tournament++,
+    eventId,
+    mode,
+    format,
+    numGroups,
+    advancePerGroup,
+    teams: [],
+    seedOrder: [],
+    nextMatchId: 1,
+    groups: null,
+    knockout: null,
+    standings: null,
+    pointsAwardedAt: null,
+    status: mode === "team" ? "team-setup" : "seeding",
+  };
+  reconcileSeedOrder(db, t);
+  db.tournaments.push(t);
+  writeDb(db);
+  res.status(201).json({ tournament: serializeTournament(db, t) });
+});
+
+app.delete("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const before = db.tournaments.length;
+  db.tournaments = db.tournaments.filter((t) => t.eventId !== eventId);
+  if (db.tournaments.length === before) return res.status(404).json({ error: "No tournament for this event" });
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+// Team mode only: groups this event's registrations into named teams. Any
+// registration not included in a team is simply left out of the
+// tournament. Replaces the whole team list each call (simplest mental
+// model - re-submit the full set to make a change).
+app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const t = findTournament(db, eventId);
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.mode !== "team") return res.status(400).json({ error: "This tournament is not in team mode" });
+  const teamsInput = Array.isArray(req.body.teams) ? req.body.teams : null;
+  if (!teamsInput) return res.status(400).json({ error: "teams must be an array" });
+  const validRegIds = new Set(
+    db.registrations.filter((r) => r.eventId === eventId && !r.waitlisted).map((r) => r.id)
+  );
+  const seen = new Set();
+  const teams = [];
+  for (const raw of teamsInput) {
+    const name = (raw.name || "").trim();
+    const memberIds = Array.isArray(raw.memberIds) ? raw.memberIds.map(Number).filter((id) => validRegIds.has(id)) : [];
+    if (!name || !memberIds.length) continue;
+    for (const id of memberIds) {
+      if (seen.has(id)) return res.status(400).json({ error: `Registration ${id} is assigned to more than one team` });
+      seen.add(id);
+    }
+    // Team ids only need to be unique within this one tournament (not
+    // globally), so a plain 1-based index each time the team list is
+    // (re)submitted is enough - simple and fully deterministic.
+    teams.push({ id: "team" + (teams.length + 1), name, memberIds });
+  }
+  if (teams.length < 2) return res.status(400).json({ error: "Define at least 2 teams (with at least one member each) before continuing" });
+  t.teams = teams;
+  t.status = "seeding";
+  reconcileSeedOrder(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const entrants = reconcileSeedOrder(db, t);
+  const validIds = new Set(entrants.map((e) => e.id));
+  const order = Array.isArray(req.body.seedOrder) ? req.body.seedOrder : null;
+  if (!order || order.length !== entrants.length || !order.every((id) => validIds.has(id))) {
+    return res.status(400).json({ error: "seedOrder must contain exactly the current entrant ids, each once" });
+  }
+  t.seedOrder = order;
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Builds the group stage (format=groups) or the knockout bracket directly
+// (format=knockout) from the current seed order. One-way door: once
+// generated, entrants are locked in for this tournament (delete and
+// recreate to change who's playing).
+app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.groups || t.knockout) return res.status(400).json({ error: "Already generated for this tournament" });
+  const entrants = reconcileSeedOrder(db, t);
+  if (entrants.length < 2) return res.status(400).json({ error: "Need at least 2 entrants to generate a tournament" });
+  if (t.format === "groups") {
+    if (entrants.length < t.numGroups * 2) {
+      return res.status(400).json({ error: `Need at least ${t.numGroups * 2} entrants for ${t.numGroups} groups (2 per group minimum)` });
+    }
+    buildGroups(t, t.seedOrder, t.numGroups);
+  } else {
+    buildKnockoutRounds(t, t.seedOrder);
+  }
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
+  const { matchId, winnerId } = req.body;
+  let match = null;
+  for (const g of t.groups) {
+    match = g.matches.find((m) => m.id === Number(matchId));
+    if (match) break;
+  }
+  if (!match) return res.status(404).json({ error: "No such match" });
+  if (winnerId !== null && winnerId !== match.a && winnerId !== match.b) {
+    return res.status(400).json({ error: "winnerId must be one of the match's two entrants, or null for a draw" });
+  }
+  match.result = { winnerId };
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
+  if (t.knockout) return res.status(400).json({ error: "Knockout stage already generated" });
+  const undecided = t.groups.reduce((sum, g) => sum + g.matches.filter((m) => !m.result).length, 0);
+  if (undecided > 0) {
+    return res.status(400).json({ error: `${undecided} group-stage match(es) still need a result before the knockout stage can be generated` });
+  }
+  const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder));
+  const qualifiers = [];
+  for (let rank = 0; rank < t.advancePerGroup; rank++) {
+    const tierGroups = rank % 2 === 0 ? standingsPerGroup : [...standingsPerGroup].reverse();
+    for (const standing of tierGroups) {
+      if (standing[rank]) qualifiers.push(standing[rank].entrantId);
+    }
+  }
+  if (qualifiers.length < 2) return res.status(400).json({ error: "Not enough qualifiers to build a knockout stage" });
+  buildKnockoutRounds(t, qualifiers);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t || !t.knockout) return res.status(404).json({ error: "No knockout bracket for this event" });
+  const { roundIndex, matchId, winnerId, score } = req.body;
+  const rIdx = Number(roundIndex);
+  const round = t.knockout.rounds[rIdx];
+  if (!round) return res.status(404).json({ error: "No such round" });
+  const mIdx = round.findIndex((m) => m.id === Number(matchId));
+  if (mIdx === -1) return res.status(404).json({ error: "No such match" });
+  const match = round[mIdx];
+  if (match.bye) return res.status(400).json({ error: "This match was already decided by a bye" });
+  if (!match.a || !match.b) return res.status(400).json({ error: "Both entrants aren't set for this match yet" });
+  if (winnerId !== match.a && winnerId !== match.b) {
+    return res.status(400).json({ error: "winnerId must be one of the match's two entrants" });
+  }
+  match.score = typeof score === "string" ? score.slice(0, 60) : "";
+  propagateKnockoutWinner(t, rIdx, mIdx, winnerId);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Applies final tournament standings to reg.position on every registration
+// belonging to each ranked entrant (every member of a team gets the team's
+// finishing rank) - the exact same field the manual Enter Event Results
+// admin tool uses, so points calculate identically either way. Safe to
+// call more than once (e.g. after fixing a mistake); each call just
+// re-applies the current standings.
+app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const t = findTournament(db, eventId);
+  if (!t || t.status !== "completed") return res.status(400).json({ error: "This tournament isn't completed yet" });
+  const entrants = tournamentEntrants(db, t);
+  let updated = 0;
+  for (const standing of t.standings) {
+    const entrant = entrants.find((e) => e.id === standing.entrantId);
+    if (!entrant) continue;
+    for (const regId of entrant.registrationIds) {
+      const reg = db.registrations.find((r) => r.id === regId && r.eventId === eventId);
+      if (reg) {
+        reg.position = standing.rank;
+        updated++;
+      }
+    }
+  }
+  t.pointsAwardedAt = new Date().toISOString();
+  writeDb(db);
+  res.json({ updated, tournament: serializeTournament(db, t) });
 });
 
 // Turns multer upload errors (file too big, wrong type, etc.) into a JSON
