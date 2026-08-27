@@ -1949,12 +1949,14 @@ function renderMembersTable() {
   }).join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
-      <th></th><th>${t("colMembershipNumber")}</th><th>${t("colName")}</th>
+      <th><input type="checkbox" data-select-all-members title="${escapeAttr(t("selectAllLabel"))}" aria-label="${escapeAttr(t("selectAllLabel"))}" /></th>
+      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th>
       <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colHasAccount")}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
   applyMembersSearchFilter();
+  updateMembersSelectAllState();
 }
 
 // Filtering hides/shows existing rows rather than rebuilding the table, so
@@ -1964,8 +1966,35 @@ function applyMembersSearchFilter() {
   document.querySelectorAll("#members-table [data-member-row]").forEach((row) => {
     row.classList.toggle("hidden", !!query && !row.dataset.search.includes(query));
   });
+  updateMembersSelectAllState();
 }
 document.getElementById("members-search").addEventListener("input", applyMembersSearchFilter);
+
+// "Select all" only ever acts on the currently *visible* (unfiltered-out)
+// rows - checking it while a search is active shouldn't silently select
+// members the admin can't even see. Individually (un)checking a row keeps
+// the header checkbox's checked/indeterminate state honest too.
+function visibleMemberCheckboxes() {
+  return Array.from(
+    document.querySelectorAll("#members-table [data-member-row]:not(.hidden) [data-member-checkbox]")
+  );
+}
+function updateMembersSelectAllState() {
+  const selectAll = document.querySelector("#members-table [data-select-all-members]");
+  if (!selectAll) return;
+  const visible = visibleMemberCheckboxes();
+  const checkedCount = visible.filter((cb) => cb.checked).length;
+  selectAll.checked = visible.length > 0 && checkedCount === visible.length;
+  selectAll.indeterminate = checkedCount > 0 && checkedCount < visible.length;
+}
+document.getElementById("members-table").addEventListener("change", (e) => {
+  if (e.target.matches("[data-select-all-members]")) {
+    visibleMemberCheckboxes().forEach((cb) => (cb.checked = e.target.checked));
+    updateMembersSelectAllState();
+  } else if (e.target.matches("[data-member-checkbox]")) {
+    updateMembersSelectAllState();
+  }
+});
 
 document.getElementById("members-export-btn").addEventListener("click", () => {
   window.location.href = "/api/admin/members/export";
@@ -2023,6 +2052,7 @@ document.getElementById("members-invite-btn").addEventListener("click", async ()
     if (result.overCapacity > 0) text += ` ${t("overCapacityByLabel")} ${fmt(result.overCapacity)}.`;
     showMsg(msg, text, true);
     document.querySelectorAll("#members-table [data-member-checkbox]:checked").forEach((cb) => (cb.checked = false));
+    updateMembersSelectAllState();
     loadAdminDashboard();
     loadAdminOverview();
     loadAdminDirectory();

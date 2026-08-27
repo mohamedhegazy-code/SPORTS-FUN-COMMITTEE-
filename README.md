@@ -436,7 +436,11 @@ time:
   registration required from them. This is meant for "we already know
   who's coming, let's just add them" rather than everyday sign-ups.
   Search narrows the list by name, membership number, or phone; tick the
-  ones to invite, then click "Invite selected members." Anyone already
+  ones to invite (or use the checkbox in the table header to select or
+  clear every currently-visible row at once — it only touches rows the
+  search box isn't hiding, and shows a dashed/indeterminate state if some
+  but not all visible rows are ticked), then click "Invite selected
+  members." Anyone already
   registered (or already on the waiting list) for that event is silently
   skipped rather than duplicated. Like promoting from the waiting list,
   inviting deliberately does not enforce the event's maximum capacity —
