@@ -17,6 +17,37 @@ function pointsVisible() {
 }
 
 // ----------------------------------------------------------------- utils --
+// Exact server-side messages that mean "your session cookie no longer maps
+// to a live session" (as opposed to e.g. a wrong password, which is also a
+// 401 but not a session problem). Used below to recognize a session that
+// died server-side - most commonly because the server restarted (every
+// deploy does this) and, since sessions used to live only in memory, wiped
+// everyone's login. Sessions now persist across restarts (see server.js),
+// but a session can still legitimately expire after its 7-day TTL, so this
+// handling stays regardless.
+const SESSION_EXPIRED_MESSAGES = new Set(["Please sign in", "Please log in", "Not signed in"]);
+// True once we've already flipped the UI back to a logged-out state for the
+// *current* staleness - reset the moment a fresh login happens (see
+// checkSession/staff-login/member-login) - so a burst of requests that all
+// fail at once (e.g. the six-odd calls admin's initial load fires) shows the
+// user one clear "please log in again" moment instead of repeatedly
+// clobbering whatever they're doing.
+let SESSION_EXPIRY_HANDLED = false;
+function handleSessionExpired() {
+  if (SESSION_EXPIRY_HANDLED) return;
+  SESSION_EXPIRY_HANDLED = true;
+  CURRENT_SESSION = null;
+  if (typeof updateUIForSession === "function") updateUIForSession();
+  // updateUIForSession() just switched the Admin/Gate Scanner tabs back to
+  // their sign-in screens - leave the reason sitting right there on the
+  // login form itself (rather than only on whatever card the failed request
+  // happened to be on), so a returning admin sees why they were logged out
+  // instead of an unexplained empty login box.
+  ["admin-lock-msg", "scan-lock-msg"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) showMsg(el, t("errSessionExpired"), false);
+  });
+}
 async function api(path, opts = {}) {
   // FormData bodies (photo uploads) must NOT get a manual Content-Type - the
   // browser needs to set its own multipart boundary, or the server can't
@@ -28,12 +59,15 @@ async function api(path, opts = {}) {
   const res = await fetch(path, Object.assign({ credentials: "include" }, opts, { headers }));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const isSessionExpiry = res.status === 401 && SESSION_EXPIRED_MESSAGES.has(data.error);
     // Keep the full response body on the thrown error (not just .message) -
     // some error responses (e.g. "already registered") carry extra fields
     // like a still-valid QR code that callers want to use instead of just
     // showing the error text.
-    const err = new Error(data.error || t("errGeneric"));
+    const err = new Error(isSessionExpiry ? t("errSessionExpired") : data.error || t("errGeneric"));
     err.data = data;
+    err.sessionExpired = isSessionExpiry;
+    if (isSessionExpiry) handleSessionExpired();
     throw err;
   }
   return data;
@@ -398,6 +432,7 @@ async function checkSession() {
   try {
     const data = await api("/api/auth/me");
     CURRENT_SESSION = data;
+    SESSION_EXPIRY_HANDLED = false;
   } catch (e) {
     CURRENT_SESSION = null;
   }
@@ -1006,6 +1041,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
       body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
+    SESSION_EXPIRY_HANDLED = false;
     document.getElementById("su-password").value = "";
     msg.classList.remove("show");
     updateUIForSession();
@@ -1028,6 +1064,7 @@ document.getElementById("li-submit").addEventListener("click", async () => {
       body: JSON.stringify({ membershipNumber, password }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
+    SESSION_EXPIRY_HANDLED = false;
     document.getElementById("li-password").value = "";
     msg.classList.remove("show");
     updateUIForSession();
@@ -1544,6 +1581,7 @@ async function staffLogin(usernameId, passwordId, msgId) {
       body: JSON.stringify({ username, password }),
     });
     CURRENT_SESSION = { type: "staff", staff: result.staff };
+    SESSION_EXPIRY_HANDLED = false;
     document.getElementById(passwordId).value = "";
     msg.classList.remove("show");
     updateUIForSession();

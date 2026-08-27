@@ -76,6 +76,16 @@ directly. The login screen has a short reminder of this under the login
 form. Staff/admin accounts don't have self-service reset either — another
 admin can remove and re-add their account if they're ever locked out.
 
+**Login sessions survive deploys.** Every login (member or staff) is kept in
+memory for speed, and mirrored into `data/db.json` so a server restart —
+which happens on every deploy — doesn't sign everyone out. Sessions still
+expire normally after 7 days. If a session ever does go stale (expired, or
+the account behind it was removed), the app now notices automatically: it
+signs that browser out, shows "Your session has expired — please log in
+again" right on the login form, and switches the Admin/Gate Scanner tabs
+back to their sign-in screens — instead of leaving a logged-in-looking page
+where every action silently fails with an error.
+
 ## QR-code check-in (gate scanning)
 
 When a member registers, they get a QR code on the confirmation screen

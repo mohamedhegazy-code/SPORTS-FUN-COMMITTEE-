@@ -267,6 +267,7 @@ function ensureDbFile() {
     newsPosts: [],
     spotlights: [],
     settings: { pointsVisibleToMembers: true },
+    sessions: {},
   };
   fs.writeFileSync(DB_PATH, JSON.stringify(starterDb, null, 2));
   console.log(`No data file found at ${DB_PATH} - created a fresh starter database.`);
@@ -332,6 +333,7 @@ function readDb() {
   if (!HEX_COLOR_RE.test(db.settings.theme.primaryColor || "")) db.settings.theme.primaryColor = "#8B0000";
   if (!HEX_COLOR_RE.test(db.settings.theme.accentColor || "")) db.settings.theme.accentColor = "#C9A227";
   if (typeof db.settings.theme.logoUrl !== "string") db.settings.theme.logoUrl = "";
+  db.sessions = db.sessions || {};
   return db;
 }
 function writeDb(db) {
@@ -350,14 +352,49 @@ function publicStaff(s) {
 }
 
 // ------------------------------------------------------------- sessions ---
-// In-memory only (lost on restart, which just means everyone logs back in -
-// fine for this prototype's scale). Not persisted to db.json on purpose:
-// sessions are ephemeral, unlike the data they authenticate access to.
+// Kept in memory for fast per-request lookups, and mirrored into db.json
+// (db.sessions) so a server restart - which happens on every deploy - does
+// not silently sign everyone out mid-task. Loaded back into memory once at
+// startup (below); persisted again on every login/logout (rare events, so a
+// full db read+write each time is cheap). Expired sessions are pruned from
+// memory on the next request that touches them, same as before; a stale
+// expired entry left behind in db.json is harmless since the startup loader
+// filters by expiresAt.
 const sessions = new Map(); // token -> { type: 'member'|'staff', id, role, expiresAt }
+
+function persistSessions() {
+  try {
+    const db = readDb();
+    db.sessions = {};
+    for (const [token, session] of sessions.entries()) {
+      db.sessions[token] = session;
+    }
+    writeDb(db);
+  } catch (e) {
+    console.error("Failed to persist sessions:", e);
+  }
+}
+(function loadPersistedSessions() {
+  try {
+    const db = readDb();
+    const now = Date.now();
+    let restored = 0;
+    for (const [token, session] of Object.entries(db.sessions || {})) {
+      if (session && session.expiresAt > now) {
+        sessions.set(token, session);
+        restored++;
+      }
+    }
+    if (restored) console.log(`Restored ${restored} session(s) from the last run.`);
+  } catch (e) {
+    console.error("Failed to load persisted sessions:", e);
+  }
+})();
 
 function createSession(type, id, role) {
   const token = crypto.randomBytes(24).toString("hex");
   sessions.set(token, { type, id, role, expiresAt: Date.now() + SESSION_TTL_MS });
+  persistSessions();
   return token;
 }
 function getSession(req) {
@@ -607,7 +644,7 @@ app.post("/api/auth/staff-login", loginRateLimiter, async (req, res) => {
 
 app.post("/api/auth/logout", (req, res) => {
   const token = req.cookies && req.cookies[SESSION_COOKIE];
-  if (token) sessions.delete(token);
+  if (token && sessions.delete(token)) persistSessions();
   res.clearCookie(SESSION_COOKIE);
   res.json({ ok: true });
 });
