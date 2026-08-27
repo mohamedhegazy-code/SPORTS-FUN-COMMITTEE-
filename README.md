@@ -362,7 +362,17 @@ Every row on the Event dashboard has a **Manage** button that opens that
 event's hub — a single panel for everything an admin or staff member needs
 to run the event, instead of hunting across separate cards:
 
-- **Attendance**, right at the top: the same search-and-check-in roster as
+- **Register a member**, right at the top: type-to-search any existing
+  member (by name, membership number, or phone) and click **Add** to give
+  them a confirmed spot and QR code for this event immediately — no
+  self-service sign-up needed from them. A member already registered (or
+  waitlisted) for the event shows an "Already registered" badge instead of
+  an Add button. This calls the same bulk-invite endpoint as the Members
+  tab's "Invite members to an event" (just for one member at a time), so
+  it has the same behavior: it doesn't enforce the event's maximum
+  capacity, trusting the admin's judgment since they're looking right at
+  the attendance numbers.
+- **Attendance**, below that: the same search-and-check-in roster as
   the Gate Scanner's manual check-in (they share the same rendering code
   and the same `/api/staff/events/:eventId/roster` /
   `/api/checkin/manual` endpoints), plus quick attendance stats

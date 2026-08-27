@@ -1828,9 +1828,75 @@ async function openAdminEventHub(eventId, label) {
   document.getElementById("hub-checkin-msg").textContent = "";
   document.getElementById("admin-hub-stats").innerHTML = "";
   document.getElementById("admin-hub-tournament-summary").innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
-  await Promise.all([loadHubRoster(), loadHubTournamentSummary()]);
+  document.getElementById("hub-add-member-search").value = "";
+  document.getElementById("hub-add-member-results").innerHTML = "";
+  document.getElementById("hub-add-member-msg").textContent = "";
+  // MEMBERS_DATA normally only gets loaded when the admin visits the
+  // Members tab - fetch it here too (harmless if already loaded elsewhere)
+  // so "Register a member" can search the full roster right away.
+  await Promise.all([loadHubRoster(), loadHubTournamentSummary(), loadAdminMembers()]);
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
+
+// "Register a member" (per-event hub): a lightweight type-to-search that
+// adds one member directly to HUB_EVENT_ID via the same bulk-invite
+// endpoint the Members tab uses (just with a single membershipNumber) -
+// same "confirmed spot + QR, no self-service flow" behavior, just reachable
+// from the event you're already looking at instead of a separate tab.
+function renderHubAddMemberResults() {
+  const wrap = document.getElementById("hub-add-member-results");
+  const query = (document.getElementById("hub-add-member-search").value || "").trim().toLowerCase();
+  if (!query) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const registeredNumbers = new Set(HUB_ROSTER.map((r) => r.membershipNumber));
+  const matches = MEMBERS_DATA.filter((m) =>
+    `${m.name} ${m.membershipNumber} ${m.phone}`.toLowerCase().includes(query)
+  ).slice(0, 20);
+  if (!matches.length) {
+    wrap.innerHTML = `<p class="hint-note">${escapeAttr(t("noMembersFound"))}</p>`;
+    return;
+  }
+  wrap.innerHTML = matches
+    .map((m) => {
+      const already = registeredNumbers.has(m.membershipNumber);
+      return `<div class="hub-add-member-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);">
+        <span>${escapeAttr(m.name)} <span style="color:var(--muted);">— ${escapeAttr(m.membershipNumber)}</span></span>
+        ${
+          already
+            ? `<span class="badge Approved">${escapeAttr(t("alreadyRegisteredLabel"))}</span>`
+            : `<button class="secondary small" data-hub-add-member="${escapeAttr(m.membershipNumber)}">${escapeAttr(t("btnAdd"))}</button>`
+        }
+      </div>`;
+    })
+    .join("");
+}
+document.getElementById("hub-add-member-search").addEventListener("input", renderHubAddMemberResults);
+document.getElementById("hub-add-member-results").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-hub-add-member]");
+  if (!btn) return;
+  btn.disabled = true;
+  const msg = document.getElementById("hub-add-member-msg");
+  try {
+    const result = await api(`/api/admin/events/${HUB_EVENT_ID}/invite`, {
+      method: "POST",
+      body: JSON.stringify({ membershipNumbers: [btn.dataset.hubAddMember] }),
+    });
+    if (result.invited.length) {
+      showMsg(msg, `${result.invited[0].name} ${t("hubMemberAddedLabel")}`, true);
+    } else if (result.skipped.length) {
+      showMsg(msg, result.skipped[0].reason, false);
+    }
+    await loadHubRoster(true);
+    renderHubAddMemberResults();
+    loadAdminDashboard();
+    loadAdminOverview();
+  } catch (err) {
+    showMsg(msg, err.message, false);
+    btn.disabled = false;
+  }
+});
 async function loadHubRoster(preserveMsg) {
   const wrap = document.getElementById("hub-checkin-wrap");
   const msg = document.getElementById("hub-checkin-msg");
