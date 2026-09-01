@@ -2704,6 +2704,44 @@ app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole("admin"),
   res.json({ tournament: serializeTournament(db, t) });
 });
 
+// Sets or changes courts/matchMinutes/startTime/breakMinutes, at any point
+// in the tournament's life - before anything is generated (same as filling
+// them in at creation), or after groups/knockout already exist. In the
+// latter case every match's court/time is wiped and recomputed from
+// scratch with the same scheduling algorithm used at generation time;
+// results and winners already recorded are untouched, only when/where each
+// still-to-play match happens moves.
+app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const courts = Number(req.body.courts);
+  const matchMinutes = Number(req.body.matchMinutes);
+  const startTime = req.body.startTime;
+  if (!Number.isInteger(courts) || courts < 1) return res.status(400).json({ error: "Courts must be a whole number of at least 1" });
+  if (!Number.isInteger(matchMinutes) || matchMinutes < 1) return res.status(400).json({ error: "Minutes per match must be a whole number of at least 1" });
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(startTime || ""))) return res.status(400).json({ error: "Start time must be in HH:MM 24-hour format" });
+  let breakMinutes = 0;
+  if (req.body.breakMinutes !== undefined && req.body.breakMinutes !== "" && req.body.breakMinutes !== null) {
+    breakMinutes = Number(req.body.breakMinutes);
+    if (!Number.isInteger(breakMinutes) || breakMinutes < 0) return res.status(400).json({ error: "Break minutes must be a whole number of 0 or more" });
+  }
+  t.courts = courts;
+  t.matchMinutes = matchMinutes;
+  t.startTime = startTime;
+  t.breakMinutes = breakMinutes;
+  if (t.groups) {
+    t.groups.forEach((g) => g.matches.forEach((m) => { m.court = null; m.time = null; }));
+    scheduleGroupMatches(t);
+  }
+  if (t.knockout) {
+    t.knockout.rounds.forEach((round) => round.forEach((m) => { m.court = null; m.time = null; }));
+    scheduleKnockoutRounds(t);
+  }
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
 // Builds the group stage (format=groups) or the knockout bracket directly
 // (format=knockout) from the current seed order. One-way door: once
 // generated, entrants are locked in for this tournament (delete and
@@ -2828,6 +2866,20 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole("adm
   if (sa !== null && sb !== null && sa !== sb) finalWinnerId = sa > sb ? match.a : match.b;
   if (finalWinnerId !== match.a && finalWinnerId !== match.b) {
     return res.status(400).json({ error: "winnerId must be one of the match's two entrants" });
+  }
+  // Correcting a score without changing who won is always safe. Changing
+  // who won is only safe if the next round hasn't already been decided off
+  // the old winner - otherwise the next match (and anything past it) would
+  // be left pointing at a matchup that never happened. Ask the admin to
+  // undo/edit that later match first rather than silently cascading.
+  if (match.winnerId && finalWinnerId !== match.winnerId) {
+    const nextRound = t.knockout.rounds[rIdx + 1];
+    if (nextRound) {
+      const nextMatch = nextRound[Math.floor(mIdx / 2)];
+      if (nextMatch.winnerId) {
+        return res.status(400).json({ error: "Can't change the winner - the next round's match already has a result. Edit or undo that match first." });
+      }
+    }
   }
   match.scoreA = sa;
   match.scoreB = sb;

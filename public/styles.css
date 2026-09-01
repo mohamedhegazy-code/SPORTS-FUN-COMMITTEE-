@@ -611,6 +611,27 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 .tourn-attendance-actions button { padding: 3px 8px; font-size: 0.7rem; border: 1px solid var(--border); background: #fff; border-radius: 999px; cursor: pointer; }
 .tourn-attendance-actions button.active { background: var(--red); color: #fff; border-color: var(--red); }
 .tourn-att-absent .tourn-attendance-name { color: var(--muted); text-decoration: line-through; }
+.tourn-att-status-badge { font-size: 0.7rem; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+
+.tourn-my-matches { margin: 4px 0 8px; font-size: 0.78rem; }
+.tourn-my-matches summary { cursor: pointer; color: var(--red); font-weight: 600; }
+.tourn-my-match {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 0; border-top: 1px dashed var(--border);
+}
+.tourn-my-match-stage { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.3px; }
+.tourn-my-match-opp { font-weight: 600; }
+.tourn-my-match-result { margin-inline-start: auto; }
+.tourn-my-match.win .tourn-my-match-result { color: #2e7d32; font-weight: 600; }
+.tourn-my-match.loss .tourn-my-match-result { color: var(--muted); }
+.tourn-my-match.draw .tourn-my-match-result { color: var(--gold, #b8860b); font-weight: 600; }
+.tourn-my-match.pending .tourn-my-match-result { color: var(--muted); font-style: italic; }
+
+.tourn-edit-score { margin-top: 6px; font-size: 0.75rem; }
+.tourn-edit-score summary { cursor: pointer; color: var(--muted); }
+.tourn-edit-score .tourn-score-entry, .tourn-edit-score .tourn-bracket-actions { margin-top: 6px; }
+
+.tourn-schedule-editor .grid-2 input { margin-top: 2px; }
 
 .lang-ar, .lang-en { display: block; }
 .lang-ar { direction: rtl; }
