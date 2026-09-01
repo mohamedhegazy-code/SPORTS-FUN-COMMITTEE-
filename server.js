@@ -2409,13 +2409,24 @@ function buildGroups(t, orderedEntrantIds, numGroups) {
   scheduleGroupMatches(t);
 }
 
-// 3 points for a win, 1 each for a draw, 0 for a loss. Ranked by points,
-// then goal difference, then goals scored, then each entrant's position in
-// the tournament's seed order (stands in for "lower team number" - stable
-// and always available, unlike head-to-head). Matches recorded before
-// scores existed in this app (result only has winnerId, no scoreA/scoreB)
-// still count fully for points/W-D-L, just contribute 0 to GF/GA/GD.
-function computeGroupStandings(group, seedOrder) {
+// Points-per-result default to 3 for a win, 1 each for a draw, 0 for a
+// loss, but are configurable per tournament (see pointsConfigOf below) so a
+// committee running a different sport/scoring convention can match it.
+// Ranked by points, then goal difference, then goals scored, then each
+// entrant's position in the tournament's seed order (stands in for "lower
+// team number" - stable and always available, unlike head-to-head). Matches
+// recorded before scores existed in this app (result only has winnerId, no
+// scoreA/scoreB) still count fully for points/W-D-L, just contribute 0 to
+// GF/GA/GD.
+function pointsConfigOf(t) {
+  return {
+    win: Number.isFinite(t.winPoints) ? t.winPoints : 3,
+    draw: Number.isFinite(t.drawPoints) ? t.drawPoints : 1,
+    loss: Number.isFinite(t.lossPoints) ? t.lossPoints : 0,
+  };
+}
+function computeGroupStandings(group, seedOrder, points) {
+  const pts = points || { win: 3, draw: 1, loss: 0 };
   const stat = {};
   group.entrantIds.forEach((id) => (stat[id] = { played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, points: 0 }));
   for (const m of group.matches) {
@@ -2433,13 +2444,14 @@ function computeGroupStandings(group, seedOrder) {
     if (m.result.winnerId === null) {
       stat[m.a].draws++;
       stat[m.b].draws++;
-      stat[m.a].points += 1;
-      stat[m.b].points += 1;
+      stat[m.a].points += pts.draw;
+      stat[m.b].points += pts.draw;
     } else {
       const loserId = m.result.winnerId === m.a ? m.b : m.a;
       stat[m.result.winnerId].wins++;
       stat[loserId].losses++;
-      stat[m.result.winnerId].points += 3;
+      stat[m.result.winnerId].points += pts.win;
+      stat[loserId].points += pts.loss;
     }
   }
   return [...group.entrantIds]
@@ -2465,7 +2477,7 @@ function serializeTournament(db, t) {
   const groups = t.groups
     ? t.groups.map((g) => ({
         entrantIds: g.entrantIds,
-        standings: computeGroupStandings(g, t.seedOrder).map((s) => ({ ...s, label: labelOf(s.entrantId) })),
+        standings: computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)).map((s) => ({ ...s, label: labelOf(s.entrantId) })),
         matches: g.matches.map((m) => ({ ...m, aLabel: labelOf(m.a), bLabel: labelOf(m.b) })),
       }))
     : null;
@@ -2504,6 +2516,10 @@ function serializeTournament(db, t) {
     format: t.format,
     numGroups: t.numGroups,
     advancePerGroup: t.advancePerGroup,
+    winPoints: pointsConfigOf(t).win,
+    drawPoints: pointsConfigOf(t).draw,
+    lossPoints: pointsConfigOf(t).loss,
+    availableHours: Number.isFinite(t.availableHours) ? t.availableHours : null,
     status: t.status,
     teams: t.teams,
     entrants,
@@ -2574,6 +2590,32 @@ app.get("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res)
   res.json({ tournament: serializeTournament(db, t), registrations });
 });
 
+// Validates the optional win/draw/loss point values and available-hours
+// field shared by tournament creation and the setup-editing endpoint below.
+// Every field is optional - a field left out of the request keeps whatever
+// value is passed in as its "current"/default. Returns { error } on a bad
+// value, otherwise the three point values (each defaulted if not given) and
+// availableHours (null if not given).
+function parseSetupFields(body, current) {
+  const result = { winPoints: current.winPoints, drawPoints: current.drawPoints, lossPoints: current.lossPoints, availableHours: current.availableHours };
+  for (const [key, label] of [["winPoints", "Points for a win"], ["drawPoints", "Points for a draw"], ["lossPoints", "Points for a loss"]]) {
+    if (body[key] === undefined || body[key] === "" || body[key] === null) continue;
+    const n = Number(body[key]);
+    if (!Number.isFinite(n) || n < 0) return { error: `${label} must be a number of 0 or more` };
+    result[key] = n;
+  }
+  if (body.availableHours === undefined) {
+    // field not sent at all - leave whatever was already there unchanged
+  } else if (body.availableHours === "" || body.availableHours === null) {
+    result.availableHours = null; // sent but blank - explicit clear
+  } else {
+    const h = Number(body.availableHours);
+    if (!Number.isFinite(h) || h <= 0) return { error: "Available hours must be a number greater than 0" };
+    result.availableHours = h;
+  }
+  return result;
+}
+
 app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
@@ -2614,6 +2656,8 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res
       if (!Number.isInteger(breakMinutes) || breakMinutes < 0) return res.status(400).json({ error: "Break minutes must be a whole number of 0 or more" });
     }
   }
+  const setup = parseSetupFields(req.body, { winPoints: 3, drawPoints: 1, lossPoints: 0, availableHours: null });
+  if (setup.error) return res.status(400).json({ error: setup.error });
   const t = {
     id: db.nextIds.tournament++,
     eventId,
@@ -2621,6 +2665,10 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res
     format,
     numGroups,
     advancePerGroup,
+    winPoints: setup.winPoints,
+    drawPoints: setup.drawPoints,
+    lossPoints: setup.lossPoints,
+    availableHours: setup.availableHours,
     courts,
     matchMinutes,
     startTime,
@@ -2726,10 +2774,17 @@ app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole("admin"), (
     breakMinutes = Number(req.body.breakMinutes);
     if (!Number.isInteger(breakMinutes) || breakMinutes < 0) return res.status(400).json({ error: "Break minutes must be a whole number of 0 or more" });
   }
+  const currentPts = pointsConfigOf(t);
+  const setup = parseSetupFields(req.body, { winPoints: currentPts.win, drawPoints: currentPts.draw, lossPoints: currentPts.loss, availableHours: t.availableHours });
+  if (setup.error) return res.status(400).json({ error: setup.error });
   t.courts = courts;
   t.matchMinutes = matchMinutes;
   t.startTime = startTime;
   t.breakMinutes = breakMinutes;
+  t.winPoints = setup.winPoints;
+  t.drawPoints = setup.drawPoints;
+  t.lossPoints = setup.lossPoints;
+  t.availableHours = setup.availableHours;
   if (t.groups) {
     t.groups.forEach((g) => g.matches.forEach((m) => { m.court = null; m.time = null; }));
     scheduleGroupMatches(t);
@@ -2821,7 +2876,7 @@ app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole("
   if (undecided > 0) {
     return res.status(400).json({ error: `${undecided} group-stage match(es) still need a result before the knockout stage can be generated` });
   }
-  const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder));
+  const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)));
   const qualifiers = [];
   for (let rank = 0; rank < t.advancePerGroup; rank++) {
     const tierGroups = rank % 2 === 0 ? standingsPerGroup : [...standingsPerGroup].reverse();

@@ -2781,6 +2781,24 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
 document.getElementById("tourn-body").addEventListener("change", (e) => {
   if (e.target.id === "tourn-format") toggleTournamentGroupFields();
 });
+// Live-recomputes the setup dashboard preview (see computeTournamentSetupPreview
+// above) on every keystroke/change to any field that feeds it, in either the
+// creation form or the post-creation schedule editor.
+const TOURN_CREATE_PREVIEW_FIELDS = new Set([
+  "tourn-mode", "tourn-format", "tourn-num-groups", "tourn-advance-per-group",
+  "tourn-win-points", "tourn-draw-points", "tourn-loss-points",
+  "tourn-courts", "tourn-match-minutes", "tourn-start-time", "tourn-break-minutes", "tourn-available-hours",
+]);
+const TOURN_EDIT_PREVIEW_FIELDS = new Set([
+  "tourn-edit-win-points", "tourn-edit-draw-points", "tourn-edit-loss-points",
+  "tourn-edit-courts", "tourn-edit-match-minutes", "tourn-edit-start-time", "tourn-edit-break-minutes", "tourn-edit-available-hours",
+]);
+function tournPreviewInputHandler(e) {
+  if (TOURN_CREATE_PREVIEW_FIELDS.has(e.target.id)) refreshCreateSetupPreview();
+  else if (TOURN_EDIT_PREVIEW_FIELDS.has(e.target.id)) refreshEditSetupPreview();
+}
+document.getElementById("tourn-body").addEventListener("input", tournPreviewInputHandler);
+document.getElementById("tourn-body").addEventListener("change", tournPreviewInputHandler);
 
 async function loadTournamentPanel(eventId) {
   TOURNAMENT_EVENT_ID = Number(eventId);
@@ -2801,6 +2819,7 @@ function renderTournamentBody() {
   if (!body) return;
   if (!TOURNAMENT_DATA) {
     body.innerHTML = renderTournamentCreateForm();
+    refreshCreateSetupPreview();
     return;
   }
   let inner = "";
@@ -2824,6 +2843,7 @@ function renderTournamentBody() {
     </div>
     ${inner}
   `;
+  if (TOURNAMENT_DATA.status !== "team-setup") refreshEditSetupPreview();
 }
 
 // Present/absent check-in for the actual players in this tournament -
@@ -2885,11 +2905,18 @@ function renderTournamentScheduleEditor() {
       <h4>${t("adminTournamentSchedule")}</h4>
       <p class="hint-note">${t("editScheduleHint")}</p>
       <div class="grid-2">
+        <div><label>${t("fieldWinPoints")}</label><input id="tourn-edit-win-points" type="number" min="0" value="${TOURNAMENT_DATA.winPoints}" /></div>
+        <div><label>${t("fieldDrawPoints")}</label><input id="tourn-edit-draw-points" type="number" min="0" value="${TOURNAMENT_DATA.drawPoints}" /></div>
+        <div><label>${t("fieldLossPoints")}</label><input id="tourn-edit-loss-points" type="number" min="0" value="${TOURNAMENT_DATA.lossPoints}" /></div>
+      </div>
+      <div class="grid-2" style="margin-top:8px;">
         <div><label>${t("fieldCourts")}</label><input id="tourn-edit-courts" type="number" min="1" value="${s ? s.courts : ""}" /></div>
         <div><label>${t("fieldMatchMinutes")}</label><input id="tourn-edit-match-minutes" type="number" min="1" value="${s ? s.matchMinutes : ""}" /></div>
         <div><label>${t("fieldStartTime")}</label><input id="tourn-edit-start-time" type="time" value="${s ? escapeAttr(s.startTime) : ""}" /></div>
         <div><label>${t("fieldBreakMinutes")}</label><input id="tourn-edit-break-minutes" type="number" min="0" value="${s ? s.breakMinutes : 0}" /></div>
+        <div><label>${t("fieldAvailableHours")}</label><input id="tourn-edit-available-hours" type="number" min="0" step="0.5" value="${TOURNAMENT_DATA.availableHours != null ? TOURNAMENT_DATA.availableHours : ""}" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
       </div>
+      <div id="tourn-setup-preview-edit"></div>
       <button class="secondary" style="margin-top:8px;" data-tourn-action="update-schedule">${t("btnUpdateSchedule")}</button>
     </div>
   `;
@@ -2900,6 +2927,10 @@ async function updateTournamentSchedule() {
   const matchMinutes = document.getElementById("tourn-edit-match-minutes").value.trim();
   const startTime = document.getElementById("tourn-edit-start-time").value.trim();
   const breakMinutes = document.getElementById("tourn-edit-break-minutes").value.trim();
+  const winPoints = document.getElementById("tourn-edit-win-points").value.trim();
+  const drawPoints = document.getElementById("tourn-edit-draw-points").value.trim();
+  const lossPoints = document.getElementById("tourn-edit-loss-points").value.trim();
+  const availableHours = document.getElementById("tourn-edit-available-hours").value.trim();
   if (!courts || !matchMinutes || !startTime) return showMsg(msg, t("scheduleFieldsRequired"), false);
   try {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/schedule", {
@@ -2909,6 +2940,10 @@ async function updateTournamentSchedule() {
         matchMinutes: Number(matchMinutes),
         startTime,
         breakMinutes: breakMinutes === "" ? 0 : Number(breakMinutes),
+        winPoints: winPoints === "" ? undefined : Number(winPoints),
+        drawPoints: drawPoints === "" ? undefined : Number(drawPoints),
+        lossPoints: lossPoints === "" ? undefined : Number(lossPoints),
+        availableHours: availableHours === "" ? null : Number(availableHours),
       }),
     });
     TOURNAMENT_DATA = data.tournament;
@@ -2930,6 +2965,208 @@ async function setTournamentAttendance(registrationId, status) {
   } catch (e) {
     showMsg(msg, e.message, false);
   }
+}
+
+// ---- Live "setup dashboard" calculator, matching the committee's own
+// tournament-planning spreadsheet: as the admin fills in groups/qualifiers,
+// courts/minutes/start time and win-draw-loss points, this recomputes match
+// counts, time slots, total duration, expected finish time and a plain-
+// language readiness message - all before anything is actually generated.
+// Pure function, no server round-trip, so it updates on every keystroke.
+function tournNextPowerOfTwo(n) {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+function tournCombinations2(n) {
+  return n > 1 ? (n * (n - 1)) / 2 : 0;
+}
+function tournMinutesLabel(mins) {
+  if (!mins || mins <= 0) return "0m";
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+function tournTimeStrToMinutes(hhmm) {
+  const [h, m] = String(hhmm || "").split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+function tournMinutesToTimeStr(mins) {
+  const wrapped = ((Math.round(mins) % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+}
+
+function computeTournamentSetupPreview(cfg) {
+  const activeTeams = Math.max(0, Number(cfg.activeTeams) || 0);
+  const courts = Number(cfg.courts) > 0 ? Number(cfg.courts) : 0;
+  const matchMinutes = Number(cfg.matchMinutes) > 0 ? Number(cfg.matchMinutes) : 0;
+  const numGroups = Number(cfg.numGroups) > 0 ? Number(cfg.numGroups) : 0;
+  const advancePerGroup = Number(cfg.advancePerGroup) > 0 ? Number(cfg.advancePerGroup) : 0;
+
+  let groupStageMatches = 0;
+  let knockoutTeams = 0;
+  let avgTeamsPerGroup = 0;
+  if (cfg.format === "groups" && numGroups > 0) {
+    avgTeamsPerGroup = activeTeams / numGroups;
+    const base = Math.floor(activeTeams / numGroups);
+    const remainder = activeTeams % numGroups;
+    groupStageMatches = remainder * tournCombinations2(base + 1) + (numGroups - remainder) * tournCombinations2(base);
+    knockoutTeams = Math.min(activeTeams, numGroups * advancePerGroup);
+  } else {
+    knockoutTeams = activeTeams;
+  }
+
+  const bracketSize = knockoutTeams >= 2 ? tournNextPowerOfTwo(knockoutTeams) : 0;
+  const byes = bracketSize ? bracketSize - knockoutTeams : 0;
+  const roundReal = [];
+  if (bracketSize >= 2) {
+    let pairs = bracketSize / 2;
+    roundReal.push(Math.max(0, pairs - byes));
+    pairs = Math.floor(pairs / 2);
+    while (pairs >= 1) {
+      roundReal.push(pairs);
+      pairs = Math.floor(pairs / 2);
+    }
+  }
+  const knockoutMatches = roundReal.reduce((a, b) => a + b, 0);
+  const totalMatches = groupStageMatches + knockoutMatches;
+
+  const groupStageSlots = courts > 0 ? Math.ceil(groupStageMatches / courts) : 0;
+  const knockoutSlots = courts > 0 ? roundReal.reduce((sum, r) => sum + Math.ceil(r / courts), 0) : 0;
+  const totalSlots = groupStageSlots + knockoutSlots;
+
+  const hasBreak = groupStageMatches > 0 && knockoutMatches > 0;
+  const totalMinutes = matchMinutes > 0 ? totalSlots * matchMinutes + (hasBreak ? Number(cfg.breakMinutes) || 0 : 0) : 0;
+
+  const availableHours = Number(cfg.availableHours) > 0 ? Number(cfg.availableHours) : null;
+  const availableMinutes = availableHours != null ? availableHours * 60 : null;
+  const fitsAvailableHours = availableMinutes != null && totalMinutes > 0 ? totalMinutes <= availableMinutes : null;
+  const oneDayCapacity = availableMinutes != null && matchMinutes > 0 && courts > 0 ? Math.floor(availableMinutes / matchMinutes) * courts : null;
+
+  let expectedFinish = null;
+  if (cfg.startTime && totalMinutes > 0) {
+    const startMins = tournTimeStrToMinutes(cfg.startTime);
+    if (startMins != null) expectedFinish = tournMinutesToTimeStr(startMins + totalMinutes);
+  }
+
+  let ready = false;
+  if (cfg.format === "groups") {
+    ready = numGroups >= 2 && advancePerGroup >= 1 && activeTeams >= numGroups * 2 && knockoutTeams >= 2;
+  } else {
+    ready = activeTeams >= 2;
+  }
+
+  return {
+    activeTeams,
+    avgTeamsPerGroup,
+    groupStageMatches,
+    knockoutTeams,
+    knockoutMatches,
+    totalMatches,
+    groupStageSlots,
+    knockoutSlots,
+    totalMinutes,
+    fitsAvailableHours,
+    oneDayCapacity,
+    expectedFinish,
+    ready,
+  };
+}
+
+// Renders the computed numbers as a friendly little stat-tile dashboard,
+// reusing the app's existing .stat-row/.stat tiles so it feels like the rest
+// of the admin panel rather than a bolted-on spreadsheet.
+function setupPreviewHtml(p, cfg) {
+  const durationLabel = tournMinutesLabel(p.totalMinutes);
+  const readyBadge = p.ready
+    ? `<span class="tourn-setup-ready ok">${t("statConfigReady").replace("{count}", p.knockoutTeams)}</span>`
+    : `<span class="tourn-setup-ready pending">${cfg.mode === "team" && p.activeTeams === 0 ? t("statConfigNeedTeams") : t("statConfigNeedMore")}</span>`;
+  const fitsLine =
+    p.fitsAvailableHours === null
+      ? ""
+      : `<div class="stat"><div class="n">${p.fitsAvailableHours ? "✓" : "✗"}</div><div class="l">${t("statFitsHours")}</div></div>`;
+  const activeLabel = cfg.mode === "team" ? t("statActiveTeams") : t("statActivePlayers");
+  const slotsLine = p.groupStageSlots || p.knockoutSlots
+    ? `
+      <div class="stat-row" style="margin-top:10px;">
+        <div class="stat"><div class="n">${p.groupStageSlots}</div><div class="l">${t("statGroupSlots")}</div></div>
+        <div class="stat"><div class="n">${p.knockoutSlots}</div><div class="l">${t("statKnockoutSlots")}</div></div>
+        ${p.oneDayCapacity != null ? `<div class="stat"><div class="n">${p.oneDayCapacity}</div><div class="l">${t("statOneDayCapacity")}</div></div>` : ""}
+      </div>`
+    : "";
+  return `
+    <div class="tourn-setup-dashboard">
+      <h5>${t("setupDashboardTitle")} ${readyBadge}</h5>
+      <p class="hint-note">${t("setupDashboardHint")}</p>
+      <div class="stat-row">
+        <div class="stat"><div class="n">${p.activeTeams}</div><div class="l">${activeLabel}</div></div>
+        <div class="stat"><div class="n">${p.groupStageMatches}</div><div class="l">${t("statGroupMatches")}</div></div>
+        <div class="stat"><div class="n">${p.knockoutMatches}</div><div class="l">${t("statKnockoutMatches")}</div></div>
+        <div class="stat"><div class="n">${p.totalMatches}</div><div class="l">${t("statTotalMatches")}</div></div>
+      </div>
+      <div class="stat-row" style="margin-top:10px;">
+        <div class="stat"><div class="n">${durationLabel}</div><div class="l">${t("statEstDuration")}</div></div>
+        <div class="stat"><div class="n">${p.expectedFinish ? formatTimeOfDay(p.expectedFinish) : "—"}</div><div class="l">${t("statExpectedFinish")}</div></div>
+        ${fitsLine}
+      </div>
+      ${slotsLine}
+    </div>
+  `;
+}
+
+function tournSetupCfgFromCreateForm() {
+  const mode = document.getElementById("tourn-mode") ? document.getElementById("tourn-mode").value : "individual";
+  const format = document.getElementById("tourn-format") ? document.getElementById("tourn-format").value : "knockout";
+  const activeTeams = mode === "team" ? 0 : TOURNAMENT_REGISTRATIONS.length;
+  return {
+    mode,
+    format,
+    activeTeams,
+    numGroups: byIdVal("tourn-num-groups"),
+    advancePerGroup: byIdVal("tourn-advance-per-group"),
+    courts: byIdVal("tourn-courts"),
+    matchMinutes: byIdVal("tourn-match-minutes"),
+    startTime: byIdVal("tourn-start-time"),
+    breakMinutes: byIdVal("tourn-break-minutes"),
+    availableHours: byIdVal("tourn-available-hours"),
+  };
+}
+function tournSetupCfgFromEditor() {
+  const mode = TOURNAMENT_DATA.mode;
+  const activeTeams = TOURNAMENT_DATA.entrants ? TOURNAMENT_DATA.entrants.length : 0;
+  return {
+    mode,
+    format: TOURNAMENT_DATA.format,
+    activeTeams,
+    numGroups: TOURNAMENT_DATA.numGroups,
+    advancePerGroup: TOURNAMENT_DATA.advancePerGroup,
+    courts: byIdVal("tourn-edit-courts"),
+    matchMinutes: byIdVal("tourn-edit-match-minutes"),
+    startTime: byIdVal("tourn-edit-start-time"),
+    breakMinutes: byIdVal("tourn-edit-break-minutes"),
+    availableHours: byIdVal("tourn-edit-available-hours"),
+  };
+}
+function byIdVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value : "";
+}
+function refreshCreateSetupPreview() {
+  const el = document.getElementById("tourn-setup-preview");
+  if (!el) return;
+  const cfg = tournSetupCfgFromCreateForm();
+  el.innerHTML = setupPreviewHtml(computeTournamentSetupPreview(cfg), cfg);
+}
+function refreshEditSetupPreview() {
+  const el = document.getElementById("tourn-setup-preview-edit");
+  if (!el || !TOURNAMENT_DATA) return;
+  const cfg = tournSetupCfgFromEditor();
+  el.innerHTML = setupPreviewHtml(computeTournamentSetupPreview(cfg), cfg);
 }
 
 function renderTournamentCreateForm() {
@@ -2956,13 +3193,20 @@ function renderTournamentCreateForm() {
       <div><label>${t("fieldNumGroups")}</label><input id="tourn-num-groups" type="number" min="2" value="2" /></div>
       <div><label>${t("fieldAdvancePerGroup")}</label><input id="tourn-advance-per-group" type="number" min="1" value="2" /></div>
     </div>
+    <div class="grid-2">
+      <div><label>${t("fieldWinPoints")}</label><input id="tourn-win-points" type="number" min="0" value="3" /></div>
+      <div><label>${t("fieldDrawPoints")}</label><input id="tourn-draw-points" type="number" min="0" value="1" /></div>
+      <div><label>${t("fieldLossPoints")}</label><input id="tourn-loss-points" type="number" min="0" value="0" /></div>
+    </div>
     <p class="hint-note" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
     <div class="grid-2">
       <div><label>${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
       <div><label>${t("fieldMatchMinutes")}</label><input id="tourn-match-minutes" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
       <div><label>${t("fieldStartTime")}</label><input id="tourn-start-time" type="time" /></div>
       <div><label>${t("fieldBreakMinutes")}</label><input id="tourn-break-minutes" type="number" min="0" placeholder="0" /></div>
+      <div><label>${t("fieldAvailableHours")}</label><input id="tourn-available-hours" type="number" min="0" step="0.5" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
     </div>
+    <div id="tourn-setup-preview"></div>
     <button class="primary" style="margin-top:10px;" data-tourn-action="create-tournament">${t("btnCreateTournament")}</button>
   `;
 }
@@ -2989,6 +3233,14 @@ async function createTournament() {
     const breakMinutes = document.getElementById("tourn-break-minutes").value.trim();
     if (breakMinutes) body.breakMinutes = Number(breakMinutes);
   }
+  const winPoints = document.getElementById("tourn-win-points").value.trim();
+  const drawPoints = document.getElementById("tourn-draw-points").value.trim();
+  const lossPoints = document.getElementById("tourn-loss-points").value.trim();
+  const availableHours = document.getElementById("tourn-available-hours").value.trim();
+  if (winPoints) body.winPoints = Number(winPoints);
+  if (drawPoints) body.drawPoints = Number(drawPoints);
+  if (lossPoints) body.lossPoints = Number(lossPoints);
+  if (availableHours) body.availableHours = Number(availableHours);
   try {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "POST", body: JSON.stringify(body) });
     TOURNAMENT_DATA = data.tournament;

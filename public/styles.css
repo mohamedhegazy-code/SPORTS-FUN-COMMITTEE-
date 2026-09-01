@@ -633,6 +633,22 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 
 .tourn-schedule-editor .grid-2 input { margin-top: 2px; }
 
+.tourn-setup-dashboard {
+  margin-top: 14px; padding: 12px 14px; background: #fafaf8;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.tourn-setup-dashboard h5 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tourn-setup-dashboard .hint-note { margin-top: 0; margin-bottom: 10px; }
+.tourn-setup-dashboard .stat-row { gap: 10px; }
+.tourn-setup-dashboard .stat { min-width: 90px; padding: 8px 10px; }
+.tourn-setup-dashboard .stat .n { font-size: 1.15rem; }
+.tourn-setup-ready {
+  display: inline-block; padding: 3px 10px; border-radius: 20px;
+  font-size: 0.72rem; font-weight: 600;
+}
+.tourn-setup-ready.ok { background: #d4edda; color: var(--green); }
+.tourn-setup-ready.pending { background: #fff3cd; color: var(--amber); }
+
 .lang-ar, .lang-en { display: block; }
 .lang-ar { direction: rtl; }
 .lang-en { color: var(--muted); font-size: 0.88em; margin-top: 2px; font-weight: 400; }
