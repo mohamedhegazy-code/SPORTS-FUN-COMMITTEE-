@@ -2143,8 +2143,24 @@ app.put("/api/settings/theme", requireStaffRole("admin"), uploadLogo.single("log
 //     seedOrder: [entrantId,...],        // admin-controlled order, used to
 //                                        // seed groups or the bracket
 //     nextMatchId,
-//     groups: [{ entrantIds:[...], matches:[{id,a,b,result}] }] | null,
-//     knockout: { rounds: [ [{id,a,b,winnerId,score,bye}, ...], ... ] } | null,
+//     courts, matchMinutes, startTime, breakMinutes,   // optional court/
+//                                        // timing setup - null unless the
+//                                        // admin filled all three of
+//                                        // courts/matchMinutes/startTime in;
+//                                        // when set, every match generated
+//                                        // from then on gets a court+time
+//                                        // (see scheduleGroupMatches/
+//                                        // scheduleKnockoutRounds below)
+//     lastGroupSlotEnd,                 // minutes-after-midnight the group
+//                                        // stage's last scheduled slot ends
+//                                        // - only set when scheduled; lets
+//                                        // the knockout stage's schedule
+//                                        // start breakMinutes after it
+//     attendance: { [registrationId]: "present"|"absent" },  // "not_yet" is
+//                                        // just the absence of a key here
+//     groups: [{ entrantIds:[...], matches:[{id,a,b,result,court,time}] }] | null,
+//                                        // result: {scoreA,scoreB,winnerId}
+//     knockout: { rounds: [ [{id,a,b,winnerId,scoreA,scoreB,note,court,time,bye}, ...], ... ] } | null,
 //     standings: [{entrantId, rank}] | null,   // set once knockout completes
 //     pointsAwardedAt: isoString | null,
 //     status: "setup"|"team-setup"|"seeding"|"groups"|"knockout"|"completed" }
@@ -2266,7 +2282,7 @@ function buildKnockoutRounds(t, orderedEntrantIds) {
     const seedB = slots[i + 1];
     const a = seedA <= n ? orderedEntrantIds[seedA - 1] : null;
     const b = seedB <= n ? orderedEntrantIds[seedB - 1] : null;
-    const match = { id: t.nextMatchId++, a, b, winnerId: null, score: "", bye: false };
+    const match = { id: t.nextMatchId++, a, b, winnerId: null, scoreA: null, scoreB: null, note: "", bye: false, court: null, time: null };
     if (a && !b) {
       match.winnerId = a;
       match.bye = true;
@@ -2281,13 +2297,14 @@ function buildKnockoutRounds(t, orderedEntrantIds) {
   for (let r = 1; r < numRounds; r++) {
     const roundMatches = [];
     for (let i = 0; i < prevCount / 2; i++) {
-      roundMatches.push({ id: t.nextMatchId++, a: null, b: null, winnerId: null, score: "", bye: false });
+      roundMatches.push({ id: t.nextMatchId++, a: null, b: null, winnerId: null, scoreA: null, scoreB: null, note: "", bye: false, court: null, time: null });
     }
     rounds.push(roundMatches);
     prevCount = roundMatches.length;
   }
   t.knockout = { rounds };
   t.status = "knockout";
+  scheduleKnockoutRounds(t);
   // Propagate round-0 byes forward. A later round's match is only ever a
   // bye itself if BOTH its feeders were byes, which the loop below reaches
   // naturally on its next iteration since propagateKnockoutWinner is called
@@ -2297,38 +2314,144 @@ function buildKnockoutRounds(t, orderedEntrantIds) {
   });
 }
 
+// ---- court + time scheduling (optional - only runs when the tournament
+// was set up with courts/matchMinutes/startTime) -------------------------
+function timeStrToMinutes(hhmm) {
+  const [h, m] = String(hhmm).split(":").map(Number);
+  return h * 60 + m;
+}
+function minutesToTimeStr(mins) {
+  const wrapped = ((Math.round(mins) % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+}
+function hasSchedule(t) {
+  return !!(t.courts && t.matchMinutes && t.startTime);
+}
+
+// Fills every court in each time slot with a queued match whose two
+// entrants aren't already playing elsewhere in that same slot, so nobody
+// is double-booked. Matches are pulled from the queue interleaved one
+// round per group (group A match 1, group B match 1, ... group A match 2,
+// ...) so groups progress roughly together instead of one group finishing
+// long before the others start. Leaves t.lastGroupSlotEnd (minutes after
+// midnight) so the knockout stage's schedule can continue right after it.
+function scheduleGroupMatches(t) {
+  if (!hasSchedule(t)) return;
+  const maxLen = Math.max(0, ...t.groups.map((g) => g.matches.length));
+  const queue = [];
+  for (let r = 0; r < maxLen; r++) {
+    for (const g of t.groups) if (g.matches[r]) queue.push(g.matches[r]);
+  }
+  let slotStart = timeStrToMinutes(t.startTime);
+  while (queue.length) {
+    const busy = new Set();
+    let court = 0;
+    let placedAny = false;
+    while (court < t.courts) {
+      const idx = queue.findIndex((m) => !busy.has(m.a) && !busy.has(m.b));
+      if (idx === -1) break;
+      const m = queue.splice(idx, 1)[0];
+      m.court = court + 1;
+      m.time = minutesToTimeStr(slotStart);
+      busy.add(m.a);
+      busy.add(m.b);
+      court++;
+      placedAny = true;
+    }
+    slotStart += t.matchMinutes;
+    if (!placedAny) break; // safety net - shouldn't happen, avoids an infinite loop
+  }
+  t.lastGroupSlotEnd = slotStart;
+}
+
+// Assigns each knockout round its own consecutive block of time slots
+// (a later round can't start until the round before it can actually be
+// played), cycling matches across courts within a round. Bye matches don't
+// need a real time slot since nothing is actually played. Starts right
+// after the group stage's schedule (plus breakMinutes) when this
+// tournament had a group stage, otherwise at the tournament's start time.
+function scheduleKnockoutRounds(t) {
+  if (!hasSchedule(t)) return;
+  let slotStart =
+    t.format === "groups" && t.lastGroupSlotEnd != null
+      ? t.lastGroupSlotEnd + (t.breakMinutes || 0)
+      : timeStrToMinutes(t.startTime);
+  for (const round of t.knockout.rounds) {
+    const real = round.filter((m) => !m.bye);
+    let i = 0;
+    let localSlot = slotStart;
+    while (i < real.length) {
+      for (let c = 0; c < t.courts && i < real.length; c++, i++) {
+        real[i].court = c + 1;
+        real[i].time = minutesToTimeStr(localSlot);
+      }
+      localSlot += t.matchMinutes;
+    }
+    slotStart = localSlot;
+  }
+  t.estimatedFinishMinutes = slotStart;
+}
+
 function buildGroups(t, orderedEntrantIds, numGroups) {
   const groups = Array.from({ length: numGroups }, () => ({ entrantIds: [], matches: [] }));
   orderedEntrantIds.forEach((id, i) => groups[i % numGroups].entrantIds.push(id));
   for (const g of groups) {
     for (let i = 0; i < g.entrantIds.length; i++) {
       for (let j = i + 1; j < g.entrantIds.length; j++) {
-        g.matches.push({ id: t.nextMatchId++, a: g.entrantIds[i], b: g.entrantIds[j], result: null });
+        g.matches.push({ id: t.nextMatchId++, a: g.entrantIds[i], b: g.entrantIds[j], result: null, court: null, time: null });
       }
     }
   }
   t.groups = groups;
   t.status = "groups";
+  scheduleGroupMatches(t);
 }
 
-// 3 points for a win, 1 each for a draw, 0 for a loss - ties broken by each
-// entrant's position in the tournament's seed order (stable, not goal
-// difference or head-to-head, which this app doesn't track).
+// 3 points for a win, 1 each for a draw, 0 for a loss. Ranked by points,
+// then goal difference, then goals scored, then each entrant's position in
+// the tournament's seed order (stands in for "lower team number" - stable
+// and always available, unlike head-to-head). Matches recorded before
+// scores existed in this app (result only has winnerId, no scoreA/scoreB)
+// still count fully for points/W-D-L, just contribute 0 to GF/GA/GD.
 function computeGroupStandings(group, seedOrder) {
-  const pts = {};
-  group.entrantIds.forEach((id) => (pts[id] = 0));
+  const stat = {};
+  group.entrantIds.forEach((id) => (stat[id] = { played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, points: 0 }));
   for (const m of group.matches) {
     if (!m.result) continue;
+    const sa = Number.isFinite(m.result.scoreA) ? m.result.scoreA : null;
+    const sb = Number.isFinite(m.result.scoreB) ? m.result.scoreB : null;
+    stat[m.a].played++;
+    stat[m.b].played++;
+    if (sa !== null && sb !== null) {
+      stat[m.a].gf += sa;
+      stat[m.a].ga += sb;
+      stat[m.b].gf += sb;
+      stat[m.b].ga += sa;
+    }
     if (m.result.winnerId === null) {
-      pts[m.a] += 1;
-      pts[m.b] += 1;
+      stat[m.a].draws++;
+      stat[m.b].draws++;
+      stat[m.a].points += 1;
+      stat[m.b].points += 1;
     } else {
-      pts[m.result.winnerId] += 3;
+      const loserId = m.result.winnerId === m.a ? m.b : m.a;
+      stat[m.result.winnerId].wins++;
+      stat[loserId].losses++;
+      stat[m.result.winnerId].points += 3;
     }
   }
   return [...group.entrantIds]
-    .sort((a, b) => (pts[b] !== pts[a] ? pts[b] - pts[a] : seedOrder.indexOf(a) - seedOrder.indexOf(b)))
-    .map((id) => ({ entrantId: id, points: pts[id] }));
+    .sort((a, b) => {
+      const sa = stat[a], sb = stat[b];
+      if (sb.points !== sa.points) return sb.points - sa.points;
+      const gda = sa.gf - sa.ga, gdb = sb.gf - sb.ga;
+      if (gdb !== gda) return gdb - gda;
+      if (sb.gf !== sa.gf) return sb.gf - sa.gf;
+      return seedOrder.indexOf(a) - seedOrder.indexOf(b);
+    })
+    .map((id) => ({ entrantId: id, ...stat[id], gd: stat[id].gf - stat[id].ga }));
 }
 
 // Serializes a tournament for the client, resolving entrant ids to display
@@ -2357,6 +2480,23 @@ function serializeTournament(db, t) {
         ),
       }
     : null;
+  // Attendance is stored keyed by registrationId; resolve it to a small
+  // array with each player's name attached so the frontend never has to
+  // cross-reference members/registrations itself, same as entrants/labels.
+  const attendanceList = entrants.flatMap((e) =>
+    e.registrationIds.map((regId) => {
+      const reg = db.registrations.find((r) => r.id === regId);
+      const member = reg ? db.members[reg.membershipNumber] : null;
+      const name = reg ? reg.dependentName || (member ? member.name : "Member") : "Member";
+      return {
+        registrationId: regId,
+        entrantId: e.id,
+        entrantLabel: e.label,
+        name,
+        status: (t.attendance || {})[regId] || "not_yet",
+      };
+    })
+  );
   return {
     id: t.id,
     eventId: t.eventId,
@@ -2372,6 +2512,16 @@ function serializeTournament(db, t) {
     knockout,
     standings: t.standings ? t.standings.map((s) => ({ ...s, label: labelOf(s.entrantId) })) : null,
     pointsAwardedAt: t.pointsAwardedAt,
+    schedule: hasSchedule(t)
+      ? {
+          courts: t.courts,
+          matchMinutes: t.matchMinutes,
+          startTime: t.startTime,
+          breakMinutes: t.breakMinutes || 0,
+          estimatedFinishTime: t.estimatedFinishMinutes != null ? minutesToTimeStr(t.estimatedFinishMinutes) : null,
+        }
+      : null,
+    attendance: attendanceList,
   };
 }
 
@@ -2395,6 +2545,7 @@ app.get("/api/tournaments", (req, res) => {
         mode: t.mode,
         format: t.format,
         status: t.status,
+        hasSchedule: hasSchedule(t),
       };
     })
     .filter(Boolean)
@@ -2442,6 +2593,27 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res
     if (!Number.isInteger(numGroups) || numGroups < 2) return res.status(400).json({ error: "numGroups must be a whole number of at least 2" });
     if (!Number.isInteger(advancePerGroup) || advancePerGroup < 1) return res.status(400).json({ error: "advancePerGroup must be a whole number of at least 1" });
   }
+  // Court/timing setup is entirely optional - fill in all three of
+  // courts/matchMinutes/startTime to get an auto-generated schedule, or
+  // leave them out for a tournament with no assigned courts or times
+  // (matches just get recorded whenever they're actually played).
+  let courts = null;
+  let matchMinutes = null;
+  let startTime = null;
+  let breakMinutes = 0;
+  const anyScheduleField = req.body.courts !== undefined || req.body.matchMinutes !== undefined || req.body.startTime !== undefined;
+  if (anyScheduleField) {
+    courts = Number(req.body.courts);
+    matchMinutes = Number(req.body.matchMinutes);
+    startTime = req.body.startTime;
+    if (!Number.isInteger(courts) || courts < 1) return res.status(400).json({ error: "Courts must be a whole number of at least 1" });
+    if (!Number.isInteger(matchMinutes) || matchMinutes < 1) return res.status(400).json({ error: "Minutes per match must be a whole number of at least 1" });
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(startTime || ""))) return res.status(400).json({ error: "Start time must be in HH:MM 24-hour format" });
+    if (req.body.breakMinutes !== undefined && req.body.breakMinutes !== "") {
+      breakMinutes = Number(req.body.breakMinutes);
+      if (!Number.isInteger(breakMinutes) || breakMinutes < 0) return res.status(400).json({ error: "Break minutes must be a whole number of 0 or more" });
+    }
+  }
   const t = {
     id: db.nextIds.tournament++,
     eventId,
@@ -2449,6 +2621,10 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res
     format,
     numGroups,
     advancePerGroup,
+    courts,
+    matchMinutes,
+    startTime,
+    breakMinutes,
     teams: [],
     seedOrder: [],
     nextMatchId: 1,
@@ -2456,6 +2632,7 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res
     knockout: null,
     standings: null,
     pointsAwardedAt: null,
+    attendance: {},
     status: mode === "team" ? "team-setup" : "seeding",
   };
   reconcileSeedOrder(db, t);
@@ -2554,17 +2731,45 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole("admin"
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
-  const { matchId, winnerId } = req.body;
+  const { matchId, scoreA, scoreB } = req.body;
   let match = null;
   for (const g of t.groups) {
     match = g.matches.find((m) => m.id === Number(matchId));
     if (match) break;
   }
   if (!match) return res.status(404).json({ error: "No such match" });
-  if (winnerId !== null && winnerId !== match.a && winnerId !== match.b) {
-    return res.status(400).json({ error: "winnerId must be one of the match's two entrants, or null for a draw" });
+  const sa = Number(scoreA);
+  const sb = Number(scoreB);
+  if (!Number.isInteger(sa) || sa < 0 || !Number.isInteger(sb) || sb < 0) {
+    return res.status(400).json({ error: "scoreA and scoreB must both be whole numbers of 0 or more" });
   }
-  match.result = { winnerId };
+  const winnerId = sa === sb ? null : sa > sb ? match.a : match.b;
+  match.result = { scoreA: sa, scoreB: sb, winnerId };
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Present/absent check-in for the players actually in this tournament
+// (every registrationId behind every entrant - in team mode that's every
+// team member, not just the team as a whole). Separate from the event's
+// own gate-scanner check-in, which is about arriving at the venue at all
+// rather than being ready to play a specific match. "not_yet" is just the
+// absence of a key, so clearing it back to not_yet removes the entry.
+app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const { registrationId, status } = req.body;
+  if (!["present", "absent", "not_yet"].includes(status)) {
+    return res.status(400).json({ error: "status must be 'present', 'absent' or 'not_yet'" });
+  }
+  const entrants = tournamentEntrants(db, t);
+  const validRegIds = new Set(entrants.flatMap((e) => e.registrationIds));
+  const regId = Number(registrationId);
+  if (!validRegIds.has(regId)) return res.status(400).json({ error: "That registration isn't part of this tournament" });
+  if (!t.attendance) t.attendance = {};
+  if (status === "not_yet") delete t.attendance[regId];
+  else t.attendance[regId] = status;
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
@@ -2596,7 +2801,7 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole("adm
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.knockout) return res.status(404).json({ error: "No knockout bracket for this event" });
-  const { roundIndex, matchId, winnerId, score } = req.body;
+  const { roundIndex, matchId, winnerId, scoreA, scoreB, note } = req.body;
   const rIdx = Number(roundIndex);
   const round = t.knockout.rounds[rIdx];
   if (!round) return res.status(404).json({ error: "No such round" });
@@ -2605,11 +2810,29 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole("adm
   const match = round[mIdx];
   if (match.bye) return res.status(400).json({ error: "This match was already decided by a bye" });
   if (!match.a || !match.b) return res.status(400).json({ error: "Both entrants aren't set for this match yet" });
-  if (winnerId !== match.a && winnerId !== match.b) {
+  // Scores are optional (an admin can just declare a winner with no score
+  // entered), but when both are given and unambiguous they decide the
+  // winner themselves - a knockout match can't end in a draw, so a tied
+  // score (extra time still level, going to penalties) needs an explicit
+  // winnerId from the admin, same as when no score is entered at all.
+  let sa = null, sb = null;
+  if (scoreA !== undefined && scoreA !== null && scoreA !== "") {
+    sa = Number(scoreA);
+    if (!Number.isInteger(sa) || sa < 0) return res.status(400).json({ error: "scoreA must be a whole number of 0 or more" });
+  }
+  if (scoreB !== undefined && scoreB !== null && scoreB !== "") {
+    sb = Number(scoreB);
+    if (!Number.isInteger(sb) || sb < 0) return res.status(400).json({ error: "scoreB must be a whole number of 0 or more" });
+  }
+  let finalWinnerId = winnerId;
+  if (sa !== null && sb !== null && sa !== sb) finalWinnerId = sa > sb ? match.a : match.b;
+  if (finalWinnerId !== match.a && finalWinnerId !== match.b) {
     return res.status(400).json({ error: "winnerId must be one of the match's two entrants" });
   }
-  match.score = typeof score === "string" ? score.slice(0, 60) : "";
-  propagateKnockoutWinner(t, rIdx, mIdx, winnerId);
+  match.scoreA = sa;
+  match.scoreB = sb;
+  match.note = typeof note === "string" ? note.slice(0, 60) : "";
+  propagateKnockoutWinner(t, rIdx, mIdx, finalWinnerId);
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });

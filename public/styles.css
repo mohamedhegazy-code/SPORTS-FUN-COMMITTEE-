@@ -565,10 +565,16 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
   font-size: 0.82rem; padding: 6px 0; border-top: 1px dashed var(--border); flex-wrap: wrap;
 }
-.tourn-match-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.tourn-match-actions { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 .tourn-match-actions button { padding: 3px 8px; font-size: 0.72rem; }
 .tourn-match-result { color: var(--red); font-weight: 600; }
 .tourn-match.decided { color: var(--muted); }
+.tourn-match-time { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
+.tourn-table-scroll { overflow-x: auto; }
+
+.tourn-score-entry { display: flex; align-items: center; gap: 4px; }
+.tourn-score-input { width: 44px; padding: 3px 4px; font-size: 0.78rem; text-align: center; }
+.tourn-ko-note { width: 100%; padding: 4px 6px; font-size: 0.72rem; margin: 4px 0; box-sizing: border-box; }
 
 .tourn-bracket { display: flex; gap: 22px; overflow-x: auto; padding-bottom: 8px; }
 .tourn-bracket-round { display: flex; flex-direction: column; justify-content: space-around; gap: 16px; min-width: 190px; }
@@ -576,19 +582,35 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 .tourn-bracket-match {
   border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden;
 }
+.tourn-bracket-time { padding: 4px 10px 0; font-size: 0.7rem; color: var(--muted); font-weight: 600; text-align: center; }
 .tourn-bracket-slot { padding: 7px 10px; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
 .tourn-bracket-slot:last-of-type { border-bottom: none; }
 .tourn-bracket-slot.winner { font-weight: 700; color: var(--red); background: #fff9ec; }
-.tourn-bracket-actions { display: flex; border-top: 1px solid var(--border); }
-.tourn-bracket-actions button {
-  flex: 1; border: none; border-radius: 0; background: #fff; color: var(--red);
-  padding: 6px 4px; font-size: 0.72rem; cursor: pointer; border-inline-start: 1px solid var(--border);
+.tourn-bracket-actions { border-top: 1px solid var(--border); padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+.tourn-bracket-actions .tourn-score-entry { justify-content: center; }
+.tourn-bracket-winner-btns { display: flex; gap: 4px; margin-top: 2px; }
+.tourn-bracket-winner-btns button {
+  flex: 1; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--red);
+  padding: 5px 4px; font-size: 0.72rem; cursor: pointer;
 }
-.tourn-bracket-actions button:first-child { border-inline-start: none; }
-.tourn-bracket-actions button:hover { background: #fdf3e3; }
+.tourn-bracket-winner-btns button:hover { background: #fdf3e3; }
 .tourn-bracket-result, .tourn-bracket-pending {
   padding: 6px 10px; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border); text-align: center;
 }
+
+.tourn-attendance h4 { margin: 0 0 10px; font-size: 0.9rem; color: var(--red-dark); }
+.tourn-attendance-team { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; background: #fff; }
+.tourn-attendance-team h5 { margin: 0 0 6px; font-size: 0.82rem; }
+.tourn-att-complete { color: #2e7d32; font-weight: 600; font-size: 0.72rem; }
+.tourn-attendance-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: 0.82rem; padding: 5px 0; border-top: 1px dashed var(--border); flex-wrap: wrap;
+}
+.tourn-attendance-team .tourn-attendance-row:first-of-type { border-top: none; }
+.tourn-attendance-actions { display: flex; gap: 4px; }
+.tourn-attendance-actions button { padding: 3px 8px; font-size: 0.7rem; border: 1px solid var(--border); background: #fff; border-radius: 999px; cursor: pointer; }
+.tourn-attendance-actions button.active { background: var(--red); color: #fff; border-color: var(--red); }
+.tourn-att-absent .tourn-attendance-name { color: var(--muted); text-decoration: line-through; }
 
 .lang-ar, .lang-en { display: block; }
 .lang-ar { direction: rtl; }

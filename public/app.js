@@ -2771,12 +2771,11 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "move-entrant") moveTournamentEntrant(btn.dataset.entrantId, Number(btn.dataset.dir));
   else if (action === "randomize-seed") randomizeTournamentSeed();
   else if (action === "generate-tournament") generateTournament();
-  else if (action === "group-result")
-    recordTournamentGroupResult(Number(btn.dataset.matchId), btn.dataset.winnerId === undefined ? null : btn.dataset.winnerId);
+  else if (action === "group-result") recordTournamentGroupResult(btn);
   else if (action === "generate-knockout") generateTournamentKnockout();
-  else if (action === "knockout-result")
-    recordTournamentKnockoutResult(Number(btn.dataset.roundIndex), Number(btn.dataset.matchId), btn.dataset.winnerId);
+  else if (action === "knockout-result") recordTournamentKnockoutResult(btn);
   else if (action === "award-points") awardTournamentPoints();
+  else if (action === "set-attendance") setTournamentAttendance(Number(btn.dataset.registrationId), btn.dataset.status);
 });
 document.getElementById("tourn-body").addEventListener("change", (e) => {
   if (e.target.id === "tourn-format") toggleTournamentGroupFields();
@@ -2809,16 +2808,80 @@ function renderTournamentBody() {
   else if (TOURNAMENT_DATA.status === "groups") inner = renderTournamentGroups();
   else if (TOURNAMENT_DATA.status === "knockout") inner = renderTournamentBracket();
   else if (TOURNAMENT_DATA.status === "completed") inner = renderTournamentBracket() + renderTournamentStandings();
+  if (TOURNAMENT_DATA.status !== "team-setup") inner += renderTournamentAttendance();
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = TOURNAMENT_DATA.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+  const matchesLink = TOURNAMENT_DATA.schedule
+    ? `<a class="secondary small" style="margin-inline-start:8px;text-decoration:none;display:inline-block;" href="/matches.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
+    : "";
   body.innerHTML = `
     <div class="tourn-summary">
       <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
       <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+      ${matchesLink}
       <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
     </div>
     ${inner}
   `;
+}
+
+// Present/absent check-in for the actual players in this tournament -
+// every registration behind every entrant (in team mode, every member of
+// every team individually, not just the team as a whole). Shown from the
+// seeding step onward, once entrants are known, independent of match
+// status - marking someone present doesn't require the bracket to exist yet.
+function renderTournamentAttendance() {
+  const list = TOURNAMENT_DATA.attendance || [];
+  if (!list.length) return "";
+  const statusBtn = (regId, status, label, cls) =>
+    `<button class="secondary small ${cls}" data-tourn-action="set-attendance" data-registration-id="${regId}" data-status="${status}">${label}</button>`;
+  const rowHtml = (a) => `
+    <div class="tourn-attendance-row tourn-att-${a.status}">
+      <span class="tourn-attendance-name">${escapeAttr(a.name)}</span>
+      <span class="tourn-attendance-actions">
+        ${statusBtn(a.registrationId, "present", t("attStatusPresent"), a.status === "present" ? "active" : "")}
+        ${statusBtn(a.registrationId, "not_yet", t("attStatusNotYet"), a.status === "not_yet" ? "active" : "")}
+        ${statusBtn(a.registrationId, "absent", t("attStatusAbsent"), a.status === "absent" ? "active" : "")}
+      </span>
+    </div>`;
+  let body;
+  if (TOURNAMENT_DATA.mode === "team") {
+    const byEntrant = {};
+    list.forEach((a) => {
+      if (!byEntrant[a.entrantId]) byEntrant[a.entrantId] = { label: a.entrantLabel, rows: [] };
+      byEntrant[a.entrantId].rows.push(a);
+    });
+    body = Object.values(byEntrant)
+      .map(
+        (grp) => `<div class="tourn-attendance-team">
+          <h5>${escapeAttr(grp.label)}${grp.rows.every((r) => r.status === "present") ? ` <span class="tourn-att-complete">${t("teamAttendanceComplete")}</span>` : ""}</h5>
+          ${grp.rows.map(rowHtml).join("")}
+        </div>`
+      )
+      .join("");
+  } else {
+    body = list.map(rowHtml).join("");
+  }
+  const presentCount = list.filter((a) => a.status === "present").length;
+  return `
+    <div class="tourn-attendance" style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;">
+      <h4>${t("adminTournamentAttendance")} <span class="hint-note" style="display:inline;">(${presentCount}/${list.length})</span></h4>
+      ${body}
+    </div>
+  `;
+}
+async function setTournamentAttendance(registrationId, status) {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/attendance", {
+      method: "PUT",
+      body: JSON.stringify({ registrationId, status }),
+    });
+    TOURNAMENT_DATA = data.tournament;
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
 }
 
 function renderTournamentCreateForm() {
@@ -2845,6 +2908,13 @@ function renderTournamentCreateForm() {
       <div><label>${t("fieldNumGroups")}</label><input id="tourn-num-groups" type="number" min="2" value="2" /></div>
       <div><label>${t("fieldAdvancePerGroup")}</label><input id="tourn-advance-per-group" type="number" min="1" value="2" /></div>
     </div>
+    <p class="hint-note" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
+    <div class="grid-2">
+      <div><label>${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+      <div><label>${t("fieldMatchMinutes")}</label><input id="tourn-match-minutes" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+      <div><label>${t("fieldStartTime")}</label><input id="tourn-start-time" type="time" /></div>
+      <div><label>${t("fieldBreakMinutes")}</label><input id="tourn-break-minutes" type="number" min="0" placeholder="0" /></div>
+    </div>
     <button class="primary" style="margin-top:10px;" data-tourn-action="create-tournament">${t("btnCreateTournament")}</button>
   `;
 }
@@ -2860,6 +2930,16 @@ async function createTournament() {
   if (format === "groups") {
     body.numGroups = Number(document.getElementById("tourn-num-groups").value);
     body.advancePerGroup = Number(document.getElementById("tourn-advance-per-group").value);
+  }
+  const courts = document.getElementById("tourn-courts").value.trim();
+  const matchMinutes = document.getElementById("tourn-match-minutes").value.trim();
+  const startTime = document.getElementById("tourn-start-time").value.trim();
+  if (courts || matchMinutes || startTime) {
+    body.courts = Number(courts);
+    body.matchMinutes = Number(matchMinutes);
+    body.startTime = startTime;
+    const breakMinutes = document.getElementById("tourn-break-minutes").value.trim();
+    if (breakMinutes) body.breakMinutes = Number(breakMinutes);
   }
   try {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "POST", body: JSON.stringify(body) });
@@ -2995,34 +3075,49 @@ async function generateTournament() {
   }
 }
 
+// Small "Court 1 · 19:30" badge shown next to a match once the tournament
+// has courts/matchMinutes/startTime set; matches created before scheduling
+// existed (or a tournament with no schedule at all) just show nothing here.
+function matchTimeBadge(m) {
+  if (!m.court || !m.time) return "";
+  return `<span class="tourn-match-time">${escapeAttr(t("courtLabel"))} ${m.court} &middot; ${escapeAttr(m.time)}</span>`;
+}
 function renderTournamentGroups() {
   const groupsHtml = TOURNAMENT_DATA.groups
     .map((g, gi) => {
       const standingsRows = g.standings
-        .map((s, i) => `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.points}</td></tr>`)
+        .map(
+          (s, i) =>
+            `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.gf}</td><td>${s.ga}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`
+        )
         .join("");
       const matchesHtml = g.matches
         .map((m) => {
+          const timeBadge = matchTimeBadge(m);
           if (m.result) {
             const resultText =
               m.result.winnerId === null
                 ? t("matchDraw")
                 : `${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
-            return `<div class="tourn-match decided"><span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)}</span><span class="tourn-match-result">${resultText}</span></div>`;
+            return `<div class="tourn-match decided">
+              <span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)} ${timeBadge}</span>
+              <span class="tourn-match-result">${m.result.scoreA} - ${m.result.scoreB} &middot; ${resultText}</span>
+            </div>`;
           }
           return `<div class="tourn-match">
-            <span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)}</span>
-            <span class="tourn-match-actions">
-              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.a)}">${escapeAttr(m.aLabel)} ${t("wins")}</button>
-              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.b)}">${escapeAttr(m.bLabel)} ${t("wins")}</button>
-              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}">${t("btnDraw")}</button>
+            <span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)} ${timeBadge}</span>
+            <span class="tourn-match-actions tourn-score-entry">
+              <input type="number" min="0" class="tourn-score-input" data-score-side="a" placeholder="0" aria-label="${escapeAttr(m.aLabel)}" />
+              <span>-</span>
+              <input type="number" min="0" class="tourn-score-input" data-score-side="b" placeholder="0" aria-label="${escapeAttr(m.bLabel)}" />
+              <button class="secondary small" data-tourn-action="group-result" data-match-id="${m.id}">${t("btnSaveScore")}</button>
             </span>
           </div>`;
         })
         .join("");
       return `<div class="tourn-group">
         <h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>
-        <table><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colPoints")}</th></tr></thead><tbody>${standingsRows}</tbody></table>
+        <div class="tourn-table-scroll"><table><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colPlayed")}</th><th>${t("colWins")}</th><th>${t("colDraws")}</th><th>${t("colLosses")}</th><th>${t("colGF")}</th><th>${t("colGA")}</th><th>${t("colGD")}</th><th>${t("colPoints")}</th></tr></thead><tbody>${standingsRows}</tbody></table></div>
         <div class="tourn-matches">${matchesHtml}</div>
       </div>`;
     })
@@ -3036,12 +3131,16 @@ function renderTournamentGroups() {
     </div>
   `;
 }
-async function recordTournamentGroupResult(matchId, winnerId) {
+async function recordTournamentGroupResult(btn) {
   const msg = document.getElementById("tourn-msg");
+  const wrap = btn.closest(".tourn-match-actions");
+  const scoreA = wrap.querySelector('[data-score-side="a"]').value;
+  const scoreB = wrap.querySelector('[data-score-side="b"]').value;
+  if (scoreA === "" || scoreB === "") return showMsg(msg, t("bothScoresRequired"), false);
   try {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/group-result", {
       method: "PUT",
-      body: JSON.stringify({ matchId, winnerId }),
+      body: JSON.stringify({ matchId: Number(btn.dataset.matchId), scoreA: Number(scoreA), scoreB: Number(scoreB) }),
     });
     TOURNAMENT_DATA = data.tournament;
     renderTournamentBody();
@@ -3061,6 +3160,12 @@ async function generateTournamentKnockout() {
   }
 }
 
+function knockoutResultText(m) {
+  const winnerLabel = m.winnerId === m.a ? m.aLabel : m.bLabel;
+  const scoreText = m.scoreA != null && m.scoreB != null ? `${m.scoreA} - ${m.scoreB}` : "";
+  const bits = [scoreText, m.note].filter(Boolean).join(" &middot; ");
+  return `${escapeAttr(winnerLabel)} ${t("wins")}${bits ? " (" + bits + ")" : ""}`;
+}
 function renderTournamentBracket() {
   const rounds = TOURNAMENT_DATA.knockout.rounds;
   const roundsHtml = rounds
@@ -3072,21 +3177,30 @@ function renderTournamentBracket() {
         .map((m) => {
           const aLabel = m.aLabel || t("tbd");
           const bLabel = m.bLabel || t("tbd");
+          const timeBadge = matchTimeBadge(m);
           let footer;
           if (m.bye) {
             footer = `<div class="tourn-bracket-result">${t("byeLabel")}</div>`;
           } else if (m.winnerId) {
-            const winnerLabel = m.winnerId === m.a ? m.aLabel : m.bLabel;
-            footer = `<div class="tourn-bracket-result">${escapeAttr(winnerLabel)} ${t("wins")}${m.score ? " (" + escapeAttr(m.score) + ")" : ""}</div>`;
+            footer = `<div class="tourn-bracket-result">${knockoutResultText(m)}</div>`;
           } else if (m.a && m.b) {
             footer = `<div class="tourn-bracket-actions">
-              <button data-tourn-action="knockout-result" data-round-index="${ri}" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.a)}">${escapeAttr(m.aLabel)}</button>
-              <button data-tourn-action="knockout-result" data-round-index="${ri}" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.b)}">${escapeAttr(m.bLabel)}</button>
+              <div class="tourn-score-entry">
+                <input type="number" min="0" class="tourn-score-input" data-ko-side="a" placeholder="0" aria-label="${escapeAttr(m.aLabel)}" />
+                <span>-</span>
+                <input type="number" min="0" class="tourn-score-input" data-ko-side="b" placeholder="0" aria-label="${escapeAttr(m.bLabel)}" />
+              </div>
+              <input type="text" class="tourn-ko-note" placeholder="${escapeAttr(t("koNotePlaceholder"))}" maxlength="60" />
+              <div class="tourn-bracket-winner-btns">
+                <button data-tourn-action="knockout-result" data-round-index="${ri}" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.a)}">${escapeAttr(m.aLabel)}</button>
+                <button data-tourn-action="knockout-result" data-round-index="${ri}" data-match-id="${m.id}" data-winner-id="${escapeAttr(m.b)}">${escapeAttr(m.bLabel)}</button>
+              </div>
             </div>`;
           } else {
             footer = `<div class="tourn-bracket-pending">${t("waitingOnPreviousRound")}</div>`;
           }
           return `<div class="tourn-bracket-match">
+            ${timeBadge ? `<div class="tourn-bracket-time">${timeBadge}</div>` : ""}
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}</div>
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}</div>
             ${footer}
@@ -3098,12 +3212,23 @@ function renderTournamentBracket() {
     .join("");
   return `<div class="tourn-bracket">${roundsHtml}</div>`;
 }
-async function recordTournamentKnockoutResult(roundIndex, matchId, winnerId) {
+async function recordTournamentKnockoutResult(btn) {
   const msg = document.getElementById("tourn-msg");
+  const wrap = btn.closest(".tourn-bracket-actions");
+  const scoreA = wrap.querySelector('[data-ko-side="a"]').value;
+  const scoreB = wrap.querySelector('[data-ko-side="b"]').value;
+  const note = wrap.querySelector(".tourn-ko-note").value;
   try {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/knockout-result", {
       method: "PUT",
-      body: JSON.stringify({ roundIndex, matchId, winnerId }),
+      body: JSON.stringify({
+        roundIndex: Number(btn.dataset.roundIndex),
+        matchId: Number(btn.dataset.matchId),
+        winnerId: btn.dataset.winnerId,
+        scoreA: scoreA === "" ? null : Number(scoreA),
+        scoreB: scoreB === "" ? null : Number(scoreB),
+        note,
+      }),
     });
     TOURNAMENT_DATA = data.tournament;
     renderTournamentBody();
@@ -3230,11 +3355,15 @@ function renderPublicTournamentBody(tn, eventId) {
   } else if (tn.status === "completed") {
     inner = (tn.format === "groups" ? renderPublicGroups(tn.groups) : "") + renderPublicBracket(tn.knockout) + renderPublicStandings(tn.standings);
   }
+  const matchesLink = tn.schedule
+    ? `<a class="secondary small" style="text-decoration:none;display:inline-block;" href="/matches.html?event=${eventId}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
+    : "";
   return `
     ${meta ? `<h3 style="margin-top:0;">${eventNameHtml(meta)}</h3>` : ""}
     <div class="tourn-summary">
       <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
       <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+      ${matchesLink}
       ${ev ? `<button class="secondary small" id="tourn-public-view-event-btn" style="margin-inline-start:auto;">${t("btnViewEventDetails")}</button>` : ""}
     </div>
     ${inner}
@@ -3244,21 +3373,25 @@ function renderPublicGroups(groups) {
   const groupsHtml = (groups || [])
     .map((g, gi) => {
       const standingsRows = g.standings
-        .map((s, i) => `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.points}</td></tr>`)
+        .map(
+          (s, i) =>
+            `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.gf}</td><td>${s.ga}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`
+        )
         .join("");
       const matchesHtml = g.matches
         .map((m) => {
+          const timeBadge = matchTimeBadge(m);
           const resultText = !m.result
             ? t("matchNotYetPlayed")
             : m.result.winnerId === null
-            ? t("matchDraw")
-            : `${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
-          return `<div class="tourn-match${m.result ? " decided" : ""}"><span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)}</span><span class="tourn-match-result">${resultText}</span></div>`;
+            ? `${m.result.scoreA} - ${m.result.scoreB} &middot; ${t("matchDraw")}`
+            : `${m.result.scoreA} - ${m.result.scoreB} &middot; ${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
+          return `<div class="tourn-match${m.result ? " decided" : ""}"><span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)} ${timeBadge}</span><span class="tourn-match-result">${resultText}</span></div>`;
         })
         .join("");
       return `<div class="tourn-group">
         <h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>
-        <table><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colPoints")}</th></tr></thead><tbody>${standingsRows}</tbody></table>
+        <div class="tourn-table-scroll"><table><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colPlayed")}</th><th>${t("colWins")}</th><th>${t("colDraws")}</th><th>${t("colLosses")}</th><th>${t("colGF")}</th><th>${t("colGA")}</th><th>${t("colGD")}</th><th>${t("colPoints")}</th></tr></thead><tbody>${standingsRows}</tbody></table></div>
         <div class="tourn-matches">${matchesHtml}</div>
       </div>`;
     })
@@ -3277,16 +3410,17 @@ function renderPublicBracket(knockout) {
         .map((m) => {
           const aLabel = m.aLabel || t("tbd");
           const bLabel = m.bLabel || t("tbd");
+          const timeBadge = matchTimeBadge(m);
           let footer;
           if (m.bye) {
             footer = `<div class="tourn-bracket-result">${t("byeLabel")}</div>`;
           } else if (m.winnerId) {
-            const winnerLabel = m.winnerId === m.a ? m.aLabel : m.bLabel;
-            footer = `<div class="tourn-bracket-result">${escapeAttr(winnerLabel)} ${t("wins")}${m.score ? " (" + escapeAttr(m.score) + ")" : ""}</div>`;
+            footer = `<div class="tourn-bracket-result">${knockoutResultText(m)}</div>`;
           } else {
             footer = `<div class="tourn-bracket-pending">${t("waitingOnPreviousRound")}</div>`;
           }
           return `<div class="tourn-bracket-match">
+            ${timeBadge ? `<div class="tourn-bracket-time">${timeBadge}</div>` : ""}
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}</div>
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}</div>
             ${footer}
