@@ -45,31 +45,49 @@
   .live-dot { width: 12px; height: 12px; border-radius: 50%; background: #4ade80; animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
   .screen-body { padding: 32px 40px 70px; max-width: 1500px; margin: 0 auto; }
-  .slot-section { margin-bottom: 40px; }
+  .slot-section { margin-bottom: 40px; animation: fadeInUp 0.45s ease; }
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   .slot-section h2 {
     color: #fff; font-size: 1.5rem; font-weight: 800; margin: 0 0 16px;
     text-transform: uppercase; letter-spacing: 0.5px;
+    display: flex; align-items: center; gap: 10px;
   }
   .slot-time { color: var(--gold); font-weight: 600; text-transform: none; font-size: 1rem; }
   .match-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
   .match-card {
+    position: relative;
     background: var(--card-bg); border-radius: 16px; padding: 20px 22px;
     box-shadow: 0 10px 26px rgba(0,0,0,0.28); border-top: 6px solid var(--gold);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
   }
+  .match-card:hover { transform: translateY(-4px); box-shadow: 0 16px 36px rgba(0,0,0,0.36); }
+  .match-card.live { border-top-color: var(--red); box-shadow: 0 12px 30px rgba(139,0,0,0.32); }
   .match-card.done { border-top-color: var(--muted); opacity: 0.7; }
+  .match-card.done:hover { transform: none; box-shadow: 0 10px 26px rgba(0,0,0,0.28); }
+  .live-badge {
+    position: absolute; top: -11px; inset-inline-end: 16px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--red); color: #fff; font-size: 0.66rem; font-weight: 800;
+    padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.6px;
+    box-shadow: 0 4px 10px rgba(139,0,0,0.4);
+  }
+  .live-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: pulse 1.3s infinite; }
   .mc-top { display: flex; justify-content: space-between; font-size: 0.95rem; font-weight: 700; color: var(--red); margin-bottom: 6px; }
   .match-card.done .mc-top { color: var(--muted); }
   .mc-stage { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
   .mc-teams { font-size: 1.3rem; font-weight: 700; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .mc-vs { font-size: 0.85rem; color: var(--muted); font-weight: 400; text-transform: lowercase; }
-  .empty-state, .picker { color: #fff; text-align: center; padding: 80px 20px; }
+  .empty-state, .picker { color: #fff; text-align: center; padding: 80px 20px; animation: fadeInUp 0.45s ease; }
   .empty-state h2 { font-size: 1.8rem; }
   .picker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 32px; }
   .picker-card {
     background: var(--card-bg); border-radius: 16px; padding: 26px; text-align: start;
     text-decoration: none; color: #222; display: block;
     box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+    border-top: 4px solid var(--gold);
   }
+  .picker-card:hover { transform: translateY(-4px); box-shadow: 0 14px 32px rgba(0,0,0,0.32); }
   .picker-card h3 { margin: 0 0 8px; color: var(--red); font-size: 1.35rem; }
   .picker-card .meta { color: var(--muted); font-size: 0.95rem; }
   .lang-ar { display: block; }

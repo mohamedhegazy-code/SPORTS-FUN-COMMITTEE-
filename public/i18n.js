@@ -377,6 +377,17 @@ const I18N = {
     statConfigNeedMore: "Add a few more entrants to fill this out",
     statConfigNeedTeams: "Set up teams first",
 
+    // Tournament page reorganized into an operational-flow layout (progress stepper + cards)
+    tournStepTeams: "Teams",
+    tournStepSeeding: "Seeding",
+    tournStepGroups: "Group Stage",
+    tournStepKnockout: "Knockout",
+    tournStepCompleted: "Completed",
+    tournCardSetupTitle: "Setup & Schedule",
+    tournCardTeamsTitle: "Teams",
+    tournCardSeedingTitle: "Seeding",
+    tournCardLiveTitle: "Matches & Scores",
+
     btnViewLiveMatches: "Live matches screen",
     liveMatchesIntro: "What's on now, court by court, and what's coming up next.",
     noScheduledTournaments: "No tournaments with a court/time schedule right now.",
@@ -872,6 +883,17 @@ const I18N = {
     statConfigReady: "جاهز — خروج مغلوب لـ {count} فريق",
     statConfigNeedMore: "أضف مزيدًا من المشاركين لإكمال الإعداد",
     statConfigNeedTeams: "أنشئ الفرق أولاً",
+
+    // صفحة البطولة مُعاد تنظيمها بترتيب تشغيلي (شريط تقدّم + بطاقات)
+    tournStepTeams: "الفرق",
+    tournStepSeeding: "الترتيب التصنيفي",
+    tournStepGroups: "دور المجموعات",
+    tournStepKnockout: "خروج المغلوب",
+    tournStepCompleted: "اكتملت",
+    tournCardSetupTitle: "الإعداد والجدول",
+    tournCardTeamsTitle: "الفرق",
+    tournCardSeedingTitle: "الترتيب التصنيفي",
+    tournCardLiveTitle: "المباريات والنتائج",
 
     btnViewLiveMatches: "شاشة المباريات المباشرة",
     liveMatchesIntro: "المباريات الجارية الآن على كل ملعب، وما هو قادم بعدها.",

@@ -2814,6 +2814,51 @@ async function loadTournamentPanel(eventId) {
   }
 }
 
+// ---- Tournament page visual shell: card wrapper + icons + progress
+// stepper. Purely presentational (no new endpoints/state) - groups the
+// existing sections into consistently-styled cards and reorders them into
+// the real operational flow an admin runs an event day in: set up the
+// logistics first, sort teams/seeding, check people in as they arrive,
+// then play matches and finalize standings.
+const TOURN_ICON = {
+  setup: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3.3v1.8M10 14.9v1.8M16.7 10h-1.8M5.1 10H3.3M14.7 5.3l-1.3 1.3M6.6 13.4l-1.3 1.3M14.7 14.7l-1.3-1.3M6.6 6.6L5.3 5.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  teams: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7.2" cy="6.5" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.3 16c.6-2.9 2.5-4.4 4.9-4.4s4.3 1.5 4.9 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14.3" cy="7" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M13 11.9c1.9.1 3.4 1.5 3.9 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  attendance: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4.5" y="3.5" width="11" height="14" rx="1.4" stroke="currentColor" stroke-width="1.5"/><path d="M7.5 2.5h5v2h-5z" stroke="currentColor" stroke-width="1.3"/><path d="M7 10.5l1.8 1.8L13.5 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  live: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.5"/><path d="M8.3 6.8l5 3.2-5 3.2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  standings: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5l2.2 4.6 5 .7-3.6 3.6.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.6 5-.7L10 2.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+};
+function tournCardHtml(icon, title, bodyHtml, extraClass) {
+  if (!bodyHtml) return "";
+  return `
+    <section class="tourn-card ${extraClass || ""}">
+      <div class="tourn-card-head"><span class="tourn-card-icon">${icon}</span><h4>${title}</h4></div>
+      <div class="tourn-card-body">${bodyHtml}</div>
+    </section>
+  `;
+}
+// Computes the ordered list of lifecycle steps this specific tournament
+// goes through (varies with mode/format - e.g. an individual/knockout
+// tournament skips the Teams step and the Group Stage step entirely) and
+// marks each done/active/upcoming relative to the tournament's current status.
+function renderTournamentProgressStepper(tn) {
+  tn = tn || TOURNAMENT_DATA;
+  const steps = [];
+  if (tn.mode === "team") steps.push({ key: "team-setup", label: t("tournStepTeams") });
+  steps.push({ key: "seeding", label: t("tournStepSeeding") });
+  if (tn.format === "groups") steps.push({ key: "groups", label: t("tournStepGroups") });
+  steps.push({ key: "knockout", label: t("tournStepKnockout") });
+  steps.push({ key: "completed", label: t("tournStepCompleted") });
+  const curIdx = steps.findIndex((s) => s.key === tn.status);
+  const pills = steps
+    .map((s, i) => {
+      const state = i < curIdx ? "done" : i === curIdx ? "active" : "upcoming";
+      const mark = state === "done" ? "✓" : String(i + 1);
+      return `<div class="tourn-step ${state}"><span class="tourn-step-dot">${mark}</span><span class="tourn-step-label">${s.label}</span></div>`;
+    })
+    .join('<div class="tourn-step-line"></div>');
+  return `<div class="tourn-stepper">${pills}</div>`;
+}
+
 function renderTournamentBody() {
   const body = document.getElementById("tourn-body");
   if (!body) return;
@@ -2822,28 +2867,51 @@ function renderTournamentBody() {
     refreshCreateSetupPreview();
     return;
   }
-  let inner = "";
-  if (TOURNAMENT_DATA.status === "team-setup") inner = renderTournamentTeamSetup();
-  else if (TOURNAMENT_DATA.status === "seeding") inner = renderTournamentSeeding();
-  else if (TOURNAMENT_DATA.status === "groups") inner = renderTournamentGroups();
-  else if (TOURNAMENT_DATA.status === "knockout") inner = renderTournamentBracket();
-  else if (TOURNAMENT_DATA.status === "completed") inner = renderTournamentBracket() + renderTournamentStandings();
-  if (TOURNAMENT_DATA.status !== "team-setup") inner += renderTournamentScheduleEditor() + renderTournamentAttendance();
+  // Operational order, not build order: logistics (Setup & Schedule) are
+  // decided first and stay editable throughout; Teams/Seeding is whichever
+  // pre-generation step is active; Attendance (day-of check-in) sits right
+  // before the actual matches since that's when it's actually used; Matches
+  // & Scores plus the final Standings close out the flow.
+  let preGenContent = "";
+  if (TOURNAMENT_DATA.status === "team-setup") preGenContent = renderTournamentTeamSetup();
+  else if (TOURNAMENT_DATA.status === "seeding") preGenContent = renderTournamentSeeding();
+  let liveContent = "";
+  if (TOURNAMENT_DATA.status === "groups") liveContent = renderTournamentGroups();
+  else if (TOURNAMENT_DATA.status === "knockout") liveContent = renderTournamentBracket();
+  else if (TOURNAMENT_DATA.status === "completed") liveContent = renderTournamentBracket();
+  const standingsContent = TOURNAMENT_DATA.status === "completed" ? renderTournamentStandings() : "";
+
+  const setupCard = tournCardHtml(TOURN_ICON.setup, t("tournCardSetupTitle"), renderTournamentScheduleEditor(), "tourn-card-setup");
+  const teamsCard = tournCardHtml(
+    TOURN_ICON.teams,
+    TOURNAMENT_DATA.status === "team-setup" ? t("tournCardTeamsTitle") : t("tournCardSeedingTitle"),
+    preGenContent,
+    "tourn-card-teams"
+  );
+  const attendanceCard = TOURNAMENT_DATA.status !== "team-setup" ? renderTournamentAttendance() : "";
+  const liveCard = tournCardHtml(TOURN_ICON.live, t("tournCardLiveTitle"), liveContent, "tourn-card-live");
+  const standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), standingsContent, "tourn-card-standings");
+
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = TOURNAMENT_DATA.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
   const matchesLink = TOURNAMENT_DATA.schedule
-    ? `<a class="secondary small" style="margin-inline-start:8px;text-decoration:none;display:inline-block;" href="/matches.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
+    ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
     : "";
   body.innerHTML = `
-    <div class="tourn-summary">
+    <div class="tourn-summary tourn-hero">
       <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
       <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
       ${matchesLink}
       <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
     </div>
-    ${inner}
+    ${renderTournamentProgressStepper()}
+    ${setupCard}
+    ${teamsCard}
+    ${attendanceCard}
+    ${liveCard}
+    ${standingsCard}
   `;
-  if (TOURNAMENT_DATA.status !== "team-setup") refreshEditSetupPreview();
+  refreshEditSetupPreview();
 }
 
 // Present/absent check-in for the actual players in this tournament -
@@ -2886,12 +2954,12 @@ function renderTournamentAttendance() {
     body = list.map((a) => rowHtml(a) + matchesBlockHtml(allMatches, a.entrantId)).join("");
   }
   const presentCount = list.filter((a) => a.status === "present").length;
-  return `
-    <div class="tourn-attendance" style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;">
-      <h4>${t("adminTournamentAttendance")} <span class="hint-note" style="display:inline;">(${presentCount}/${list.length})</span></h4>
-      ${body}
-    </div>
-  `;
+  return tournCardHtml(
+    TOURN_ICON.attendance,
+    `${t("adminTournamentAttendance")} <span class="tourn-card-count">${presentCount}/${list.length}</span>`,
+    body,
+    "tourn-card-attendance"
+  );
 }
 // Manage courts/matchMinutes/startTime/breakMinutes at any point, not just
 // at creation - filling these in for the first time turns on scheduling,
@@ -2901,8 +2969,6 @@ function renderTournamentAttendance() {
 function renderTournamentScheduleEditor() {
   const s = TOURNAMENT_DATA.schedule;
   return `
-    <div class="tourn-schedule-editor" style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;">
-      <h4>${t("adminTournamentSchedule")}</h4>
       <p class="hint-note">${t("editScheduleHint")}</p>
       <div class="grid-2">
         <div><label>${t("fieldWinPoints")}</label><input id="tourn-edit-win-points" type="number" min="0" value="${TOURNAMENT_DATA.winPoints}" /></div>
@@ -2918,7 +2984,6 @@ function renderTournamentScheduleEditor() {
       </div>
       <div id="tourn-setup-preview-edit"></div>
       <button class="secondary" style="margin-top:8px;" data-tourn-action="update-schedule">${t("btnUpdateSchedule")}</button>
-    </div>
   `;
 }
 async function updateTournamentSchedule() {
@@ -3640,7 +3705,6 @@ function renderTournamentStandings() {
     ? `<p class="hint-note">${t("pointsAwardedOn")} ${escapeAttr(new Date(TOURNAMENT_DATA.pointsAwardedAt).toLocaleString())}</p>`
     : "";
   return `
-    <h4 style="margin-top:18px;">${t("finalStandingsTitle")}</h4>
     <table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${rows}</tbody></table>
     ${awardedNote}
     <button class="primary" style="margin-top:10px;" data-tourn-action="award-points">${TOURNAMENT_DATA.pointsAwardedAt ? t("btnReAwardPoints") : t("btnAwardPoints")}</button>
@@ -3742,28 +3806,39 @@ function renderPublicTournamentBody(tn, eventId) {
   const ev = EVENTS_DATA.find((e) => e.id === eventId);
   const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
-  let inner = "";
+  let notStartedHtml = "";
+  let groupsCard = "";
+  let bracketCard = "";
+  let standingsCard = "";
   if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
-    inner = `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
+    notStartedHtml = `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
   } else if (tn.status === "groups") {
-    inner = renderPublicGroups(tn.groups);
+    groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups), "tourn-card-live");
   } else if (tn.status === "knockout") {
-    inner = renderPublicBracket(tn.knockout);
+    bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout), "tourn-card-live");
   } else if (tn.status === "completed") {
-    inner = (tn.format === "groups" ? renderPublicGroups(tn.groups) : "") + renderPublicBracket(tn.knockout) + renderPublicStandings(tn.standings);
+    if (tn.format === "groups") groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups), "tourn-card-live");
+    bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout), "tourn-card-live");
+    standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), renderPublicStandings(tn.standings), "tourn-card-standings");
   }
   const matchesLink = tn.schedule
-    ? `<a class="secondary small" style="text-decoration:none;display:inline-block;" href="/matches.html?event=${eventId}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
+    ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${eventId}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
     : "";
   return `
-    ${meta ? `<h3 style="margin-top:0;">${eventNameHtml(meta)}</h3>` : ""}
-    <div class="tourn-summary">
-      <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
-      <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
-      ${matchesLink}
-      ${ev ? `<button class="secondary small" id="tourn-public-view-event-btn" style="margin-inline-start:auto;">${t("btnViewEventDetails")}</button>` : ""}
+    <div class="tourn-summary tourn-hero">
+      ${meta ? `<h3 style="margin:0 0 6px;">${eventNameHtml(meta)}</h3>` : ""}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+        <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+        ${matchesLink}
+        ${ev ? `<button class="secondary small" id="tourn-public-view-event-btn" style="margin-inline-start:auto;">${t("btnViewEventDetails")}</button>` : ""}
+      </div>
     </div>
-    ${inner}
+    ${renderTournamentProgressStepper(tn)}
+    ${notStartedHtml}
+    ${groupsCard}
+    ${bracketCard}
+    ${standingsCard}
     ${renderPublicAttendance(tn)}
   `;
 }
@@ -3810,12 +3885,13 @@ function renderPublicAttendance(tn) {
   } else {
     body = list.map(rowHtml).join("");
   }
-  return `
-    <div class="tourn-attendance" style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;">
-      <h4>${t("adminTournamentAttendance")}</h4>
-      ${body}
-    </div>
-  `;
+  const presentCount = list.filter((a) => a.status === "present").length;
+  return tournCardHtml(
+    TOURN_ICON.attendance,
+    `${t("adminTournamentAttendance")} <span class="tourn-card-count">${presentCount}/${list.length}</span>`,
+    body,
+    "tourn-card-attendance"
+  );
 }
 function renderPublicGroups(groups) {
   const groupsHtml = (groups || [])
@@ -3883,10 +3959,7 @@ function renderPublicBracket(knockout) {
 function renderPublicStandings(standings) {
   if (!standings) return "";
   const rows = standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`).join("");
-  return `
-    <h4 style="margin-top:18px;">${t("finalStandingsTitle")}</h4>
-    <table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${rows}</tbody></table>
-  `;
+  return `<table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function loadRedemptionsTable() {

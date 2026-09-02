@@ -64,8 +64,11 @@ function collectScheduledMatches(tn) {
   return list.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.court - b.court);
 }
 
-function matchCardHtml(m) {
-  return `<div class="match-card ${m.decided ? "done" : "live"}">
+function matchCardHtml(m, isLive) {
+  const stateClass = m.decided ? "done" : isLive ? "live" : "upcoming";
+  const badge = isLive && !m.decided ? `<span class="live-badge"><span class="live-badge-dot"></span>${esc(t("liveNow"))}</span>` : "";
+  return `<div class="match-card ${stateClass}">
+    ${badge}
     <div class="mc-top"><span class="mc-court">${esc(t("courtLabel"))} ${m.court}</span><span class="mc-time">${esc(m.time)}</span></div>
     <div class="mc-stage">${esc(m.stage)}</div>
     <div class="mc-teams">${esc(m.aLabel || t("tbd"))}<span class="mc-vs">${esc(t("vs"))}</span>${esc(m.bLabel || t("tbd"))}</div>
@@ -74,10 +77,10 @@ function matchCardHtml(m) {
 
 function renderSlots(nowMatches, nextMatches, nowLabel, nextTime) {
   const nowHtml = nowMatches.length
-    ? `<div class="slot-section"><h2>${esc(t("liveNow"))}</h2><div class="match-grid">${nowMatches.map(matchCardHtml).join("")}</div></div>`
+    ? `<div class="slot-section"><h2><span class="live-dot"></span>${esc(t("liveNow"))}</h2><div class="match-grid">${nowMatches.map((m) => matchCardHtml(m, true)).join("")}</div></div>`
     : "";
   const nextHtml = nextMatches.length
-    ? `<div class="slot-section"><h2>${esc(t("upNext"))}${nextTime ? ` <span class="slot-time">${esc(nextTime)}</span>` : ""}</h2><div class="match-grid">${nextMatches.map(matchCardHtml).join("")}</div></div>`
+    ? `<div class="slot-section"><h2>${esc(t("upNext"))}${nextTime ? ` <span class="slot-time">${esc(nextTime)}</span>` : ""}</h2><div class="match-grid">${nextMatches.map((m) => matchCardHtml(m, false)).join("")}</div></div>`
     : "";
   return nowHtml + nextHtml;
 }

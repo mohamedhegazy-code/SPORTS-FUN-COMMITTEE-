@@ -538,10 +538,94 @@ button.secondary.small { padding: 5px 10px; font-size: 0.75rem; }
 button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 
 /* -------------------------------------------------------------- tournament -- */
-.tourn-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+/* Hero summary strip + delete button */
+.tourn-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.tourn-summary.tourn-hero {
+  background: linear-gradient(120deg, #fff9ec 0%, #fff 60%);
+  border: 1px solid var(--gold); border-radius: 12px; padding: 12px 16px;
+  box-shadow: 0 2px 10px rgba(201, 162, 39, 0.12);
+}
 .tourn-summary-badge {
   background: #fff9ec; border: 1px solid var(--gold); color: var(--red-dark);
   font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+}
+.tourn-live-link {
+  margin-inline-start: 8px; text-decoration: none; display: inline-flex; align-items: center;
+  gap: 5px; padding: 5px 12px; border-radius: 20px; transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.tourn-live-link:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(139, 0, 0, 0.15); }
+.tourn-live-link::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red);
+  box-shadow: 0 0 0 rgba(139, 0, 0, 0.5); animation: tourn-pulse 1.8s infinite;
+}
+@keyframes tourn-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(139, 0, 0, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(139, 0, 0, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 0, 0, 0); }
+}
+
+/* Progress stepper - the operational-flow at-a-glance view */
+.tourn-stepper {
+  display: flex; align-items: flex-start; margin-bottom: 20px; padding: 4px 2px;
+  overflow-x: auto;
+}
+.tourn-step { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 64px; flex-shrink: 0; }
+.tourn-step-dot {
+  width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 0.8rem; font-weight: 700; border: 2px solid var(--border); background: #fff; color: var(--muted);
+  transition: all 0.2s ease;
+}
+.tourn-step.done .tourn-step-dot { background: var(--green); border-color: var(--green); color: #fff; }
+.tourn-step.active .tourn-step-dot {
+  background: linear-gradient(135deg, var(--red), var(--red-dark)); border-color: var(--gold); color: #fff;
+  box-shadow: 0 0 0 4px rgba(201, 162, 39, 0.25); transform: scale(1.08);
+}
+.tourn-step-label { font-size: 0.7rem; color: var(--muted); text-align: center; white-space: nowrap; }
+.tourn-step.active .tourn-step-label { color: var(--red-dark); font-weight: 700; }
+.tourn-step.done .tourn-step-label { color: var(--green); }
+.tourn-step-line { flex: 1; height: 2px; background: var(--border); margin: 15px 4px 0; min-width: 16px; }
+
+/* Section cards - each stage of the flow gets its own card with a
+   distinctly-colored gradient header so the page reads at a glance, without
+   any of it depending on new state (purely presentational wrapper). */
+.tourn-card {
+  background: var(--card); border-radius: 14px; overflow: hidden; margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 20px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border); transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.tourn-card:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 12px 28px rgba(0, 0, 0, 0.08); }
+.tourn-card-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 18px; color: #fff;
+}
+.tourn-card-head h4 { margin: 0; font-size: 0.95rem; font-weight: 700; }
+.tourn-card-icon {
+  width: 30px; height: 30px; border-radius: 9px; background: rgba(255, 255, 255, 0.22);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.tourn-card-icon svg { width: 18px; height: 18px; }
+.tourn-card-count {
+  margin-inline-start: 6px; background: rgba(255, 255, 255, 0.25); padding: 1px 9px;
+  border-radius: 20px; font-size: 0.72rem; font-weight: 600;
+}
+.tourn-card-body { padding: 16px 18px 18px; }
+.tourn-card-body .hint-note:first-child { margin-top: 0; }
+
+.tourn-card-setup .tourn-card-head { background: linear-gradient(120deg, #2b6ea3, #1c4c73); }
+.tourn-card-teams .tourn-card-head { background: linear-gradient(120deg, #7d4fb0, #55307f); }
+.tourn-card-attendance .tourn-card-head { background: linear-gradient(120deg, #d97b1f, #a85a10); }
+.tourn-card-live .tourn-card-head { background: linear-gradient(120deg, var(--red), var(--red-dark)); }
+.tourn-card-standings .tourn-card-head { background: linear-gradient(120deg, var(--gold), #a8811b); }
+
+.tourn-card button.primary, .tourn-card button.secondary, .tourn-card button.danger {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.tourn-card button.primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(139, 0, 0, 0.25); }
+.tourn-card button.secondary:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1); }
+@media (max-width: 640px) {
+  .tourn-card-head { padding: 10px 14px; }
+  .tourn-card-body { padding: 12px 14px 14px; }
+  .tourn-step-label { display: none; }
+  .tourn-step { min-width: 34px; }
 }
 .tourn-seed-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .tourn-seed-row {
@@ -598,7 +682,6 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
   padding: 6px 10px; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border); text-align: center;
 }
 
-.tourn-attendance h4 { margin: 0 0 10px; font-size: 0.9rem; color: var(--red-dark); }
 .tourn-attendance-team { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; background: #fff; }
 .tourn-attendance-team h5 { margin: 0 0 6px; font-size: 0.82rem; }
 .tourn-att-complete { color: #2e7d32; font-weight: 600; font-size: 0.72rem; }
@@ -631,7 +714,7 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 .tourn-edit-score summary { cursor: pointer; color: var(--muted); }
 .tourn-edit-score .tourn-score-entry, .tourn-edit-score .tourn-bracket-actions { margin-top: 6px; }
 
-.tourn-schedule-editor .grid-2 input { margin-top: 2px; }
+.tourn-card-setup .grid-2 input { margin-top: 2px; }
 
 .tourn-setup-dashboard {
   margin-top: 14px; padding: 12px 14px; background: #fafaf8;
