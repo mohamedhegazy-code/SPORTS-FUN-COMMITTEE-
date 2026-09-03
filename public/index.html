@@ -481,6 +481,31 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8" cy="7" r="2.8" stroke="currentColor" stroke-width="1.4"/><path d="M3 16c.6-3 2.5-4.6 5-4.6s4.4 1.6 5 4.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M14.5 6.5h3M16 5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminMembersTitle">Members</span></h2>
           <p class="section-sub" data-i18n="adminMembersIntro">Import your existing member list, export it as a backup, and invite members directly to an event without waiting for them to sign up themselves.</p>
 
+          <h3 style="margin-top:0;" data-i18n="addMemberTitle">Add a member</h3>
+          <div class="grid-2">
+            <div>
+              <label data-i18n="fieldMembership">Membership number</label>
+              <input id="member-add-number" type="text" />
+            </div>
+            <div>
+              <label data-i18n="fieldName">Full name</label>
+              <input id="member-add-name" type="text" />
+            </div>
+            <div>
+              <label data-i18n="fieldPhone">Phone (optional)</label>
+              <input id="member-add-phone" type="text" />
+            </div>
+            <div>
+              <label data-i18n="fieldFamilyGroup">Family group (optional)</label>
+              <input id="member-add-family" type="text" />
+            </div>
+          </div>
+          <label data-i18n="fieldAlsoRegisterEvent">Also register for an event (optional)</label>
+          <select id="member-add-event"></select>
+          <button class="primary" id="member-add-btn" style="margin-top:10px;" data-i18n="btnAddMember">Add member</button>
+          <div class="msg" id="member-add-msg"></div>
+
+          <h3 style="margin-top:22px;" data-i18n="importMembersTitle">Import members from a file</h3>
           <div class="grid-2" style="align-items:end;">
             <div>
               <label data-i18n="fieldImportFile">Import members (.xlsx)</label>

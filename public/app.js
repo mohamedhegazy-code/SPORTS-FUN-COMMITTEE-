@@ -356,6 +356,7 @@ function setLang(lang) {
   ) {
     loadAdminDashboard();
     renderMembersInviteEventDropdown();
+    renderMemberAddEventDropdown();
     renderMembersTable();
     renderDirectoryTable();
   }
@@ -2019,6 +2020,7 @@ async function loadAdminMembers() {
     MEMBERS_DATA = [];
   }
   renderMembersInviteEventDropdown();
+  renderMemberAddEventDropdown();
   renderMembersTable();
 }
 
@@ -2029,6 +2031,20 @@ function renderMembersInviteEventDropdown() {
   sel.innerHTML = upcoming.length
     ? upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("")
     : `<option value="">${t("noEventsToInvite")}</option>`;
+  if (upcoming.some((ev) => String(ev.id) === prevValue)) sel.value = prevValue;
+}
+
+// Same upcoming-events list as the bulk-invite dropdown above, but with a
+// leading "don't register" option since registering the newly-added member
+// for an event is optional here (unlike the bulk-invite flow, which only
+// runs once members are already checked).
+function renderMemberAddEventDropdown() {
+  const sel = document.getElementById("member-add-event");
+  const prevValue = sel.value;
+  const upcoming = EVENTS_DATA.filter(isUpcoming);
+  const noInviteOption = `<option value="">${t("optionNoInvite")}</option>`;
+  sel.innerHTML =
+    noInviteOption + upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
   if (upcoming.some((ev) => String(ev.id) === prevValue)) sel.value = prevValue;
 }
 
@@ -2102,6 +2118,54 @@ document.getElementById("members-table").addEventListener("change", (e) => {
 
 document.getElementById("members-export-btn").addEventListener("click", () => {
   window.location.href = "/api/admin/members/export";
+});
+
+document.getElementById("member-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("member-add-msg");
+  const membershipNumber = document.getElementById("member-add-number").value.trim();
+  const name = document.getElementById("member-add-name").value.trim();
+  const phone = document.getElementById("member-add-phone").value.trim();
+  const familyGroup = document.getElementById("member-add-family").value.trim();
+  const eventId = document.getElementById("member-add-event").value;
+  if (!membershipNumber || !name) return showMsg(msg, t("pleaseFillMembershipAndName"), false);
+  try {
+    const result = await api("/api/admin/members", {
+      method: "POST",
+      body: JSON.stringify({ membershipNumber, name, phone, familyGroup }),
+    });
+    let text = `${t("memberAddedLabel")} ${escapeAttr(result.member.name)}.`;
+    // Registering the brand-new member for an event is a second, independent
+    // call to the same bulk-invite endpoint the "Invite members to an event"
+    // table below uses - reusing it here keeps capacity/waitlist/multi-
+    // activity handling in exactly one place rather than duplicating it.
+    if (eventId) {
+      try {
+        const inviteResult = await api(`/api/admin/events/${eventId}/invite`, {
+          method: "POST",
+          body: JSON.stringify({ membershipNumbers: [membershipNumber] }),
+        });
+        if (inviteResult.invited.length) {
+          text += ` ${t("registeredForEventLabel")}.`;
+        } else if (inviteResult.skipped.length) {
+          text += ` ${inviteResult.skipped[0].reason}.`;
+        }
+      } catch (e) {
+        text += ` ${t("registeredForEventFailedLabel")}: ${e.message}`;
+      }
+    }
+    showMsg(msg, text, true);
+    document.getElementById("member-add-number").value = "";
+    document.getElementById("member-add-name").value = "";
+    document.getElementById("member-add-phone").value = "";
+    document.getElementById("member-add-family").value = "";
+    document.getElementById("member-add-event").value = "";
+    await loadAdminMembers();
+    loadAdminDashboard();
+    loadAdminOverview();
+    loadAdminDirectory();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
 });
 
 document.getElementById("members-import-btn").addEventListener("click", async () => {

@@ -1811,6 +1811,39 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
   res.json(rows);
 });
 
+// Adds a single new member directly - for the common "just one or two
+// people" case where building/uploading an .xlsx via the import endpoint
+// above would be overkill. Deliberately rejects an already-used membership
+// number (409) rather than upserting like import does: this is an explicit
+// "create new" action, so a collision almost certainly means the admin
+// meant to search for the existing member (e.g. via the invite table or the
+// per-event hub) instead of silently overwriting them.
+app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const membershipNumber = String(req.body.membershipNumber || "").trim();
+  const name = String(req.body.name || "").trim();
+  const phone = String(req.body.phone || "").trim();
+  const familyGroup = String(req.body.familyGroup || "").trim();
+  if (!membershipNumber || !name) {
+    return res.status(400).json({ error: "Membership number and name are required" });
+  }
+  if (db.members[membershipNumber]) {
+    return res.status(409).json({ error: "A member with this membership number already exists" });
+  }
+  db.members[membershipNumber] = {
+    membershipNumber,
+    name,
+    familyGroup,
+    phone,
+    passwordHash: null,
+    dependents: [],
+  };
+  writeDb(db);
+  res.status(201).json({
+    member: { membershipNumber, name, phone, familyGroup, hasLoggedInAccount: false, dependentsCount: 0 },
+  });
+});
+
 // Exports the member roster as an .xlsx file. Re-importing this same file
 // (see below) is a safe no-op for anyone unchanged, so this also doubles as
 // a simple backup/round-trip format.
