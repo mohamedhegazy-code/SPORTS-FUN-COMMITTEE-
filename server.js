@@ -435,15 +435,28 @@ function requireMember(req, res, next) {
   req.member = member;
   next();
 }
-// Attaches req.staff (the logged-in staff/admin record). role='admin' means
-// only admins pass; role='staff' means staff OR admin pass (admins can do
-// everything staff can).
+// Attaches req.staff (the logged-in staff/admin record). Two call shapes:
+//   requireStaffRole("admin") - only role='admin' passes (unchanged from before).
+//   requireStaffRole("staff") - any staff-type session passes, whatever its
+//     role (unchanged from before - this was always "any staff account",
+//     not literally role==='staff', which is how the original two-role
+//     "staff OR admin" behavior worked without ever checking session.role).
+//   requireStaffRole([...roles]) - a granular role (e.g. "tournament") named
+//     in the array passes; 'admin' always passes every gate regardless of
+//     what's listed, since admin can do everything every other role can.
+// This lets a narrower role (tournament-only management, say) be opted into
+// per-endpoint without touching the two original roles' behavior at all.
 function requireStaffRole(role) {
+  const allowList = Array.isArray(role) ? role : null;
   return (req, res, next) => {
     const session = getSession(req);
     if (!session || session.type !== "staff") return res.status(401).json({ error: "Please sign in" });
-    if (role === "admin" && session.role !== "admin") {
-      return res.status(403).json({ error: "Admin access required" });
+    if (session.role !== "admin") {
+      if (allowList) {
+        if (!allowList.includes(session.role)) return res.status(403).json({ error: "Admin access required" });
+      } else if (role === "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
     }
     const db = readDb();
     const staff = db.staffAccounts[session.id];
@@ -684,7 +697,7 @@ app.post("/api/auth/change-password", async (req, res) => {
 app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   const db = readDb();
   const { username, password, name, role } = req.body;
-  if (!username || !password || !name || !["admin", "staff"].includes(role)) {
+  if (!username || !password || !name || !["admin", "staff", "tournament"].includes(role)) {
     return res.status(400).json({ error: "username, password, name, and a valid role are required" });
   }
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
@@ -1733,7 +1746,7 @@ app.get("/api/admin/overview", requireStaffRole("admin"), (req, res) => {
 // the capacity the admin set (if any). Min is informational only (shown so
 // the committee can see at a glance whether an event is under its target),
 // it never blocks a registration.
-app.get("/api/admin/dashboard", requireStaffRole("admin"), (req, res) => {
+app.get("/api/admin/dashboard", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const rows = db.events
     .slice()
@@ -1761,7 +1774,7 @@ app.get("/api/admin/dashboard", requireStaffRole("admin"), (req, res) => {
 
 // Lists everyone on an event's waiting list, in join order, so the admin can
 // decide who to promote first if a confirmed spot opens up.
-app.get("/api/admin/events/:eventId/waitlist", requireStaffRole("admin"), (req, res) => {
+app.get("/api/admin/events/:eventId/waitlist", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const rows = db.registrations
@@ -1778,7 +1791,7 @@ app.get("/api/admin/events/:eventId/waitlist", requireStaffRole("admin"), (req, 
 // re-check maxCapacity - if the admin is promoting someone, it's because
 // they know there's room (a spot freed up, or they raised the cap), and
 // this is the manual override for that judgment call.
-app.post("/api/admin/registrations/:id/promote", requireStaffRole("admin"), (req, res) => {
+app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const id = Number(req.params.id);
   const reg = db.registrations.find((r) => r.id === id);
@@ -2609,7 +2622,7 @@ app.get("/api/tournaments/:eventId", (req, res) => {
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.get("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
+app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);
@@ -2649,7 +2662,7 @@ function parseSetupFields(body, current) {
   return result;
 }
 
-app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
+app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const event = db.events.find((e) => e.id === eventId);
@@ -2722,7 +2735,7 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res
   res.status(201).json({ tournament: serializeTournament(db, t) });
 });
 
-app.delete("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, res) => {
+app.delete("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const before = db.tournaments.length;
@@ -2736,7 +2749,7 @@ app.delete("/api/admin/tournaments/:eventId", requireStaffRole("admin"), (req, r
 // registration not included in a team is simply left out of the
 // tournament. Replaces the whole team list each call (simplest mental
 // model - re-submit the full set to make a change).
-app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);
@@ -2770,7 +2783,7 @@ app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole("admin"), (req
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -2792,7 +2805,7 @@ app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole("admin"),
 // scratch with the same scheduling algorithm used at generation time;
 // results and winners already recorded are untouched, only when/where each
 // still-to-play match happens moves.
-app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -2834,7 +2847,7 @@ app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole("admin"), (
 // (format=knockout) from the current seed order. One-way door: once
 // generated, entrants are locked in for this tournament (delete and
 // recreate to change who's playing).
-app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole("admin"), (req, res) => {
+app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -2863,7 +2876,7 @@ app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole("admin"), 
 // already exists, the admin needs to delete and recreate the tournament
 // instead - same trade-off already made for editing team rosters/seed
 // order after generation (see the project notes on that decision).
-app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole("admin"), (req, res) => {
+app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -2894,7 +2907,7 @@ app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole("admin"), (r
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
@@ -2922,7 +2935,7 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole("admin"
 // own gate-scanner check-in, which is about arriving at the venue at all
 // rather than being ready to play a specific match. "not_yet" is just the
 // absence of a key, so clearing it back to not_yet removes the entry.
-app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -2941,7 +2954,7 @@ app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole("admin"),
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole("admin"), (req, res) => {
+app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
@@ -2964,7 +2977,7 @@ app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole("
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.knockout) return res.status(404).json({ error: "No knockout bracket for this event" });
@@ -3024,7 +3037,7 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole("adm
 // admin tool uses, so points calculate identically either way. Safe to
 // call more than once (e.g. after fixing a mistake); each call just
 // re-applies the current standings.
-app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole("admin"), (req, res) => {
+app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);

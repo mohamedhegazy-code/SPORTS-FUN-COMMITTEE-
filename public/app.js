@@ -451,7 +451,10 @@ function updateSessionBadge() {
   if (CURRENT_SESSION.type === "member") {
     text.textContent = `${t("sessionAsMember")} ${CURRENT_SESSION.member.name} (#${CURRENT_SESSION.member.membershipNumber})`;
   } else {
-    text.textContent = `${t("sessionAsStaff")} ${CURRENT_SESSION.staff.name} (${CURRENT_SESSION.staff.role})`;
+    const roleLabel =
+      CURRENT_SESSION.staff.role === "admin" ? t("roleAdminShort") :
+      CURRENT_SESSION.staff.role === "tournament" ? t("roleTournamentShort") : t("roleStaffShort");
+    text.textContent = `${t("sessionAsStaff")} ${CURRENT_SESSION.staff.name} (${roleLabel})`;
   }
 }
 
@@ -460,6 +463,15 @@ function updateUIForSession() {
   const isMember = CURRENT_SESSION && CURRENT_SESSION.type === "member";
   const isStaff = CURRENT_SESSION && CURRENT_SESSION.type === "staff";
   const isAdmin = isStaff && CURRENT_SESSION.staff.role === "admin";
+  // Tournament Manager: a narrower staff role that can only reach
+  // tournaments, the Event dashboard, and check-in - see requireStaffRole()
+  // in server.js for the matching backend gate. isAdminAreaVisible covers
+  // both roles that get *some* view of the Admin section; .admin-full-only
+  // elements (tagged in index.html) are then hidden for anyone who isn't
+  // the real isAdmin, so a Tournament Manager only ever sees the cards this
+  // role is actually allowed to use.
+  const isTournamentRole = isStaff && CURRENT_SESSION.staff.role === "tournament";
+  const isAdminAreaVisible = isAdmin || isTournamentRole;
 
   // Register tab
   document.getElementById("reg-auth").classList.toggle("hidden", isMember);
@@ -504,23 +516,41 @@ function updateUIForSession() {
 
   // Admin tab
   document.getElementById("admin-lock").classList.toggle("hidden", isStaff);
-  document.getElementById("admin-denied").classList.toggle("hidden", !isStaff || isAdmin);
-  document.getElementById("admin-panel").classList.toggle("hidden", !isAdmin);
-  if (isAdmin) {
+  document.getElementById("admin-denied").classList.toggle("hidden", !isStaff || isAdminAreaVisible);
+  document.getElementById("admin-panel").classList.toggle("hidden", !isAdminAreaVisible);
+  // Cards/tabs only the full Admin role should see (Members, Points &
+  // Rewards, Content & Chat, Settings tabs; Add/Edit/Delete-event and Enter
+  // results within Events; the Overview stats card; "Register a member"
+  // within the per-event hub) - reset every time so switching sessions
+  // (e.g. a Tournament Manager logs out, an admin logs in) doesn't leave
+  // stale visibility from the previous session.
+  document.querySelectorAll(".admin-full-only").forEach((el) => el.classList.toggle("hidden", !isAdmin));
+  if (isAdminAreaVisible) {
     initAdminTabs();
-    loadAdminOverview();
+    // A Tournament Manager can't reach Members/Points/Content/Settings - if
+    // the currently-active tab is one of those (remembered from an earlier
+    // full-admin session in this same browser, or a mid-session role
+    // switch with no page reload in between), land on Events instead of a
+    // blank panel with no tab button to get back out of.
+    if (isTournamentRole) {
+      const activeTab = document.querySelector(".admin-tab.active");
+      if (activeTab && activeTab.classList.contains("admin-full-only")) switchAdminTab("events");
+    }
     loadAdminDashboard();
-    loadAdminMembers();
-    loadAdminDirectory();
-    loadRedemptionsTable();
-    loadStaffAccountsTable();
-    loadRulesForEdit();
-    renderLadderEdit();
-    loadChatThreadsList();
-    updateAdminChatBadge();
-    loadNewsAdminList();
-    loadSpotlightAdminList();
-    applySettingsToUI();
+    if (isAdmin) {
+      loadAdminOverview();
+      loadAdminMembers();
+      loadAdminDirectory();
+      loadRedemptionsTable();
+      loadStaffAccountsTable();
+      loadRulesForEdit();
+      renderLadderEdit();
+      loadChatThreadsList();
+      updateAdminChatBadge();
+      loadNewsAdminList();
+      loadSpotlightAdminList();
+      applySettingsToUI();
+    }
   } else {
     document.getElementById("admin-chat-badge").classList.add("hidden");
   }
@@ -1807,7 +1837,10 @@ async function openAdminWaitlist(eventId, eventLabelText) {
           await api(`/api/admin/registrations/${btn.dataset.promoteId}/promote`, { method: "POST" });
           await openAdminWaitlist(eventId, eventLabelText);
           await loadAdminDashboard();
-          loadAdminDirectory();
+          // Member directory is admin-only - a Tournament Manager can also
+          // promote from the waiting list (bundled with Event dashboard
+          // access), but has no access to that tool to refresh.
+          if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin") loadAdminDirectory();
           showMsg(document.getElementById("admin-waitlist-msg"), t("promoted"), true);
         } catch (e) {
           showMsg(waitlistMsg, e.message, false);
@@ -1872,8 +1905,15 @@ async function openAdminEventHub(eventId, label) {
   document.getElementById("hub-add-member-msg").textContent = "";
   // MEMBERS_DATA normally only gets loaded when the admin visits the
   // Members tab - fetch it here too (harmless if already loaded elsewhere)
-  // so "Register a member" can search the full roster right away.
-  await Promise.all([loadHubRoster(), loadHubTournamentSummary(), loadAdminMembers()]);
+  // so "Register a member" can search the full roster right away. Skipped
+  // for a Tournament Manager: that role has no access to the members list
+  // or the invite endpoint "Register a member" needs, and its section of
+  // this panel is hidden for them (see .admin-full-only above), so there's
+  // nothing here for the extra request to serve.
+  const isAdmin = CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin";
+  const loaders = [loadHubRoster(), loadHubTournamentSummary()];
+  if (isAdmin) loaders.push(loadAdminMembers());
+  await Promise.all(loaders);
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -1960,10 +2000,14 @@ async function loadHubTournamentSummary() {
   try {
     const data = await api("/api/admin/tournaments/" + HUB_EVENT_ID);
     if (!data.tournament) {
+      // "Enter results" jumps to a card a Tournament Manager doesn't have
+      // access to (that's the plain manual-results tool, out of this
+      // role's scope) - only offer it to the full Admin role.
+      const isAdmin = CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin";
       wrap.innerHTML = `
         <p class="hint-note">${t("hubNoTournament")}</p>
         <button class="secondary small" id="hub-goto-tournament">${t("btnSetUpTournament")}</button>
-        <button class="secondary small" id="hub-goto-results">${t("btnEnterResults")}</button>
+        ${isAdmin ? `<button class="secondary small" id="hub-goto-results">${t("btnEnterResults")}</button>` : ""}
       `;
     } else {
       const tn = data.tournament;
@@ -4168,7 +4212,7 @@ async function loadStaffAccountsTable() {
           (s) => `<tr>
         <td>${s.username}</td>
         <td>${s.name}</td>
-        <td>${s.role === "admin" ? t("roleAdmin") : t("roleStaff")}</td>
+        <td>${s.role === "admin" ? t("roleAdmin") : s.role === "tournament" ? t("roleTournament") : t("roleStaff")}</td>
         <td>${
           CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.username === s.username
             ? ""
