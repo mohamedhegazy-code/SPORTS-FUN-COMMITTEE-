@@ -2812,6 +2812,14 @@ document.getElementById("res-save").addEventListener("click", async () => {
 // the UI doesn't have to refetch after every click.
 let TOURNAMENT_EVENT_ID = null;
 let TOURNAMENT_DATA = null;
+// Team mode, pre-generation only: toggled on by the "Edit teams" button on
+// the Seeding card so the admin can get back to the per-registrant
+// team-name table after already saving teams once (saving teams moves
+// status straight to "seeding", so the table normally never reappears).
+// Purely a client-side view flag - the PUT .../teams endpoint itself has
+// always accepted being called again pre-generation, this just gives the
+// UI a way back to it. Reset whenever a different tournament is loaded.
+let TOURN_EDITING_TEAMS = false;
 let TOURNAMENT_REGISTRATIONS = [];
 
 document.getElementById("tourn-load").addEventListener("click", () => {
@@ -2836,6 +2844,8 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "randomize-seed") randomizeTournamentSeed();
   else if (action === "generate-tournament") generateTournament();
   else if (action === "reseed-tournament") reseedTournament();
+  else if (action === "edit-teams") { TOURN_EDITING_TEAMS = true; renderTournamentBody(); }
+  else if (action === "cancel-edit-teams") cancelEditTournamentTeams();
   else if (action === "group-result") recordTournamentGroupResult(btn);
   else if (action === "generate-knockout") generateTournamentKnockout();
   else if (action === "knockout-result") recordTournamentKnockoutResult(btn);
@@ -2867,6 +2877,7 @@ document.getElementById("tourn-body").addEventListener("change", tournPreviewInp
 
 async function loadTournamentPanel(eventId) {
   TOURNAMENT_EVENT_ID = Number(eventId);
+  TOURN_EDITING_TEAMS = false;
   const msg = document.getElementById("tourn-msg");
   if (msg) msg.textContent = "";
   try {
@@ -2939,6 +2950,7 @@ function renderTournamentBody() {
   // & Scores plus the final Standings close out the flow.
   let preGenContent = "";
   if (TOURNAMENT_DATA.status === "team-setup") preGenContent = renderTournamentTeamSetup();
+  else if (TOURNAMENT_DATA.status === "seeding" && TOURNAMENT_DATA.mode === "team" && TOURN_EDITING_TEAMS) preGenContent = renderTournamentTeamSetup();
   else if (TOURNAMENT_DATA.status === "seeding") preGenContent = renderTournamentSeeding();
   else if (TOURNAMENT_DATA.status === "groups" || TOURNAMENT_DATA.status === "knockout") preGenContent = renderTournamentReseedPanel();
   let liveContent = "";
@@ -3398,18 +3410,34 @@ async function deleteTournament() {
 // Team mode only: a plain text-input-per-registrant sheet rather than
 // drag-and-drop - deliberately simple. Registrants sharing the exact same
 // (trimmed, case-insensitive) team name become one team; anyone left blank
-// sits out the tournament.
+// sits out the tournament. A registrant with no partner is still a valid
+// team - just give them a team name nobody else shares (e.g. their own
+// name) and they'll show up as a one-person team.
+// When teams already exist (TOURN_EDITING_TEAMS - see above), every input
+// is prefilled with that registrant's current team name so re-saving only
+// requires touching the rows that actually need to change, and a Cancel
+// button returns to the seeding view without submitting anything.
 function renderTournamentTeamSetup() {
+  const editing = TOURNAMENT_DATA.status === "seeding" && TOURN_EDITING_TEAMS;
+  const teamNameByReg = {};
+  if (editing) {
+    (TOURNAMENT_DATA.teams || []).forEach((team) => {
+      (team.memberIds || []).forEach((id) => { teamNameByReg[id] = team.name; });
+    });
+  }
   const rows = TOURNAMENT_REGISTRATIONS.map(
     (r) => `<tr>
       <td>${escapeAttr(r.label)}</td>
-      <td><input type="text" class="tourn-team-name" data-reg-id="${r.id}" placeholder="${escapeAttr(t("teamNamePlaceholder"))}" /></td>
+      <td><input type="text" class="tourn-team-name" data-reg-id="${r.id}" placeholder="${escapeAttr(t("teamNamePlaceholder"))}" value="${escapeAttr(teamNameByReg[r.id] || "")}" /></td>
     </tr>`
   ).join("");
   return `
     <p class="hint-note">${t("teamSetupHint")}</p>
     <table><thead><tr><th>${t("colName")}</th><th>${t("colTeam")}</th></tr></thead><tbody>${rows}</tbody></table>
-    <button class="primary" style="margin-top:10px;" data-tourn-action="save-teams">${t("btnSaveTeams")}</button>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="primary" data-tourn-action="save-teams">${t("btnSaveTeams")}</button>
+      ${editing ? `<button class="secondary" data-tourn-action="cancel-edit-teams">${t("btnCancel")}</button>` : ""}
+    </div>
   `;
 }
 async function saveTournamentTeams() {
@@ -3428,11 +3456,16 @@ async function saveTournamentTeams() {
       body: JSON.stringify({ teams: Object.values(groups) }),
     });
     TOURNAMENT_DATA = data.tournament;
+    TOURN_EDITING_TEAMS = false;
     showMsg(msg, t("teamsSaved"), true);
     renderTournamentBody();
   } catch (e) {
     showMsg(msg, e.message, false);
   }
+}
+function cancelEditTournamentTeams() {
+  TOURN_EDITING_TEAMS = false;
+  renderTournamentBody();
 }
 
 // Seeding: the order here becomes group placement or bracket seeding once
@@ -3456,11 +3489,15 @@ function renderTournamentSeeding() {
     })
     .join("");
   const genLabel = TOURNAMENT_DATA.format === "groups" ? t("btnGenerateGroups") : t("btnGenerateBracket");
+  const editTeamsBtn = TOURNAMENT_DATA.mode === "team"
+    ? `<button class="secondary" data-tourn-action="edit-teams">${t("btnEditTeams")}</button>`
+    : "";
   return `
     <p class="hint-note">${t("seedingHint")}</p>
     <div class="tourn-seed-list">${rows}</div>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
       <button class="secondary" data-tourn-action="randomize-seed">${t("btnRandomize")}</button>
+      ${editTeamsBtn}
       <button class="primary" data-tourn-action="generate-tournament">${escapeAttr(genLabel)}</button>
     </div>
   `;
