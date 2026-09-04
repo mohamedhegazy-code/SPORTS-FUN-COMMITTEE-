@@ -336,8 +336,59 @@ function readDb() {
   db.sessions = db.sessions || {};
   return db;
 }
+// Where rolling safety-net snapshots of db.json are kept - see backupDbFile()
+// below. Same volume as db.json itself (data/), so it survives redeploys.
+const DB_BACKUP_DIR = path.join(__dirname, "data", "backups");
+// Snapshots are spaced out by time rather than taken on every single write,
+// so the kept history actually spans real hours rather than being 40
+// near-identical copies from one busy five-minute stretch of check-ins.
+const DB_BACKUP_MIN_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const DB_BACKUP_KEEP = 48; // ~24 hours of rolling history at that spacing
+let lastDbBackupAt = 0;
+
+// Copies the CURRENT on-disk db.json into data/backups/ before it gets
+// overwritten, throttled to once per DB_BACKUP_MIN_INTERVAL_MS. This is a
+// separate safety net from the atomic write below: the atomic write only
+// protects against a truncated/corrupt file from a crash mid-write, not
+// against a write that completes fine but contains wrong data (a bug, a
+// mistaken admin action) - a rolling backup lets that be rolled back to a
+// recent known-good snapshot instead. Best-effort: a failure here is logged
+// but never blocks the real write, since the backup is a nice-to-have, not
+// the source of truth.
+function backupDbFile() {
+  try {
+    if (!fs.existsSync(DB_PATH)) return; // nothing on disk yet to snapshot
+    const now = Date.now();
+    if (now - lastDbBackupAt < DB_BACKUP_MIN_INTERVAL_MS) return;
+    fs.mkdirSync(DB_BACKUP_DIR, { recursive: true });
+    const stamp = new Date(now).toISOString().replace(/[:.]/g, "-");
+    fs.copyFileSync(DB_PATH, path.join(DB_BACKUP_DIR, `db-${stamp}.json`));
+    lastDbBackupAt = now;
+    const files = fs
+      .readdirSync(DB_BACKUP_DIR)
+      .filter((f) => f.startsWith("db-") && f.endsWith(".json"))
+      .sort(); // ISO timestamps in the filename sort chronologically
+    for (let i = 0; i < files.length - DB_BACKUP_KEEP; i++) {
+      fs.unlinkSync(path.join(DB_BACKUP_DIR, files[i]));
+    }
+  } catch (err) {
+    console.error("Failed to back up data/db.json before write:", err.message);
+  }
+}
+
+// Writes db.json atomically: write the new content to a temp file in the
+// same directory, then rename it over the real file. A rename on the same
+// filesystem is atomic, so a process kill/crash/OOM mid-write (a redeploy,
+// a Railway resource limit, anything) can never leave db.json truncated or
+// invalid - the file on disk is always either the old complete version or
+// the new complete version, never a half-written one. Previously this was
+// a plain writeFileSync straight to db.json, which had no such guarantee.
 function writeDb(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  const json = JSON.stringify(db, null, 2);
+  backupDbFile();
+  const tmpPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpPath, json);
+  fs.renameSync(tmpPath, DB_PATH);
 }
 // Never send a password hash back to a client.
 function publicMember(m) {
