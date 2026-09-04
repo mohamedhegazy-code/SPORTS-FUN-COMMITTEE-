@@ -2228,7 +2228,22 @@ function findTournament(db, eventId) {
 // are a manual grouping the admin defines once).
 function tournamentEntrants(db, t) {
   if (t.mode === "team") {
-    return t.teams.map((team) => ({ id: team.id, label: team.name, registrationIds: team.memberIds }));
+    return t.teams.map((team) => ({
+      id: team.id,
+      label: team.name,
+      registrationIds: team.memberIds,
+      // The names behind this team, in the order they were grouped - lets
+      // every place a team's name is shown (seeding, standings, bracket,
+      // group matches, the public/big-screen/live-matches pages) also show
+      // a numbered player roster without a separate lookup. Individual-mode
+      // entrants below leave this null since the entrant already IS the one
+      // player - there's no separate roster to show.
+      players: team.memberIds.map((regId) => {
+        const reg = db.registrations.find((r) => r.id === regId);
+        const member = reg ? db.members[reg.membershipNumber] : null;
+        return reg ? reg.dependentName || (member ? member.name : "Member") : "Member";
+      }),
+    }));
   }
   return db.registrations
     .filter((r) => r.eventId === t.eventId && !r.waitlisted)
@@ -2238,6 +2253,7 @@ function tournamentEntrants(db, t) {
         id: "reg" + r.id,
         label: r.dependentName || (member ? member.name : "Member"),
         registrationIds: [r.id],
+        players: null,
       };
     });
 }

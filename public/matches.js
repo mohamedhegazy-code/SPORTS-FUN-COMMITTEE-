@@ -12,6 +12,21 @@ function eventNameHtml(ev) {
   return esc(ar || en);
 }
 
+// Team mode: a small numbered "1. Alice · 2. Bob" line under a team's name
+// on a match card, mirroring the same helper in app.js/screen.js (this page
+// runs standalone with no login, so it keeps its own small copy). Renders
+// nothing for individual-mode entrants (no `players` array).
+function firstTwoNames(fullName) {
+  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).join(" ") || fullName || "";
+}
+function teamRosterHtml(entrants, entrantId) {
+  const e = entrants && entrants.find((x) => x.id === entrantId);
+  if (!e || !e.players || !e.players.length) return "";
+  const text = e.players.map((p, i) => `${i + 1}. ${esc(firstTwoNames(p))}`).join(" &middot; ");
+  return `<div class="team-roster">${text}</div>`;
+}
+
 const params = new URLSearchParams(location.search);
 const eventId = params.get("event");
 
@@ -64,23 +79,27 @@ function collectScheduledMatches(tn) {
   return list.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.court - b.court);
 }
 
-function matchCardHtml(m, isLive) {
+function matchCardHtml(m, isLive, entrants) {
   const stateClass = m.decided ? "done" : isLive ? "live" : "upcoming";
   const badge = isLive && !m.decided ? `<span class="live-badge"><span class="live-badge-dot"></span>${esc(t("liveNow"))}</span>` : "";
   return `<div class="match-card ${stateClass}">
     ${badge}
     <div class="mc-top"><span class="mc-court">${esc(t("courtLabel"))} ${m.court}</span><span class="mc-time">${esc(m.time)}</span></div>
     <div class="mc-stage">${esc(m.stage)}</div>
-    <div class="mc-teams">${esc(m.aLabel || t("tbd"))}<span class="mc-vs">${esc(t("vs"))}</span>${esc(m.bLabel || t("tbd"))}</div>
+    <div class="mc-teams">
+      <span class="mc-team">${esc(m.aLabel || t("tbd"))}${teamRosterHtml(entrants, m.a)}</span>
+      <span class="mc-vs">${esc(t("vs"))}</span>
+      <span class="mc-team">${esc(m.bLabel || t("tbd"))}${teamRosterHtml(entrants, m.b)}</span>
+    </div>
   </div>`;
 }
 
-function renderSlots(nowMatches, nextMatches, nowLabel, nextTime) {
+function renderSlots(nowMatches, nextMatches, nowLabel, nextTime, entrants) {
   const nowHtml = nowMatches.length
-    ? `<div class="slot-section"><h2><span class="live-dot"></span>${esc(t("liveNow"))}</h2><div class="match-grid">${nowMatches.map((m) => matchCardHtml(m, true)).join("")}</div></div>`
+    ? `<div class="slot-section"><h2><span class="live-dot"></span>${esc(t("liveNow"))}</h2><div class="match-grid">${nowMatches.map((m) => matchCardHtml(m, true, entrants)).join("")}</div></div>`
     : "";
   const nextHtml = nextMatches.length
-    ? `<div class="slot-section"><h2>${esc(t("upNext"))}${nextTime ? ` <span class="slot-time">${esc(nextTime)}</span>` : ""}</h2><div class="match-grid">${nextMatches.map((m) => matchCardHtml(m, false)).join("")}</div></div>`
+    ? `<div class="slot-section"><h2>${esc(t("upNext"))}${nextTime ? ` <span class="slot-time">${esc(nextTime)}</span>` : ""}</h2><div class="match-grid">${nextMatches.map((m) => matchCardHtml(m, false, entrants)).join("")}</div></div>`
     : "";
   return nowHtml + nextHtml;
 }
@@ -150,7 +169,7 @@ async function loadAndRenderEvent() {
     if (!nowMatches.length && !nextMatches.length) {
       inner = `<div class="empty-state"><h2>${esc(t("tournStatusCompleted"))}</h2></div>`;
     } else {
-      inner = renderSlots(nowMatches, nextMatches, null, nextSlotMin !== undefined ? minutesToStr(nextSlotMin) : null);
+      inner = renderSlots(nowMatches, nextMatches, null, nextSlotMin !== undefined ? minutesToStr(nextSlotMin) : null, tn.entrants);
     }
     body.innerHTML = inner;
   } catch (e) {

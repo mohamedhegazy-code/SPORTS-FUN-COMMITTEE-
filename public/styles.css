@@ -656,6 +656,17 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 .tourn-match-time { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
 .tourn-table-scroll { overflow-x: auto; }
 
+/* Team mode: a small numbered "1. Alice · 2. Bob" line under a team's name,
+   wherever that name is shown on its own - seeding rows, standings cells,
+   bracket slots, match lines, live/big-screen displays. Individual-mode
+   entrants never get one (teamRosterHtml renders nothing for them). */
+.tourn-team-roster { font-size: 0.72rem; color: var(--muted); font-weight: 400; margin-top: 2px; line-height: 1.4; }
+.tourn-bracket-slot .tourn-team-roster, .tourn-seed-label .tourn-team-roster { font-size: 0.68rem; }
+.tourn-my-match-opp-roster { display: block; font-size: 0.68rem; }
+.tourn-match-teams { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tourn-match-side { display: inline-block; }
+.tourn-vs { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; }
+
 .tourn-score-entry { display: flex; align-items: center; gap: 4px; }
 .tourn-score-input { width: 44px; padding: 3px 4px; font-size: 0.78rem; text-align: center; }
 .tourn-ko-note { width: 100%; padding: 4px 6px; font-size: 0.72rem; margin: 4px 0; box-sizing: border-box; }

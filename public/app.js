@@ -3047,9 +3047,9 @@ function renderTournamentAttendance() {
   const allMatches = collectAllTournamentMatches(TOURNAMENT_DATA);
   const statusBtn = (regId, status, label, cls) =>
     `<button class="secondary small ${cls}" data-tourn-action="set-attendance" data-registration-id="${regId}" data-status="${status}">${label}</button>`;
-  const rowHtml = (a) => `
+  const rowHtml = (a, num) => `
     <div class="tourn-attendance-row tourn-att-${a.status}">
-      <span class="tourn-attendance-name">${escapeAttr(a.name)}</span>
+      <span class="tourn-attendance-name">${num != null ? `${num}. ` : ""}${escapeAttr(a.name)}</span>
       <span class="tourn-attendance-actions">
         ${statusBtn(a.registrationId, "present", t("attStatusPresent"), a.status === "present" ? "active" : "")}
         ${statusBtn(a.registrationId, "not_yet", t("attStatusNotYet"), a.status === "not_yet" ? "active" : "")}
@@ -3067,13 +3067,13 @@ function renderTournamentAttendance() {
       .map(
         (grp) => `<div class="tourn-attendance-team">
           <h5>${escapeAttr(grp.label)}${grp.rows.every((r) => r.status === "present") ? ` <span class="tourn-att-complete">${t("teamAttendanceComplete")}</span>` : ""}</h5>
-          ${grp.rows.map(rowHtml).join("")}
-          ${matchesBlockHtml(allMatches, grp.entrantId)}
+          ${grp.rows.map((a, i) => rowHtml(a, i + 1)).join("")}
+          ${matchesBlockHtml(allMatches, grp.entrantId, TOURNAMENT_DATA.entrants)}
         </div>`
       )
       .join("");
   } else {
-    body = list.map((a) => rowHtml(a) + matchesBlockHtml(allMatches, a.entrantId)).join("");
+    body = list.map((a) => rowHtml(a) + matchesBlockHtml(allMatches, a.entrantId, TOURNAMENT_DATA.entrants)).join("");
   }
   const presentCount = list.filter((a) => a.status === "present").length;
   return tournCardHtml(
@@ -3524,7 +3524,7 @@ function renderTournamentSeeding() {
       const e = entrants.find((x) => x.id === id);
       return `<div class="tourn-seed-row">
         <span class="tourn-seed-num">${i + 1}</span>
-        <span class="tourn-seed-label">${escapeAttr(e ? e.label : id)}</span>
+        <div class="tourn-seed-label">${escapeAttr(e ? e.label : id)}${teamRosterHtml(entrants, id)}</div>
         <span class="tourn-seed-actions">
           <button class="secondary small" ${i === 0 ? "disabled" : ""} data-tourn-action="move-entrant" data-entrant-id="${escapeAttr(id)}" data-dir="-1">↑</button>
           <button class="secondary small" ${i === order.length - 1 ? "disabled" : ""} data-tourn-action="move-entrant" data-entrant-id="${escapeAttr(id)}" data-dir="1">↓</button>
@@ -3602,7 +3602,7 @@ function renderTournamentReseedPanel() {
       const e = entrants.find((x) => x.id === id);
       return `<div class="tourn-seed-row">
         <span class="tourn-seed-num">${i + 1}</span>
-        <span class="tourn-seed-label">${escapeAttr(e ? e.label : id)}</span>
+        <div class="tourn-seed-label">${escapeAttr(e ? e.label : id)}${teamRosterHtml(entrants, id)}</div>
       </div>`;
     })
     .join("");
@@ -3635,6 +3635,48 @@ function matchTimeBadge(m) {
   return `<span class="tourn-match-time">${escapeAttr(t("courtLabel"))} ${m.court} &middot; ${escapeAttr(m.time)}</span>`;
 }
 
+// Team mode only: a numbered "1. Alice · 2. Bob" line for a team entrant,
+// shown wherever that team's name appears on its own (seeding, standings,
+// bracket slots, group matches, the public/big-screen/live-matches pages)
+// so a team is never just a name - who's actually on it is always visible
+// alongside it. Individual-mode entrants carry no separate roster (the
+// entrant already IS the one player), so this renders nothing for them -
+// purely additive, never changes individual-mode UI. `entrants` is
+// whichever tournament's resolved entrant list is in scope (TOURNAMENT_DATA
+// .entrants on the admin page, tn.entrants on the public/screen/matches
+// pages), so this works identically everywhere a team name is drawn.
+// Members are stored with a full name (often 3-4 words for Arabic names -
+// first, father's, grandfather's, family). A team roster is meant to be a
+// quick "who's on this team" glance, not a formal ID, so it shows just the
+// first two words (first + second/father's name) rather than the whole
+// thing.
+function firstTwoNames(fullName) {
+  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).join(" ") || fullName || "";
+}
+function teamRosterText(entrants, entrantId) {
+  const e = entrants && entrants.find((x) => x.id === entrantId);
+  if (!e || !e.players || !e.players.length) return "";
+  return e.players.map((p, i) => `${i + 1}. ${escapeAttr(firstTwoNames(p))}`).join(" &middot; ");
+}
+function teamRosterHtml(entrants, entrantId, cls) {
+  const text = teamRosterText(entrants, entrantId);
+  return text ? `<div class="${cls || "tourn-team-roster"}">${text}</div>` : "";
+}
+// Shared "TeamA vs TeamB" line for a group/knockout match, with each side's
+// numbered player roster shown underneath it in team mode (nothing extra in
+// individual mode, since teamRosterHtml already renders empty there). Used
+// everywhere a match is shown as one inline row rather than two separate
+// bracket slots (group-stage match rows, admin and public alike).
+function matchTeamsLineHtml(entrants, m, extra) {
+  return `<span class="tourn-match-teams">
+    <span class="tourn-match-side">${escapeAttr(m.aLabel)}${teamRosterHtml(entrants, m.a)}</span>
+    <span class="tourn-vs">${t("vs")}</span>
+    <span class="tourn-match-side">${escapeAttr(m.bLabel)}${teamRosterHtml(entrants, m.b)}</span>
+    ${extra || ""}
+  </span>`;
+}
+
 // Flattens every group-stage and knockout match into one list, each tagged
 // with a human stage label ("Group A", "Semifinal", ...) - shared by the
 // per-attendee "my matches" lists below (admin and public alike) so a
@@ -3661,9 +3703,10 @@ function collectAllTournamentMatches(tn) {
 }
 // One line in a player's own match list, from that player's point of view
 // (opponent, not "a"/"b"; "Won"/"Lost" rather than a neutral winner name).
-function attendeeMatchLineHtml(m, entrantId) {
+function attendeeMatchLineHtml(m, entrantId, entrants) {
   const isA = m.a === entrantId;
   const opponentLabel = isA ? m.bLabel || t("tbd") : m.aLabel || t("tbd");
+  const opponentId = isA ? m.b : m.a;
   const timeBadge = matchTimeBadge(m);
   let resultBit = t("matchNotYetPlayed");
   let cls = "pending";
@@ -3691,7 +3734,7 @@ function attendeeMatchLineHtml(m, entrantId) {
   }
   return `<div class="tourn-my-match ${cls}">
     <span class="tourn-my-match-stage">${escapeAttr(m.stage)}</span>
-    <span class="tourn-my-match-opp">${t("vs")} ${escapeAttr(opponentLabel)}</span>
+    <span class="tourn-my-match-opp">${t("vs")} ${escapeAttr(opponentLabel)}${teamRosterHtml(entrants, opponentId, "tourn-team-roster tourn-my-match-opp-roster")}</span>
     ${timeBadge}
     <span class="tourn-my-match-result">${resultBit}</span>
   </div>`;
@@ -3699,21 +3742,22 @@ function attendeeMatchLineHtml(m, entrantId) {
 // Collapsed by default (native <details> - no extra JS needed) so a long
 // attendee list doesn't turn into a wall of match cards; the summary shows
 // just a count until someone opens it.
-function matchesBlockHtml(allMatches, entrantId) {
+function matchesBlockHtml(allMatches, entrantId, entrants) {
   const mine = allMatches.filter((m) => m.a === entrantId || m.b === entrantId);
   if (!mine.length) return "";
   return `<details class="tourn-my-matches">
     <summary>${t("attendeeMatchesLabel")} (${mine.length})</summary>
-    ${mine.map((m) => attendeeMatchLineHtml(m, entrantId)).join("")}
+    ${mine.map((m) => attendeeMatchLineHtml(m, entrantId, entrants)).join("")}
   </details>`;
 }
 function renderTournamentGroups() {
+  const entrants = TOURNAMENT_DATA.entrants;
   const groupsHtml = TOURNAMENT_DATA.groups
     .map((g, gi) => {
       const standingsRows = g.standings
         .map(
           (s, i) =>
-            `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.gf}</td><td>${s.ga}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`
+            `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}${teamRosterHtml(entrants, s.entrantId)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.gf}</td><td>${s.ga}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`
         )
         .join("");
       const matchesHtml = g.matches
@@ -3725,7 +3769,7 @@ function renderTournamentGroups() {
                 ? t("matchDraw")
                 : `${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
             return `<div class="tourn-match decided">
-              <span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)} ${timeBadge}</span>
+              ${matchTeamsLineHtml(entrants, m, timeBadge)}
               <span class="tourn-match-result">${m.result.scoreA} - ${m.result.scoreB} &middot; ${resultText}</span>
               <details class="tourn-edit-score">
                 <summary>${t("btnEditScore")}</summary>
@@ -3739,7 +3783,7 @@ function renderTournamentGroups() {
             </div>`;
           }
           return `<div class="tourn-match">
-            <span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)} ${timeBadge}</span>
+            ${matchTeamsLineHtml(entrants, m, timeBadge)}
             <span class="tourn-match-actions tourn-score-entry">
               <input type="number" min="0" class="tourn-score-input" data-score-side="a" placeholder="0" aria-label="${escapeAttr(m.aLabel)}" />
               <span>-</span>
@@ -3801,6 +3845,7 @@ function knockoutResultText(m) {
   return `${escapeAttr(winnerLabel)} ${t("wins")}${bits ? " (" + bits + ")" : ""}`;
 }
 function renderTournamentBracket() {
+  const entrants = TOURNAMENT_DATA.entrants;
   const rounds = TOURNAMENT_DATA.knockout.rounds;
   const roundsHtml = rounds
     .map((round, ri) => {
@@ -3850,8 +3895,8 @@ function renderTournamentBracket() {
           }
           return `<div class="tourn-bracket-match">
             ${timeBadge ? `<div class="tourn-bracket-time">${timeBadge}</div>` : ""}
-            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}</div>
-            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}</div>
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}${teamRosterHtml(entrants, m.a)}</div>
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}${teamRosterHtml(entrants, m.b)}</div>
             ${footer}
           </div>`;
         })
@@ -3887,7 +3932,8 @@ async function recordTournamentKnockoutResult(btn) {
 }
 
 function renderTournamentStandings() {
-  const rows = TOURNAMENT_DATA.standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`).join("");
+  const entrants = TOURNAMENT_DATA.entrants;
+  const rows = TOURNAMENT_DATA.standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}${teamRosterHtml(entrants, s.entrantId)}</td></tr>`).join("");
   const awardedNote = TOURNAMENT_DATA.pointsAwardedAt
     ? `<p class="hint-note">${t("pointsAwardedOn")} ${escapeAttr(new Date(TOURNAMENT_DATA.pointsAwardedAt).toLocaleString())}</p>`
     : "";
@@ -4000,13 +4046,13 @@ function renderPublicTournamentBody(tn, eventId) {
   if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
     notStartedHtml = `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
   } else if (tn.status === "groups") {
-    groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups), "tourn-card-live");
+    groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups, tn.entrants), "tourn-card-live");
   } else if (tn.status === "knockout") {
-    bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout), "tourn-card-live");
+    bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout, tn.entrants), "tourn-card-live");
   } else if (tn.status === "completed") {
-    if (tn.format === "groups") groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups), "tourn-card-live");
-    bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout), "tourn-card-live");
-    standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), renderPublicStandings(tn.standings), "tourn-card-standings");
+    if (tn.format === "groups") groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups, tn.entrants), "tourn-card-live");
+    bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout, tn.entrants), "tourn-card-live");
+    standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), renderPublicStandings(tn.standings, tn.entrants), "tourn-card-standings");
   }
   const matchesLink = tn.schedule
     ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${eventId}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
@@ -4045,7 +4091,7 @@ function renderPublicAttendance(tn) {
       <span class="tourn-attendance-name">${escapeAttr(a.name)}</span>
       <span class="tourn-att-status-badge">${escapeAttr(attStatusLabel(a.status))}</span>
     </div>
-    ${matchesBlockHtml(allMatches, a.entrantId)}`;
+    ${matchesBlockHtml(allMatches, a.entrantId, tn.entrants)}`;
   let body;
   if (tn.mode === "team") {
     const byEntrant = {};
@@ -4059,13 +4105,13 @@ function renderPublicAttendance(tn) {
           <h5>${escapeAttr(grp.label)}</h5>
           ${grp.rows
             .map(
-              (a) => `<div class="tourn-attendance-row tourn-att-${a.status}">
-                <span class="tourn-attendance-name">${escapeAttr(a.name)}</span>
+              (a, i) => `<div class="tourn-attendance-row tourn-att-${a.status}">
+                <span class="tourn-attendance-name">${i + 1}. ${escapeAttr(a.name)}</span>
                 <span class="tourn-att-status-badge">${escapeAttr(attStatusLabel(a.status))}</span>
               </div>`
             )
             .join("")}
-          ${matchesBlockHtml(allMatches, grp.entrantId)}
+          ${matchesBlockHtml(allMatches, grp.entrantId, tn.entrants)}
         </div>`
       )
       .join("");
@@ -4080,13 +4126,13 @@ function renderPublicAttendance(tn) {
     "tourn-card-attendance"
   );
 }
-function renderPublicGroups(groups) {
+function renderPublicGroups(groups, entrants) {
   const groupsHtml = (groups || [])
     .map((g, gi) => {
       const standingsRows = g.standings
         .map(
           (s, i) =>
-            `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.gf}</td><td>${s.ga}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`
+            `<tr><td>${i + 1}</td><td>${escapeAttr(s.label)}${teamRosterHtml(entrants, s.entrantId)}</td><td>${s.played}</td><td>${s.wins}</td><td>${s.draws}</td><td>${s.losses}</td><td>${s.gf}</td><td>${s.ga}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`
         )
         .join("");
       const matchesHtml = g.matches
@@ -4097,7 +4143,7 @@ function renderPublicGroups(groups) {
             : m.result.winnerId === null
             ? `${m.result.scoreA} - ${m.result.scoreB} &middot; ${t("matchDraw")}`
             : `${m.result.scoreA} - ${m.result.scoreB} &middot; ${escapeAttr(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
-          return `<div class="tourn-match${m.result ? " decided" : ""}"><span>${escapeAttr(m.aLabel)} ${t("vs")} ${escapeAttr(m.bLabel)} ${timeBadge}</span><span class="tourn-match-result">${resultText}</span></div>`;
+          return `<div class="tourn-match${m.result ? " decided" : ""}">${matchTeamsLineHtml(entrants, m, timeBadge)}<span class="tourn-match-result">${resultText}</span></div>`;
         })
         .join("");
       return `<div class="tourn-group">
@@ -4109,7 +4155,7 @@ function renderPublicGroups(groups) {
     .join("");
   return `<div class="tourn-groups-grid">${groupsHtml}</div>`;
 }
-function renderPublicBracket(knockout) {
+function renderPublicBracket(knockout, entrants) {
   if (!knockout) return "";
   const rounds = knockout.rounds;
   const roundsHtml = rounds
@@ -4132,8 +4178,8 @@ function renderPublicBracket(knockout) {
           }
           return `<div class="tourn-bracket-match">
             ${timeBadge ? `<div class="tourn-bracket-time">${timeBadge}</div>` : ""}
-            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}</div>
-            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}</div>
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}${teamRosterHtml(entrants, m.a)}</div>
+            <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}${teamRosterHtml(entrants, m.b)}</div>
             ${footer}
           </div>`;
         })
@@ -4143,9 +4189,9 @@ function renderPublicBracket(knockout) {
     .join("");
   return `<div class="tourn-bracket">${roundsHtml}</div>`;
 }
-function renderPublicStandings(standings) {
+function renderPublicStandings(standings, entrants) {
   if (!standings) return "";
-  const rows = standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`).join("");
+  const rows = standings.map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}${teamRosterHtml(entrants, s.entrantId)}</td></tr>`).join("");
   return `<table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 

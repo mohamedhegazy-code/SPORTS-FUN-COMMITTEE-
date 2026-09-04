@@ -12,6 +12,22 @@
     return esc(ar || en);
   }
 
+  // Team mode: a small numbered "1. Alice · 2. Bob" line under a team's
+  // name, mirroring the same helper in app.js (this page runs standalone
+  // with no login, so it keeps its own small copy rather than importing
+  // app.js). Individual-mode entrants carry no `players` array, so this
+  // renders nothing for them.
+  function firstTwoNames(fullName) {
+    const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+    return parts.slice(0, 2).join(" ") || fullName || "";
+  }
+  function teamRosterHtml(entrants, entrantId) {
+    const e = entrants && entrants.find((x) => x.id === entrantId);
+    if (!e || !e.players || !e.players.length) return "";
+    const text = e.players.map((p, i) => `${i + 1}. ${esc(firstTwoNames(p))}`).join(" &middot; ");
+    return `<div class="team-roster">${text}</div>`;
+  }
+
   const params = new URLSearchParams(location.search);
   const eventId = params.get("event");
 
@@ -32,11 +48,11 @@
     } catch (e) { /* theme is cosmetic only - never block the page on it */ }
   }
 
-  function renderStandings(standings) {
+  function renderStandings(standings, entrants) {
     if (!standings || !standings.length) return "";
     const winner = standings.find((s) => s.rank === 1);
     const rows = standings
-      .map((s) => `<tr><td>${s.rank}</td><td>${esc(s.label)}</td></tr>`)
+      .map((s) => `<tr><td>${s.rank}</td><td>${esc(s.label)}${teamRosterHtml(entrants, s.entrantId)}</td></tr>`)
       .join("");
     const banner = winner
       ? `<div class="winner-banner">
@@ -53,11 +69,11 @@
       </div>`;
   }
 
-  function renderGroups(groups) {
+  function renderGroups(groups, entrants) {
     if (!groups || !groups.length) return "";
     const cards = groups
       .map((g, gi) => {
-        const standingsRows = g.standings.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.label)}</td><td>${s.points}</td></tr>`).join("");
+        const standingsRows = g.standings.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.label)}${teamRosterHtml(entrants, s.entrantId)}</td><td>${s.points}</td></tr>`).join("");
         const matches = g.matches
           .map((m) => {
             const resultText = !m.result
@@ -65,7 +81,7 @@
               : m.result.winnerId === null
               ? t("matchDraw")
               : `${esc(m.result.winnerId === m.a ? m.aLabel : m.bLabel)} ${t("wins")}`;
-            return `<div class="group-match${m.result ? " decided" : ""}"><span>${esc(m.aLabel)} ${esc(t("vs"))} ${esc(m.bLabel)}</span><span class="result">${esc(resultText)}</span></div>`;
+            return `<div class="group-match${m.result ? " decided" : ""}"><span>${esc(m.aLabel)}${teamRosterHtml(entrants, m.a)} ${esc(t("vs"))} ${esc(m.bLabel)}${teamRosterHtml(entrants, m.b)}</span><span class="result">${esc(resultText)}</span></div>`;
           })
           .join("");
         return `<div class="group-card">
@@ -78,7 +94,7 @@
     return `<div class="section-title">${esc(t("tournamentFormatGroups"))}</div><div class="groups-grid">${cards}</div>`;
   }
 
-  function renderBracket(knockout) {
+  function renderBracket(knockout, entrants) {
     if (!knockout) return "";
     const rounds = knockout.rounds;
     const roundsHtml = rounds
@@ -97,8 +113,8 @@
               footer = `${esc(winnerLabel)} ${t("wins")}${m.score ? " (" + esc(m.score) + ")" : ""}`;
             } else footer = t("waitingOnPreviousRound");
             return `<div class="bracket-match">
-              <div class="bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${esc(aLabel)}</div>
-              <div class="bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${esc(bLabel)}</div>
+              <div class="bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${esc(aLabel)}${teamRosterHtml(entrants, m.a)}</div>
+              <div class="bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${esc(bLabel)}${teamRosterHtml(entrants, m.b)}</div>
               <div class="bracket-footer">${esc(footer)}</div>
             </div>`;
           })
@@ -157,11 +173,11 @@
       if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
         inner = `<div class="empty-state"><h2>${esc(t("tournPublicNotStarted"))}</h2></div>`;
       } else if (tn.status === "groups") {
-        inner = renderGroups(tn.groups);
+        inner = renderGroups(tn.groups, tn.entrants);
       } else if (tn.status === "knockout") {
-        inner = renderBracket(tn.knockout);
+        inner = renderBracket(tn.knockout, tn.entrants);
       } else if (tn.status === "completed") {
-        inner = renderStandings(tn.standings) + (tn.format === "groups" ? renderGroups(tn.groups) : "") + renderBracket(tn.knockout);
+        inner = renderStandings(tn.standings, tn.entrants) + (tn.format === "groups" ? renderGroups(tn.groups, tn.entrants) : "") + renderBracket(tn.knockout, tn.entrants);
       }
       body.innerHTML = `
         <div class="badges">
