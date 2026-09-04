@@ -2853,6 +2853,47 @@ app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole("admin"), 
   res.json({ tournament: serializeTournament(db, t) });
 });
 
+// Undoes generation and sends the tournament back to the seeding step, so
+// the admin can fix a wrong seed order (or reorder further) and regenerate
+// through the exact same Generate flow used the first time - deliberately
+// NOT a reseed-in-place, since entrant ids are baked into every match once
+// generated. Only allowed while nothing has actually been played yet
+// (byes don't count - nobody played those, they just auto-advanced), so
+// there's nothing at risk of being silently discarded. If any real result
+// already exists, the admin needs to delete and recreate the tournament
+// instead - same trade-off already made for editing team rosters/seed
+// order after generation (see the project notes on that decision).
+app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (!t.groups && !t.knockout) {
+    return res.status(400).json({ error: "This tournament hasn't been generated yet - just edit the seed order directly" });
+  }
+  if (t.status === "completed") {
+    return res.status(400).json({ error: "This tournament is already completed and can't be reseeded" });
+  }
+  const playedGroupMatches = (t.groups || []).reduce((sum, g) => sum + g.matches.filter((m) => m.result).length, 0);
+  const playedKnockoutMatches = t.knockout
+    ? t.knockout.rounds.reduce((sum, round) => sum + round.filter((m) => m.winnerId && !m.bye).length, 0)
+    : 0;
+  const played = playedGroupMatches + playedKnockoutMatches;
+  if (played > 0) {
+    return res.status(400).json({
+      error: `Can't reseed - ${played} match result${played === 1 ? " has" : "s have"} already been recorded. Delete and recreate the tournament instead if you need to change the seeding now.`,
+    });
+  }
+  t.groups = null;
+  t.knockout = null;
+  t.standings = null;
+  t.pointsAwardedAt = null;
+  t.lastGroupSlotEnd = null;
+  t.status = "seeding";
+  reconcileSeedOrder(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
 app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole("admin"), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));

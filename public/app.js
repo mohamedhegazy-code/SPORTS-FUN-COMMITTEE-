@@ -2835,6 +2835,7 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "move-entrant") moveTournamentEntrant(btn.dataset.entrantId, Number(btn.dataset.dir));
   else if (action === "randomize-seed") randomizeTournamentSeed();
   else if (action === "generate-tournament") generateTournament();
+  else if (action === "reseed-tournament") reseedTournament();
   else if (action === "group-result") recordTournamentGroupResult(btn);
   else if (action === "generate-knockout") generateTournamentKnockout();
   else if (action === "knockout-result") recordTournamentKnockoutResult(btn);
@@ -2939,6 +2940,7 @@ function renderTournamentBody() {
   let preGenContent = "";
   if (TOURNAMENT_DATA.status === "team-setup") preGenContent = renderTournamentTeamSetup();
   else if (TOURNAMENT_DATA.status === "seeding") preGenContent = renderTournamentSeeding();
+  else if (TOURNAMENT_DATA.status === "groups" || TOURNAMENT_DATA.status === "knockout") preGenContent = renderTournamentReseedPanel();
   let liveContent = "";
   if (TOURNAMENT_DATA.status === "groups") liveContent = renderTournamentGroups();
   else if (TOURNAMENT_DATA.status === "knockout") liveContent = renderTournamentBracket();
@@ -3498,6 +3500,46 @@ async function generateTournament() {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/generate", { method: "POST" });
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("tournamentGenerated"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+// Shown once a bracket/groups already exist (status "groups" or
+// "knockout"): a read-only view of the seed order that generated it, plus a
+// Reseed button that sends the tournament back to the seeding step so the
+// admin can fix the order and regenerate through the same flow as before.
+// Only offered here in the UI when nothing has been played yet - the server
+// re-checks this too (byes don't count, see the /reseed endpoint), so this
+// is just keeping the button honest rather than the actual guard.
+function renderTournamentReseedPanel() {
+  const entrants = TOURNAMENT_DATA.entrants;
+  const order = TOURNAMENT_DATA.seedOrder;
+  const rows = order
+    .map((id, i) => {
+      const e = entrants.find((x) => x.id === id);
+      return `<div class="tourn-seed-row">
+        <span class="tourn-seed-num">${i + 1}</span>
+        <span class="tourn-seed-label">${escapeAttr(e ? e.label : id)}</span>
+      </div>`;
+    })
+    .join("");
+  return `
+    <p class="hint-note">${t("reseedHint")}</p>
+    <div class="tourn-seed-list">${rows}</div>
+    <div style="margin-top:10px;">
+      <button class="secondary" data-tourn-action="reseed-tournament">${t("btnReseed")}</button>
+    </div>
+  `;
+}
+async function reseedTournament() {
+  if (!confirm(t("confirmReseedTournament"))) return;
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/reseed", { method: "POST" });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, t("tournamentReseeded"), true);
     renderTournamentBody();
   } catch (e) {
     showMsg(msg, e.message, false);
