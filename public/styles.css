@@ -667,6 +667,20 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 .tourn-match-side { display: inline-block; }
 .tourn-vs { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; }
 
+/* A member's still-valid entry QR shown next to their name on a roster row
+   (Gate Scanner's manual check-in list, the per-event admin hub's
+   attendance list, and the Member directory's registration history) - lets
+   staff/admin resend a code to someone who missed it at the gate. Only
+   rendered when the backend decided the QR is still worth showing (not
+   checked in, not waitlisted, event not over yet). */
+.roster-qr { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.roster-qr-thumb { width: 56px; height: 56px; border: 1px solid var(--border); border-radius: 6px; background: #fff; padding: 2px; }
+.roster-qr-download {
+  display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red);
+  padding: 4px 8px; border-radius: 6px; font-size: 0.68rem; text-decoration: none; white-space: nowrap;
+}
+.roster-qr-download:hover { background: #fdeaea; }
+
 .tourn-score-entry { display: flex; align-items: center; gap: 4px; }
 .tourn-score-input { width: 44px; padding: 3px 4px; font-size: 0.78rem; text-align: center; }
 .tourn-ko-note { width: 100%; padding: 4px 6px; font-size: 0.72rem; margin: 4px 0; box-sizing: border-box; }

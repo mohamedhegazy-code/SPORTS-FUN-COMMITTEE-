@@ -2298,13 +2298,13 @@ function renderDirectoryTable() {
       : `<p class="dashboard-empty-note">${t("noDependents")}</p>`;
     const regsHtml = m.registrations.length
       ? `<table class="dashboard-table"><thead><tr>
-          <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colStatus")}</th><th>${t("colPoints")}</th>
+          <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colStatus")}</th><th>${t("colPoints")}</th><th></th>
         </tr></thead><tbody>${m.registrations
           .map((r) => {
             const label = currentLang === "ar" ? r.nameAr || r.nameEn : r.nameEn;
             const who = r.dependentName ? ` (${escapeAttr(r.dependentName)})` : "";
             const status = r.waitlisted ? t("waitlistLabel") : r.checkedIn ? t("colCheckedIn") : t("statusRegistered");
-            return `<tr><td>${escapeAttr(label)}${who}</td><td>${escapeAttr(r.date)}</td><td>${status}</td><td class="num">${fmt(r.points)}</td></tr>`;
+            return `<tr><td>${escapeAttr(label)}${who}</td><td>${escapeAttr(r.date)}</td><td>${status}</td><td class="num">${fmt(r.points)}</td><td>${rosterQrCellHtml(r.qrDataUrl, `${m.membershipNumber}-${r.eventId}`)}</td></tr>`;
           })
           .join("")}</tbody></table>`
       : `<p class="dashboard-empty-note">${t("noRegistrationsYet")}</p>`;
@@ -4526,10 +4526,25 @@ function rosterTableHtml(roster, query) {
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td>${status}</td>
+        <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
         <td>${action}</td>
       </tr>`;
     })
     .join("")}</tbody></table>`;
+}
+// Small QR thumbnail + a Download link, shown next to a roster row whenever
+// the backend decided this registration's QR is still worth showing (not
+// checked in, not waitlisted, event not over - see the server's roster/
+// directory endpoints). Lets staff/admin resend a code to someone who
+// missed it at the gate without needing a real "send" mechanism this app
+// doesn't have (no email/SMS infra) - they download the image here and
+// share it however they normally would.
+function rosterQrCellHtml(qrDataUrl, downloadKey) {
+  if (!qrDataUrl) return "";
+  return `<div class="roster-qr">
+    <img src="${qrDataUrl}" alt="QR" class="roster-qr-thumb" />
+    <a class="roster-qr-download" href="${qrDataUrl}" download="qr-${escapeAttr(String(downloadKey))}.png">${t("btnDownloadQr")}</a>
+  </div>`;
 }
 document.getElementById("checkin-roster-wrap").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-checkin-reg]");

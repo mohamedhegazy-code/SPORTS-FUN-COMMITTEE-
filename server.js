@@ -1637,23 +1637,36 @@ app.post("/api/checkin", requireStaffRole("staff"), async (req, res) => {
 // list next to the scanner. Includes waitlisted registrations too (shown,
 // not checkable - performCheckIn rejects those the same way the QR path
 // does) so staff see the full picture at the gate, not just who's eligible.
-app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), (req, res) => {
+app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), async (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
-  const roster = db.registrations
-    .filter((r) => r.eventId === eventId)
-    .map((r) => {
-      const member = db.members[r.membershipNumber];
-      return {
-        registrationId: r.id,
-        attendeeName: r.dependentName || (member ? member.name : r.membershipNumber),
-        membershipNumber: r.membershipNumber,
-        checkedIn: !!r.checkedIn,
-        checkInAt: r.checkInAt,
-        waitlisted: !!r.waitlisted,
-      };
-    })
-    .sort((a, b) => a.attendeeName.localeCompare(b.attendeeName));
+  const event = db.events.find((e) => e.id === eventId);
+  // A registration's QR is only worth showing while it could still actually
+  // be used: not already checked in, not waitlisted (no QR was ever issued
+  // for those), and the event itself hasn't closed. Lets staff/admin pull up
+  // and resend a code to someone who missed it at the gate, without also
+  // showing a stale code for someone already checked in or an event that's
+  // over. Mirrors the exact same rule the member's own "My Registrations"
+  // view already uses (see loadMyRegistrations() in app.js).
+  const eventOver = !event || eventEndDate(event) < todayStr();
+  const roster = await Promise.all(
+    db.registrations
+      .filter((r) => r.eventId === eventId)
+      .map(async (r) => {
+        const member = db.members[r.membershipNumber];
+        const canShowQr = !r.checkedIn && !r.waitlisted && !eventOver;
+        return {
+          registrationId: r.id,
+          attendeeName: r.dependentName || (member ? member.name : r.membershipNumber),
+          membershipNumber: r.membershipNumber,
+          checkedIn: !!r.checkedIn,
+          checkInAt: r.checkInAt,
+          waitlisted: !!r.waitlisted,
+          qrDataUrl: canShowQr ? await qrDataUrl(r) : null,
+        };
+      })
+  );
+  roster.sort((a, b) => a.attendeeName.localeCompare(b.attendeeName));
   res.json(roster);
 });
 
@@ -2127,27 +2140,37 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
 // points earned per event). Meant for browsing/printing the whole roster
 // with real detail, as opposed to /api/admin/members which is the lighter
 // list used for search + bulk-invite.
-app.get("/api/admin/directory", requireStaffRole("admin"), (req, res) => {
+app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
   const db = req.db;
-  const rows = Object.values(db.members)
-    .map((m) => {
+  const today = todayStr();
+  const rows = await Promise.all(
+    Object.values(db.members).map(async (m) => {
       const snap = balanceSnapshot(db, m.membershipNumber);
-      const registrations = db.registrations
-        .filter((r) => r.membershipNumber === m.membershipNumber)
-        .map((r) => {
-          const event = db.events.find((e) => e.id === r.eventId);
-          return {
-            eventId: r.eventId,
-            nameEn: event ? event.nameEn : "",
-            nameAr: event ? event.nameAr : "",
-            date: event ? event.date : "",
-            dependentName: r.dependentName,
-            waitlisted: !!r.waitlisted,
-            checkedIn: !!r.checkedIn,
-            points: registrationPoints(db, r),
-          };
-        })
-        .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      const registrations = await Promise.all(
+        db.registrations
+          .filter((r) => r.membershipNumber === m.membershipNumber)
+          .map(async (r) => {
+            const event = db.events.find((e) => e.id === r.eventId);
+            // Same "still usable" rule as the staff roster endpoint above -
+            // only show a QR while it hasn't been checked in/waitlisted and
+            // the event hasn't closed yet, so admin can resend a real,
+            // still-valid code rather than a stale one.
+            const eventOver = !event || eventEndDate(event) < today;
+            const canShowQr = !r.checkedIn && !r.waitlisted && !eventOver;
+            return {
+              eventId: r.eventId,
+              nameEn: event ? event.nameEn : "",
+              nameAr: event ? event.nameAr : "",
+              date: event ? event.date : "",
+              dependentName: r.dependentName,
+              waitlisted: !!r.waitlisted,
+              checkedIn: !!r.checkedIn,
+              points: registrationPoints(db, r),
+              qrDataUrl: canShowQr ? await qrDataUrl(r) : null,
+            };
+          })
+      );
+      registrations.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
       return {
         membershipNumber: m.membershipNumber,
         name: m.name,
@@ -2161,7 +2184,8 @@ app.get("/api/admin/directory", requireStaffRole("admin"), (req, res) => {
         checkedInCount: registrations.filter((r) => r.checkedIn).length,
       };
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  );
+  rows.sort((a, b) => a.name.localeCompare(b.name));
   res.json(rows);
 });
 
