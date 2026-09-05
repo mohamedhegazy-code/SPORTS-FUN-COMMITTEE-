@@ -288,6 +288,16 @@ function switchTab(view) {
       loadPublicTournamentsList();
     }
   }
+  // Manual check-in only ever loaded on a dropdown "change" event, so if the
+  // event a visitor cares about is already the default-selected option when
+  // the tab opens (e.g. it's the newest event, first in the sorted list),
+  // nobody ever fires that event and the roster silently never loads - the
+  // search box shows up with nothing underneath it, even though the event
+  // genuinely has registrations (confirmed via the Admin hub's identical
+  // Attendance section, which loads explicitly and always worked). Loading
+  // it here too means opening (or returning to) the tab always reflects
+  // whatever event is currently selected, default or not.
+  if (view === "scan") loadCheckinRoster();
   if (view === "mypoints" && CURRENT_SESSION && CURRENT_SESSION.type === "member") loadMyChat();
   if (view === "admin" && CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin") {
     loadChatThreadsList();
