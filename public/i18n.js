@@ -576,6 +576,9 @@ const I18N = {
     mgmtNoTournamentForEvent: "This event didn't run a tournament.",
     colMember: "Member",
     fieldMode: "Mode",
+    mgmtSelectAllEvents: "Select all",
+    mgmtClearEvents: "Clear all",
+    mgmtNoEventsSelected: "No events selected — use \"Select all\" above to show them.",
   },
   ar: {
     appTitle: "أهلاوي — التسجيل الإلكتروني ونظام النقاط",
@@ -1154,6 +1157,9 @@ const I18N = {
     mgmtNoTournamentForEvent: "لم تُقم بطولة في هذه الفعالية.",
     colMember: "العضو",
     fieldMode: "النوع",
+    mgmtSelectAllEvents: "تحديد الكل",
+    mgmtClearEvents: "إلغاء التحديد",
+    mgmtNoEventsSelected: "لم يتم تحديد أي فعالية — استخدم \"تحديد الكل\" أعلاه لعرضها.",
   },
 };
 

@@ -1864,6 +1864,101 @@ function monthLabel(key) {
   const d = new Date(Number(y), Number(m) - 1, 1);
   return d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { year: "numeric", month: "short" });
 }
+
+// Event performance trends: which events to include is a client-side
+// filter, not a server query - the dashboard already returns every event's
+// row in one call, so narrowing to a chosen subset is just re-rendering
+// from the same cached data. The chosen subset is remembered per-browser
+// (sessionStorage, same pattern as the admin tab memory) so it survives a
+// dashboard reload but not a full log-out/new-session.
+const MGMT_TRENDS_STORAGE_KEY = "mgmtTrendsSelectedEvents";
+let MGMT_EVENT_TRENDS_ALL = [];
+let MGMT_TRENDS_SELECTED_IDS = new Set();
+function loadMgmtTrendsSelection() {
+  try {
+    const raw = sessionStorage.getItem(MGMT_TRENDS_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : null;
+  } catch (e) {
+    return null; // sessionStorage unavailable - fall back to "show everything"
+  }
+}
+function saveMgmtTrendsSelection() {
+  try {
+    sessionStorage.setItem(MGMT_TRENDS_STORAGE_KEY, JSON.stringify([...MGMT_TRENDS_SELECTED_IDS]));
+  } catch (e) {
+    /* ignore - non-fatal, selection just won't be remembered on next visit */
+  }
+}
+function eventTrendsSectionHtml(rows, selectedIds) {
+  const filterHtml = rows.length
+    ? `<div class="mgmt-trend-filter" style="margin-bottom:12px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <button type="button" class="secondary small" id="mgmt-trends-select-all">${t("mgmtSelectAllEvents")}</button>
+          <button type="button" class="secondary small" id="mgmt-trends-clear-all">${t("mgmtClearEvents")}</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px 16px;max-height:160px;overflow-y:auto;">
+          ${rows
+            .map(
+              (r) => `<label style="display:flex;align-items:center;gap:5px;font-size:0.85rem;white-space:nowrap;">
+              <input type="checkbox" data-trend-event-id="${r.eventId}" ${selectedIds.has(r.eventId) ? "checked" : ""} />
+              ${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))} <span class="hint-note" style="display:inline;">(${escapeAttr(r.date)})</span>
+            </label>`
+            )
+            .join("")}
+        </div>
+      </div>`
+    : "";
+  const filtered = rows.filter((r) => selectedIds.has(r.eventId));
+  const eventRows = filtered
+    .map(
+      (r) => `<tr>
+      <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
+      <td>${escapeAttr(r.date)}</td>
+      <td class="num">${fmt(r.confirmedCount)}</td>
+      <td class="num">${fmt(r.waitlistCount)}</td>
+      <td class="num">${fmt(r.checkedInCount)}</td>
+      <td>${r.attendanceRate === null ? "—" : r.attendanceRate + "%"}</td>
+    </tr>`
+    )
+    .join("");
+  const tableOrEmpty = filtered.length
+    ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
+      <thead><tr><th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colRegistrations")}</th><th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th></tr></thead>
+      <tbody>${eventRows}</tbody>
+    </table></div>`
+    : `<p class="dashboard-empty-note">${t(rows.length ? "mgmtNoEventsSelected" : "noEventsYet")}</p>`;
+  return `<h3>${t("mgmtEventTrends")}</h3>${filterHtml}${tableOrEmpty}`;
+}
+function renderEventTrendsSection() {
+  const container = document.getElementById("mgmt-event-trends-section");
+  if (!container) return;
+  container.innerHTML = eventTrendsSectionHtml(MGMT_EVENT_TRENDS_ALL, MGMT_TRENDS_SELECTED_IDS);
+  container.querySelectorAll("[data-trend-event-id]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = Number(cb.dataset.trendEventId);
+      if (cb.checked) MGMT_TRENDS_SELECTED_IDS.add(id);
+      else MGMT_TRENDS_SELECTED_IDS.delete(id);
+      saveMgmtTrendsSelection();
+      renderEventTrendsSection();
+    });
+  });
+  const selectAllBtn = document.getElementById("mgmt-trends-select-all");
+  if (selectAllBtn) {
+    selectAllBtn.addEventListener("click", () => {
+      MGMT_TRENDS_SELECTED_IDS = new Set(MGMT_EVENT_TRENDS_ALL.map((r) => r.eventId));
+      saveMgmtTrendsSelection();
+      renderEventTrendsSection();
+    });
+  }
+  const clearAllBtn = document.getElementById("mgmt-trends-clear-all");
+  if (clearAllBtn) {
+    clearAllBtn.addEventListener("click", () => {
+      MGMT_TRENDS_SELECTED_IDS = new Set();
+      saveMgmtTrendsSelection();
+      renderEventTrendsSection();
+    });
+  }
+}
 async function loadManagementDashboard() {
   const wrap = document.getElementById("mgmt-dashboard-body");
   if (!wrap) return;
@@ -1891,28 +1986,17 @@ function renderManagementDashboard(data) {
     </div>
     <p class="hint-note">${t("mgmtNewSignups")}: ${g.newSignupsByMonth.map((r) => `${monthLabel(r.month)} (${fmt(r.count)})`).join(" · ")}</p>`;
 
-  const eventRows = data.eventTrends
-    .map(
-      (r) => `<tr>
-      <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
-      <td>${escapeAttr(r.date)}</td>
-      <td class="num">${fmt(r.confirmedCount)}</td>
-      <td class="num">${fmt(r.waitlistCount)}</td>
-      <td class="num">${fmt(r.checkedInCount)}</td>
-      <td>${r.attendanceRate === null ? "—" : r.attendanceRate + "%"}</td>
-    </tr>`
-    )
-    .join("");
-  const trendsHtml = `
-    <h3>${t("mgmtEventTrends")}</h3>
-    ${
-      data.eventTrends.length
-        ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
-      <thead><tr><th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colRegistrations")}</th><th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th></tr></thead>
-      <tbody>${eventRows}</tbody>
-    </table></div>`
-        : `<p class="dashboard-empty-note">${t("noEventsYet")}</p>`
-    }`;
+  // Which events show in the trends table is a client-side filter over
+  // this same data - see eventTrendsSectionHtml()/renderEventTrendsSection()
+  // above. Preserve whatever the user already picked (sessionStorage) if
+  // this isn't the first load; default to "show everything" the first time.
+  MGMT_EVENT_TRENDS_ALL = data.eventTrends;
+  const storedTrendsSelection = loadMgmtTrendsSelection();
+  const allTrendIds = data.eventTrends.map((r) => r.eventId);
+  MGMT_TRENDS_SELECTED_IDS = storedTrendsSelection
+    ? new Set(allTrendIds.filter((id) => storedTrendsSelection.has(id)))
+    : new Set(allTrendIds);
+  const trendsHtml = `<div id="mgmt-event-trends-section"></div>`;
 
   const leaderboardRows = p.leaderboard
     .map(
@@ -1965,6 +2049,7 @@ function renderManagementDashboard(data) {
     }`;
 
   wrap.innerHTML = `${growthHtml}<hr style="margin:18px 0;border-color:var(--border);" />${trendsHtml}<hr style="margin:18px 0;border-color:var(--border);" />${pointsHtml}<hr style="margin:18px 0;border-color:var(--border);" />${tournamentHtml}`;
+  renderEventTrendsSection();
 }
 
 // Per-event auto-report: a picker plus the report body, with a link to
