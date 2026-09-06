@@ -310,11 +310,15 @@
 
     <div id="admin-panel" class="hidden">
       <div class="admin-tabs" id="admin-tabs" role="tablist">
-        <button class="admin-tab active" type="button" data-admin-tab="overview" role="tab">
+        <button class="admin-tab active evt-tab-only" type="button" data-admin-tab="overview" role="tab">
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/></svg>
           <span data-i18n="adminTabOverview">Overview</span>
         </button>
-        <button class="admin-tab" type="button" data-admin-tab="events" role="tab">
+        <button class="admin-tab mgmt-tab-only" type="button" data-admin-tab="management" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 16.5V9M8 16.5V5M13 16.5v-4M18 16.5V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span data-i18n="adminTabManagement">Management Dashboard</span>
+        </button>
+        <button class="admin-tab evt-tab-only" type="button" data-admin-tab="events" role="tab">
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v3M14 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span data-i18n="adminTabEvents">Events</span>
         </button>
@@ -338,7 +342,7 @@
         </button>
       </div>
 
-      <div class="admin-tab-panel" data-admin-panel="overview">
+      <div class="admin-tab-panel evt-tab-only" data-admin-panel="overview">
         <div class="card admin-full-only">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.5 16.5h15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 16V10.5M10 16V4M15 16V12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span data-i18n="adminOverview">Overview</span></h2>
           <div class="stat-row" id="admin-stats"></div>
@@ -379,7 +383,7 @@
         </div>
       </div>
 
-      <div class="admin-tab-panel hidden" data-admin-panel="events">
+      <div class="admin-tab-panel hidden evt-tab-only" data-admin-panel="events">
         <div class="card admin-full-only">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.8v6.4M6.8 10h6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span data-i18n="adminAddEvent">Add an event</span></h2>
           <div class="grid-2">
@@ -684,6 +688,7 @@
               <select id="sa-role">
                 <option value="staff" data-i18n="roleStaff">Staff (gate scanner only)</option>
                 <option value="tournament" data-i18n="roleTournament">Tournament Manager (tournaments, check-in &amp; event dashboard only)</option>
+                <option value="management" data-i18n="roleManagement">Management (dashboard &amp; reports only)</option>
                 <option value="admin" data-i18n="roleAdmin">Admin (full access)</option>
               </select>
             </div>
@@ -700,6 +705,21 @@
           <input id="cp-new" type="password" placeholder="At least 6 characters" />
           <button class="primary" id="cp-submit" data-i18n="btnChangePassword">Change password</button>
           <div class="msg" id="cp-msg"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden mgmt-tab-only" data-admin-panel="management">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 16.5V9M8 16.5V5M13 16.5v-4M18 16.5V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span data-i18n="mgmtDashboardTitle">Management dashboard</span></h2>
+          <p class="section-sub" data-i18n="mgmtDashboardIntro">A cross-event overview of club growth, event performance, points activity, and tournaments.</p>
+          <div id="mgmt-dashboard-body"><p style="color:var(--muted);" data-i18n="loading">Loading…</p></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="1.4" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 8h15M2.5 12.5h15" stroke="currentColor" stroke-width="1.2"/></svg><span data-i18n="mgmtReportTitle">Per-event report</span></h2>
+          <p class="section-sub" data-i18n="mgmtReportIntro">Pick an event to see its auto-generated report, with a downloadable Word document.</p>
+          <select id="mgmt-report-event-select"></select>
+          <div id="mgmt-report-body" style="margin-top:14px;"></div>
         </div>
       </div>
     </div>

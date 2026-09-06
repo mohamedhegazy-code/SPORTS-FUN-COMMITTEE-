@@ -16,6 +16,20 @@ const multer = require("multer");
 const XLSX = require("xlsx");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  ShadingType,
+  AlignmentType,
+  BorderStyle,
+} = require("docx");
 
 const DB_PATH = path.join(__dirname, "data", "db.json");
 // Used to sign each registration's QR code so it can't be forged or edited.
@@ -682,6 +696,11 @@ app.post("/api/auth/signup", async (req, res) => {
     email: trimmedEmail || (existing ? existing.email : "") || "",
     passwordHash,
     dependents: (existing && existing.dependents) || [],
+    createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+    // This call is always the actual account-creation moment (a pre-existing
+    // passwordHash would have 409'd above), whether it's a brand-new member
+    // or someone claiming a profile the committee pre-loaded for them.
+    accountCreatedAt: new Date().toISOString(),
   };
   writeDb(db);
 
@@ -756,7 +775,7 @@ app.post("/api/auth/change-password", async (req, res) => {
 app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   const db = readDb();
   const { username, password, name, role } = req.body;
-  if (!username || !password || !name || !["admin", "staff", "tournament"].includes(role)) {
+  if (!username || !password || !name || !["admin", "staff", "tournament", "management"].includes(role)) {
     return res.status(400).json({ error: "username, password, name, and a valid role are required" });
   }
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
@@ -1922,6 +1941,13 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
     phone,
     passwordHash: null,
     dependents: [],
+    // Used by the management dashboard's club-growth chart. Only tracked
+    // going forward (added in the same change as that dashboard) - members
+    // created before this field existed simply have no createdAt, and the
+    // dashboard buckets those into a "before tracking" baseline instead of
+    // guessing a date for them.
+    createdAt: new Date().toISOString(),
+    accountCreatedAt: null,
   };
   writeDb(db);
   res.status(201).json({
@@ -2043,6 +2069,8 @@ app.post(
           phone: primaryRow.phone || "",
           passwordHash: null,
           dependents: [],
+          createdAt: new Date().toISOString(),
+          accountCreatedAt: null,
         };
         db.members[membershipNumber] = member;
         created.push({ membershipNumber, name: primaryRow.name });
@@ -3158,6 +3186,386 @@ app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tour
   t.pointsAwardedAt = new Date().toISOString();
   writeDb(db);
   res.json({ updated, tournament: serializeTournament(db, t) });
+});
+
+// ---------------------------------------------- management dashboard/report --
+// Cross-event aggregate dashboard and per-event auto-generated reports, for
+// the restricted "management" staff role (and, as with every other narrow
+// role, Admin too - see requireStaffRole()). Everything here is computed
+// live from existing data (members/events/registrations/redemptions/
+// tournaments) - nothing new is stored except the member createdAt/
+// accountCreatedAt timestamps added above, which only exist going forward.
+
+function monthKeyOf(iso) {
+  return iso ? String(iso).slice(0, 7) : null; // "YYYY-MM"
+}
+
+function computeClubGrowth(db) {
+  const members = Object.values(db.members);
+  const totalMembers = members.length;
+  const membersWithAccount = members.filter((m) => m.passwordHash).length;
+  const registeredMemberNumbers = new Set(db.registrations.map((r) => r.membershipNumber));
+  const activeCount = members.filter((m) => registeredMemberNumbers.has(m.membershipNumber)).length;
+  const neverRegisteredCount = totalMembers - activeCount;
+
+  // Total-members-over-time: a cumulative line, bucketed by the month each
+  // member's record was first created. Members from before this field
+  // existed (createdAt missing) are folded into one "before" starting point
+  // instead of being dropped or given a fabricated date.
+  const withCreatedAt = members.filter((m) => m.createdAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const legacyMemberCount = totalMembers - withCreatedAt.length;
+  const memberMonthCounts = new Map();
+  for (const m of withCreatedAt) {
+    const key = monthKeyOf(m.createdAt);
+    memberMonthCounts.set(key, (memberMonthCounts.get(key) || 0) + 1);
+  }
+  let running = legacyMemberCount;
+  const totalMembersOverTime = [{ month: "before", cumulative: running }];
+  for (const key of [...memberMonthCounts.keys()].sort()) {
+    running += memberMonthCounts.get(key);
+    totalMembersOverTime.push({ month: key, cumulative: running });
+  }
+
+  // New sign-ups (accounts actually created, not just roster entries) by
+  // month - same "before tracking" bucket for accounts created before this
+  // field existed.
+  const withAccountCreatedAt = members.filter((m) => m.passwordHash && m.accountCreatedAt);
+  const legacyAccountCount = membersWithAccount - withAccountCreatedAt.length;
+  const signupMonthCounts = new Map();
+  for (const m of withAccountCreatedAt) {
+    const key = monthKeyOf(m.accountCreatedAt);
+    signupMonthCounts.set(key, (signupMonthCounts.get(key) || 0) + 1);
+  }
+  const newSignupsByMonth = [
+    { month: "before", count: legacyAccountCount },
+    ...[...signupMonthCounts.keys()].sort().map((key) => ({ month: key, count: signupMonthCounts.get(key) })),
+  ];
+
+  return { totalMembers, membersWithAccount, activeCount, neverRegisteredCount, totalMembersOverTime, newSignupsByMonth };
+}
+
+function computeEventTrends(db) {
+  return db.events
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((ev) => {
+      const regs = db.registrations.filter((r) => r.eventId === ev.id);
+      const confirmed = regs.filter((r) => !r.waitlisted);
+      const waitlist = regs.filter((r) => r.waitlisted);
+      const checkedIn = confirmed.filter((r) => r.checkedIn);
+      return {
+        eventId: ev.id,
+        nameEn: ev.nameEn,
+        nameAr: ev.nameAr,
+        date: ev.date,
+        confirmedCount: confirmed.length,
+        waitlistCount: waitlist.length,
+        checkedInCount: checkedIn.length,
+        attendanceRate: confirmed.length ? Math.round((checkedIn.length / confirmed.length) * 100) : null,
+      };
+    });
+}
+
+function computePointsActivity(db) {
+  const totalPointsAwarded = db.registrations.reduce((sum, r) => sum + registrationPoints(db, r), 0);
+  const redemptions = {
+    total: db.redemptions.length,
+    pending: db.redemptions.filter((r) => r.status === "Pending").length,
+    approved: db.redemptions.filter((r) => r.status === "Approved").length,
+    fulfilled: db.redemptions.filter((r) => r.status === "Fulfilled").length,
+    rejected: db.redemptions.filter((r) => r.status === "Rejected").length,
+  };
+  const leaderboard = Object.keys(db.members)
+    .map((membershipNumber) => balanceSnapshot(db, membershipNumber))
+    .filter(Boolean)
+    .sort((a, b) => b.balance - a.balance)
+    .slice(0, 10)
+    .map((s) => ({ membershipNumber: s.membershipNumber, name: s.member.name, balance: s.balance }));
+  return { totalPointsAwarded, redemptions, leaderboard };
+}
+
+function computeTournamentActivity(db) {
+  const tournaments = db.tournaments || [];
+  const rows = tournaments
+    .map((t) => {
+      const ev = db.events.find((e) => e.id === t.eventId);
+      if (!ev) return null;
+      return {
+        eventId: t.eventId,
+        nameEn: ev.nameEn,
+        nameAr: ev.nameAr,
+        date: ev.date,
+        mode: t.mode,
+        format: t.format,
+        status: t.status,
+        participantCount: tournamentEntrants(db, t).length,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const completedCount = tournaments.filter((t) => t.status === "completed").length;
+  return {
+    totalTournaments: tournaments.length,
+    completedCount,
+    completionRate: tournaments.length ? Math.round((completedCount / tournaments.length) * 100) : null,
+    totalParticipants: rows.reduce((sum, r) => sum + r.participantCount, 0),
+    rows,
+  };
+}
+
+app.get("/api/admin/management/dashboard", requireStaffRole(["management"]), (req, res) => {
+  const db = req.db;
+  res.json({
+    clubGrowth: computeClubGrowth(db),
+    eventTrends: computeEventTrends(db),
+    pointsActivity: computePointsActivity(db),
+    tournamentActivity: computeTournamentActivity(db),
+  });
+});
+
+// Auto-generated per-event report: attendance, registration timing, points
+// awarded, and tournament results (if the event had one) - all computed
+// live from existing data, nothing stored. Shared by the in-app report view
+// and the downloadable .docx below, so both always agree.
+function buildEventReport(db, eventId) {
+  const event = db.events.find((e) => e.id === eventId);
+  if (!event) return null;
+  const regs = db.registrations.filter((r) => r.eventId === eventId);
+  const confirmed = regs.filter((r) => !r.waitlisted);
+  const waitlisted = regs.filter((r) => r.waitlisted);
+  const checkedIn = confirmed.filter((r) => r.checkedIn);
+  const over = eventEndDate(event) < todayStr();
+  const noShow = over ? confirmed.filter((r) => !r.checkedIn) : [];
+  const early = confirmed.filter((r) => r.earlyRegistration);
+
+  // Capacity fill timeline: cumulative confirmed registrations by day, in
+  // registration order - shows how quickly the event filled up.
+  const byDay = new Map();
+  confirmed
+    .slice()
+    .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))
+    .forEach((r) => {
+      const day = r.registeredAt.slice(0, 10);
+      byDay.set(day, (byDay.get(day) || 0) + 1);
+    });
+  let cumulative = 0;
+  const fillTimeline = [...byDay.keys()].sort().map((day) => {
+    cumulative += byDay.get(day);
+    return { date: day, cumulativeConfirmed: cumulative };
+  });
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const daysBefore = confirmed
+    .map((r) => (new Date(event.date) - new Date(r.registeredAt.slice(0, 10))) / msPerDay)
+    .filter((d) => Number.isFinite(d));
+  const avgDaysBeforeEvent = daysBefore.length
+    ? Math.round((daysBefore.reduce((a, b) => a + b, 0) / daysBefore.length) * 10) / 10
+    : null;
+
+  const participationTotal = checkedIn.length * db.rules.participation;
+  const earlyBonusTotal = checkedIn.filter((r) => r.earlyRegistration).reduce((sum) => sum + db.rules.earlyBonus, 0);
+  const positionBonusTotal = checkedIn.reduce(
+    (sum, r) => sum + (r.position ? db.rules.positionBonus[String(r.position)] || 0 : 0),
+    0
+  );
+
+  const t = findTournament(db, eventId);
+  let tournament = null;
+  if (t) {
+    const serialized = serializeTournament(db, t);
+    tournament = {
+      mode: t.mode,
+      format: t.format,
+      status: t.status,
+      participantCount: serialized.entrants.length,
+      standings: serialized.standings || null,
+      winnerLabel: serialized.standings && serialized.standings.length ? serialized.standings[0].label : null,
+    };
+  }
+
+  return {
+    event: {
+      id: event.id,
+      nameEn: event.nameEn,
+      nameAr: event.nameAr,
+      date: event.date,
+      endDate: event.endDate || null,
+      minCapacity: event.minCapacity,
+      maxCapacity: event.maxCapacity,
+    },
+    attendance: {
+      registeredTotal: regs.length,
+      confirmed: confirmed.length,
+      waitlisted: waitlisted.length,
+      checkedIn: checkedIn.length,
+      noShow: noShow.length,
+      eventOver: over,
+      checkedInRate: confirmed.length ? Math.round((checkedIn.length / confirmed.length) * 100) : null,
+    },
+    timing: {
+      earlyRegistrationsCount: early.length,
+      earlyRegistrationsRate: confirmed.length ? Math.round((early.length / confirmed.length) * 100) : null,
+      fillTimeline,
+      avgDaysBeforeEvent,
+      maxCapacity: event.maxCapacity,
+      filledPercent: event.maxCapacity ? Math.round((confirmed.length / event.maxCapacity) * 100) : null,
+    },
+    points: {
+      totalAwarded: participationTotal + earlyBonusTotal + positionBonusTotal,
+      participationTotal,
+      earlyBonusTotal,
+      positionBonusTotal,
+    },
+    tournament,
+  };
+}
+
+app.get("/api/admin/management/events/:eventId/report", requireStaffRole(["management"]), (req, res) => {
+  const report = buildEventReport(req.db, Number(req.params.eventId));
+  if (!report) return res.status(404).json({ error: "Event not found" });
+  res.json(report);
+});
+
+// ------------------------------------------- downloadable .docx report ----
+function reportDocLabels(lang) {
+  const ar = lang === "ar";
+  const L = (en, arText) => (ar ? arText : en);
+  const statusLabel = (status) => {
+    const map = {
+      "team-setup": L("Setting up teams", "إعداد الفرق"),
+      seeding: L("Seeding", "الترتيب التصنيفي"),
+      groups: L("Group stage", "دور المجموعات"),
+      knockout: L("Knockout", "خروج المغلوب"),
+      completed: L("Completed", "اكتملت"),
+    };
+    return map[status] || status;
+  };
+  return { ar, L, statusLabel };
+}
+
+async function buildEventReportDocx(report, lang) {
+  const { ar, L, statusLabel } = reportDocLabels(lang);
+  const name = ar ? report.event.nameAr || report.event.nameEn : report.event.nameEn || report.event.nameAr;
+  const alignment = ar ? AlignmentType.RIGHT : AlignmentType.LEFT;
+
+  const heading = (text) =>
+    new Paragraph({ text, heading: HeadingLevel.HEADING_2, bidirectional: ar, alignment, spacing: { before: 240, after: 120 } });
+  const para = (text) =>
+    new Paragraph({ children: [new TextRun({ text, rightToLeft: ar })], bidirectional: ar, alignment, spacing: { after: 80 } });
+  const cellPara = (text, bold) =>
+    new Paragraph({ children: [new TextRun({ text: String(text), bold: !!bold, rightToLeft: ar })], bidirectional: ar, alignment });
+  const statTable = (rows) =>
+    new Table({
+      width: { size: 9000, type: WidthType.DXA },
+      columnWidths: [4500, 4500],
+      rows: rows.map(
+        ([label, value]) =>
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 4500, type: WidthType.DXA },
+                shading: { type: ShadingType.CLEAR, fill: "F2F2F2" },
+                children: [cellPara(label, true)],
+              }),
+              new TableCell({ width: { size: 4500, type: WidthType.DXA }, children: [cellPara(value, false)] }),
+            ],
+          })
+      ),
+    });
+
+  const children = [
+    new Paragraph({ text: L("Event Report", "تقرير الفعالية"), heading: HeadingLevel.HEADING_1, bidirectional: ar, alignment }),
+    para(name || ""),
+    para(`${L("Date", "التاريخ")}: ${report.event.date}${report.event.endDate ? " - " + report.event.endDate : ""}`),
+    heading(L("Attendance Summary", "ملخص الحضور")),
+    statTable([
+      [L("Registered (total)", "إجمالي التسجيلات"), report.attendance.registeredTotal],
+      [L("Confirmed", "مؤكد"), report.attendance.confirmed],
+      [L("Waitlisted", "قائمة الانتظار"), report.attendance.waitlisted],
+      [L("Checked in", "تم تسجيل الحضور"), report.attendance.checkedIn],
+      [
+        L("No-shows", "لم يحضروا"),
+        report.attendance.eventOver
+          ? report.attendance.noShow
+          : L("Not yet determined (event hasn't ended)", "لم يتحدد بعد (الفعالية لم تنتهِ)"),
+      ],
+      [
+        L("Check-in rate", "نسبة الحضور"),
+        report.attendance.checkedInRate !== null ? report.attendance.checkedInRate + "%" : L("N/A", "غير متاح"),
+      ],
+    ]),
+    heading(L("Timing Details", "تفاصيل التوقيت")),
+    statTable([
+      [L("Early-registration sign-ups", "التسجيلات المبكرة"), report.timing.earlyRegistrationsCount],
+      [
+        L("Early-registration rate", "نسبة التسجيل المبكر"),
+        report.timing.earlyRegistrationsRate !== null ? report.timing.earlyRegistrationsRate + "%" : L("N/A", "غير متاح"),
+      ],
+      [
+        L("Average days before event", "متوسط عدد الأيام قبل الفعالية"),
+        report.timing.avgDaysBeforeEvent !== null ? report.timing.avgDaysBeforeEvent : L("N/A", "غير متاح"),
+      ],
+      [
+        L("Capacity filled", "نسبة امتلاء السعة"),
+        report.timing.filledPercent !== null ? report.timing.filledPercent + "%" : L("No capacity limit set", "لا يوجد حد للسعة"),
+      ],
+    ]),
+  ];
+  if (report.timing.fillTimeline.length) {
+    children.push(
+      para(
+        L(
+          "Capacity fill timeline (cumulative confirmed registrations by day):",
+          "مخطط امتلاء السعة (عدد التسجيلات المؤكدة التراكمي حسب اليوم):"
+        )
+      )
+    );
+    children.push(statTable(report.timing.fillTimeline.map((r) => [r.date, r.cumulativeConfirmed])));
+  }
+
+  children.push(
+    heading(L("Points Awarded", "النقاط الممنوحة")),
+    statTable([
+      [L("Total points awarded", "إجمالي النقاط الممنوحة"), report.points.totalAwarded],
+      [L("Participation points", "نقاط المشاركة"), report.points.participationTotal],
+      [L("Early-registration bonus", "مكافأة التسجيل المبكر"), report.points.earlyBonusTotal],
+      [L("Position bonus", "مكافأة الترتيب"), report.points.positionBonusTotal],
+    ])
+  );
+
+  children.push(heading(L("Tournament Results", "نتائج البطولة")));
+  if (report.tournament) {
+    children.push(
+      statTable([
+        [L("Mode", "النوع"), report.tournament.mode === "team" ? L("Team", "فرق") : L("Individual", "فردي")],
+        [L("Format", "النظام"), report.tournament.format === "groups" ? L("Groups", "مجموعات") : L("Knockout", "خروج المغلوب")],
+        [L("Status", "الحالة"), statusLabel(report.tournament.status)],
+        [L("Participants", "عدد المشاركين"), report.tournament.participantCount],
+        [L("Winner", "الفائز"), report.tournament.winnerLabel || L("Not decided yet", "لم يتحدد بعد")],
+      ])
+    );
+    if (report.tournament.standings && report.tournament.standings.length) {
+      children.push(para(L("Final standings:", "الترتيب النهائي:")));
+      children.push(statTable(report.tournament.standings.map((s) => [L("Rank", "المركز") + " " + s.rank, s.label])));
+    }
+  } else {
+    children.push(para(L("This event did not run a tournament.", "لم تُقم بطولة في هذه الفعالية.")));
+  }
+
+  const doc = new Document({
+    sections: [{ properties: { page: { size: { width: 12240, height: 15840 } } }, children }],
+  });
+  return Packer.toBuffer(doc);
+}
+
+app.get("/api/admin/management/events/:eventId/report.docx", requireStaffRole(["management"]), async (req, res) => {
+  const report = buildEventReport(req.db, Number(req.params.eventId));
+  if (!report) return res.status(404).json({ error: "Event not found" });
+  const lang = req.query.lang === "ar" ? "ar" : "en";
+  const buffer = await buildEventReportDocx(report, lang);
+  const safeName = (report.event.nameEn || "event").replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/(^-|-$)/g, "").slice(0, 60);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeName || "event"}-report.docx"`);
+  res.send(buffer);
 });
 
 // Turns multer upload errors (file too big, wrong type, etc.) into a JSON

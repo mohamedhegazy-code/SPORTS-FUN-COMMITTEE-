@@ -463,7 +463,8 @@ function updateSessionBadge() {
   } else {
     const roleLabel =
       CURRENT_SESSION.staff.role === "admin" ? t("roleAdminShort") :
-      CURRENT_SESSION.staff.role === "tournament" ? t("roleTournamentShort") : t("roleStaffShort");
+      CURRENT_SESSION.staff.role === "tournament" ? t("roleTournamentShort") :
+      CURRENT_SESSION.staff.role === "management" ? t("roleManagementShort") : t("roleStaffShort");
     text.textContent = `${t("sessionAsStaff")} ${CURRENT_SESSION.staff.name} (${roleLabel})`;
   }
 }
@@ -481,7 +482,13 @@ function updateUIForSession() {
   // the real isAdmin, so a Tournament Manager only ever sees the cards this
   // role is actually allowed to use.
   const isTournamentRole = isStaff && CURRENT_SESSION.staff.role === "tournament";
-  const isAdminAreaVisible = isAdmin || isTournamentRole;
+  // Management: another narrow staff role, this one scoped the other way -
+  // it can ONLY reach the new Management Dashboard tab (cross-event
+  // analytics + per-event auto-reports), nothing else in Admin. See
+  // requireStaffRole(["management"]) in server.js for the matching backend
+  // gate on the dashboard/report endpoints.
+  const isManagementRole = isStaff && CURRENT_SESSION.staff.role === "management";
+  const isAdminAreaVisible = isAdmin || isTournamentRole || isManagementRole;
 
   // Register tab
   document.getElementById("reg-auth").classList.toggle("hidden", isMember);
@@ -535,6 +542,14 @@ function updateUIForSession() {
   // (e.g. a Tournament Manager logs out, an admin logs in) doesn't leave
   // stale visibility from the previous session.
   document.querySelectorAll(".admin-full-only").forEach((el) => el.classList.toggle("hidden", !isAdmin));
+  // Management Dashboard tab/panel: visible to Admin and the Management
+  // role, hidden from a Tournament Manager or plain Staff account.
+  document.querySelectorAll(".mgmt-tab-only").forEach((el) => el.classList.toggle("hidden", !(isAdmin || isManagementRole)));
+  // Overview/Events tabs (and everything inside them not already
+  // admin-full-only) are for Admin + Tournament Manager - a pure Management
+  // role account has no use for event editing or the old per-event mini
+  // dashboard, so it only ever sees the Management Dashboard tab.
+  document.querySelectorAll(".evt-tab-only").forEach((el) => el.classList.toggle("hidden", isManagementRole && !isAdmin));
   if (isAdminAreaVisible) {
     initAdminTabs();
     // A Tournament Manager can't reach Members/Points/Content/Settings - if
@@ -546,8 +561,17 @@ function updateUIForSession() {
       const activeTab = document.querySelector(".admin-tab.active");
       if (activeTab && activeTab.classList.contains("admin-full-only")) switchAdminTab("events");
     }
-    loadAdminDashboard();
+    // A pure Management role account only has the Management tab available
+    // at all, so always land there regardless of what was remembered from
+    // an earlier full-admin/tournament session in this same browser.
+    if (isManagementRole && !isAdmin) {
+      switchAdminTab("management");
+      loadManagementDashboard();
+    } else {
+      loadAdminDashboard();
+    }
     if (isAdmin) {
+      loadManagementDashboard();
       loadAdminOverview();
       loadAdminMembers();
       loadAdminDirectory();
@@ -1820,6 +1844,200 @@ function renderAdminDashboardTable(rows) {
     btn.addEventListener("click", () => openAdminEventHub(Number(btn.dataset.hubEvent), btn.dataset.hubLabel));
   });
 }
+// ------------------------------------------------ management dashboard ----
+// Cross-event analytics for the restricted "management" staff role (Admin
+// sees it too, in its own tab - see requireStaffRole(["management"]) on the
+// matching /api/admin/management/* endpoints in server.js).
+function tournamentStatusLabel(status) {
+  const map = {
+    "team-setup": t("tournStepTeams"),
+    seeding: t("tournStepSeeding"),
+    groups: t("tournStepGroups"),
+    knockout: t("tournStepKnockout"),
+    completed: t("tournStepCompleted"),
+  };
+  return map[status] || status;
+}
+function monthLabel(key) {
+  if (key === "before") return t("mgmtBeforeTracking");
+  const [y, m] = key.split("-");
+  const d = new Date(Number(y), Number(m) - 1, 1);
+  return d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { year: "numeric", month: "short" });
+}
+async function loadManagementDashboard() {
+  const wrap = document.getElementById("mgmt-dashboard-body");
+  if (!wrap) return;
+  try {
+    const data = await api("/api/admin/management/dashboard");
+    renderManagementDashboard(data);
+  } catch (e) {
+    wrap.innerHTML = `<p class="dashboard-empty-note">${escapeAttr(e.message)}</p>`;
+  }
+  loadManagementReportEventOptions();
+}
+function renderManagementDashboard(data) {
+  const wrap = document.getElementById("mgmt-dashboard-body");
+  const g = data.clubGrowth;
+  const p = data.pointsActivity;
+  const ta = data.tournamentActivity;
+
+  const growthHtml = `
+    <h3>${t("mgmtClubGrowth")}</h3>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${fmt(g.totalMembers)}</div><div class="l">${t("mgmtTotalMembers")}</div></div>
+      <div class="stat"><div class="n">${fmt(g.membersWithAccount)}</div><div class="l">${t("mgmtMembersWithAccount")}</div></div>
+      <div class="stat"><div class="n">${fmt(g.activeCount)}</div><div class="l">${t("mgmtActiveMembers")}</div></div>
+      <div class="stat"><div class="n">${fmt(g.neverRegisteredCount)}</div><div class="l">${t("mgmtNeverRegistered")}</div></div>
+    </div>
+    <p class="hint-note">${t("mgmtNewSignups")}: ${g.newSignupsByMonth.map((r) => `${monthLabel(r.month)} (${fmt(r.count)})`).join(" · ")}</p>`;
+
+  const eventRows = data.eventTrends
+    .map(
+      (r) => `<tr>
+      <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
+      <td>${escapeAttr(r.date)}</td>
+      <td class="num">${fmt(r.confirmedCount)}</td>
+      <td class="num">${fmt(r.waitlistCount)}</td>
+      <td class="num">${fmt(r.checkedInCount)}</td>
+      <td>${r.attendanceRate === null ? "—" : r.attendanceRate + "%"}</td>
+    </tr>`
+    )
+    .join("");
+  const trendsHtml = `
+    <h3>${t("mgmtEventTrends")}</h3>
+    ${
+      data.eventTrends.length
+        ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
+      <thead><tr><th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colRegistrations")}</th><th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th></tr></thead>
+      <tbody>${eventRows}</tbody>
+    </table></div>`
+        : `<p class="dashboard-empty-note">${t("noEventsYet")}</p>`
+    }`;
+
+  const leaderboardRows = p.leaderboard
+    .map(
+      (r, i) => `<tr><td>${i + 1}</td><td>${escapeAttr(r.name)} (#${escapeAttr(r.membershipNumber)})</td><td class="num">${fmt(r.balance)}</td></tr>`
+    )
+    .join("");
+  const pointsHtml = `
+    <h3>${t("mgmtPointsActivity")}</h3>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${fmt(p.totalPointsAwarded)}</div><div class="l">${t("mgmtTotalPointsAwarded")}</div></div>
+      <div class="stat"><div class="n">${fmt(p.redemptions.total)}</div><div class="l">${t("mgmtRedemptionRequests")}</div></div>
+      <div class="stat"><div class="n">${fmt(p.redemptions.pending)}</div><div class="l">${t("mgmtRedemptionsPending")}</div></div>
+      <div class="stat"><div class="n">${fmt(p.redemptions.fulfilled)}</div><div class="l">${t("mgmtRedemptionsFulfilled")}</div></div>
+    </div>
+    ${
+      p.leaderboard.length
+        ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
+      <thead><tr><th>#</th><th>${t("colMember")}</th><th>${t("colPointsBalance")}</th></tr></thead>
+      <tbody>${leaderboardRows}</tbody>
+    </table></div>`
+        : ""
+    }`;
+
+  const tournRows = ta.rows
+    .map(
+      (r) => `<tr>
+      <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
+      <td>${escapeAttr(r.date)}</td>
+      <td>${r.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual")}</td>
+      <td class="num">${fmt(r.participantCount)}</td>
+      <td>${escapeAttr(tournamentStatusLabel(r.status))}</td>
+    </tr>`
+    )
+    .join("");
+  const tournamentHtml = `
+    <h3>${t("mgmtTournamentActivity")}</h3>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${fmt(ta.totalTournaments)}</div><div class="l">${t("mgmtTotalTournaments")}</div></div>
+      <div class="stat"><div class="n">${fmt(ta.completedCount)}</div><div class="l">${t("mgmtCompletedTournaments")}</div></div>
+      <div class="stat"><div class="n">${ta.completionRate === null ? "—" : ta.completionRate + "%"}</div><div class="l">${t("mgmtCompletionRate")}</div></div>
+      <div class="stat"><div class="n">${fmt(ta.totalParticipants)}</div><div class="l">${t("mgmtTotalParticipants")}</div></div>
+    </div>
+    ${
+      ta.rows.length
+        ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
+      <thead><tr><th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("fieldMode")}</th><th>${t("mgmtColParticipants")}</th><th>${t("colStatus")}</th></tr></thead>
+      <tbody>${tournRows}</tbody>
+    </table></div>`
+        : `<p class="dashboard-empty-note">${t("mgmtNoTournamentsYet")}</p>`
+    }`;
+
+  wrap.innerHTML = `${growthHtml}<hr style="margin:18px 0;border-color:var(--border);" />${trendsHtml}<hr style="margin:18px 0;border-color:var(--border);" />${pointsHtml}<hr style="margin:18px 0;border-color:var(--border);" />${tournamentHtml}`;
+}
+
+// Per-event auto-report: a picker plus the report body, with a link to
+// download the same report as a Word document (see the .docx endpoint).
+function loadManagementReportEventOptions() {
+  const select = document.getElementById("mgmt-report-event-select");
+  if (!select) return;
+  const previouslySelected = select.value;
+  const sorted = EVENTS_DATA.slice().sort((a, b) => b.date.localeCompare(a.date));
+  select.innerHTML =
+    `<option value="">${t("mgmtPickEvent")}</option>` +
+    sorted.map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} (${escapeAttr(ev.date)})</option>`).join("");
+  if (previouslySelected && sorted.some((ev) => String(ev.id) === previouslySelected)) select.value = previouslySelected;
+}
+document.getElementById("mgmt-report-event-select").addEventListener("change", (e) => {
+  const eventId = e.target.value;
+  const body = document.getElementById("mgmt-report-body");
+  if (!eventId) {
+    body.innerHTML = "";
+    return;
+  }
+  loadManagementReport(Number(eventId));
+});
+async function loadManagementReport(eventId) {
+  const body = document.getElementById("mgmt-report-body");
+  body.innerHTML = `<p style="color:var(--muted);">${t("loading")}</p>`;
+  try {
+    const r = await api(`/api/admin/management/events/${eventId}/report`);
+    renderManagementReport(body, eventId, r);
+  } catch (e) {
+    body.innerHTML = `<p class="dashboard-empty-note">${escapeAttr(e.message)}</p>`;
+  }
+}
+function renderManagementReport(body, eventId, r) {
+  const noShowText = r.attendance.eventOver ? fmt(r.attendance.noShow) : t("mgmtNotYetOver");
+  const downloadUrl = `/api/admin/management/events/${eventId}/report.docx?lang=${currentLang}`;
+  body.innerHTML = `
+    <h3>${escapeAttr(eventLabel({ nameEn: r.event.nameEn, nameAr: r.event.nameAr }))}</h3>
+    <p class="hint-note">${escapeAttr(r.event.date)}${r.event.endDate ? " – " + escapeAttr(r.event.endDate) : ""}</p>
+    <a class="secondary" href="${downloadUrl}" download><button class="secondary" type="button">${t("mgmtDownloadReport")}</button></a>
+
+    <h4>${t("mgmtAttendanceSummary")}</h4>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${fmt(r.attendance.confirmed)}</div><div class="l">${t("mgmtConfirmed")}</div></div>
+      <div class="stat"><div class="n">${fmt(r.attendance.waitlisted)}</div><div class="l">${t("waitlistLabel")}</div></div>
+      <div class="stat"><div class="n">${fmt(r.attendance.checkedIn)}</div><div class="l">${t("colCheckedIn")}</div></div>
+      <div class="stat"><div class="n">${noShowText}</div><div class="l">${t("mgmtNoShows")}</div></div>
+    </div>
+    <p class="hint-note">${t("colAttendance")}: ${r.attendance.checkedInRate === null ? "—" : r.attendance.checkedInRate + "%"}</p>
+
+    <h4>${t("mgmtTimingDetails")}</h4>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${fmt(r.timing.earlyRegistrationsCount)}</div><div class="l">${t("mgmtEarlyRegs")}</div></div>
+      <div class="stat"><div class="n">${r.timing.avgDaysBeforeEvent === null ? "—" : r.timing.avgDaysBeforeEvent}</div><div class="l">${t("mgmtAvgDaysBefore")}</div></div>
+      <div class="stat"><div class="n">${r.timing.filledPercent === null ? "—" : r.timing.filledPercent + "%"}</div><div class="l">${t("mgmtCapacityFilled")}</div></div>
+    </div>
+
+    <h4>${t("mgmtPointsAwarded")}</h4>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${fmt(r.points.totalAwarded)}</div><div class="l">${t("mgmtTotalPointsAwarded")}</div></div>
+      <div class="stat"><div class="n">${fmt(r.points.participationTotal)}</div><div class="l">${t("mgmtParticipationPoints")}</div></div>
+      <div class="stat"><div class="n">${fmt(r.points.earlyBonusTotal)}</div><div class="l">${t("mgmtEarlyBonusPoints")}</div></div>
+      <div class="stat"><div class="n">${fmt(r.points.positionBonusTotal)}</div><div class="l">${t("mgmtPositionBonusPoints")}</div></div>
+    </div>
+
+    <h4>${t("mgmtTournamentResults")}</h4>
+    ${
+      r.tournament
+        ? `<p class="hint-note">${t("mgmtWinner")}: ${escapeAttr(r.tournament.winnerLabel || t("mgmtNotDecidedYet"))} · ${t("mgmtColParticipants")}: ${fmt(r.tournament.participantCount)}</p>`
+        : `<p class="dashboard-empty-note">${t("mgmtNoTournamentForEvent")}</p>`
+    }`;
+}
+
 async function openAdminWaitlist(eventId, eventLabelText) {
   const panel = document.getElementById("admin-waitlist-panel");
   const title = document.getElementById("admin-waitlist-title");
@@ -4270,7 +4488,15 @@ async function loadStaffAccountsTable() {
           (s) => `<tr>
         <td>${s.username}</td>
         <td>${s.name}</td>
-        <td>${s.role === "admin" ? t("roleAdmin") : s.role === "tournament" ? t("roleTournament") : t("roleStaff")}</td>
+        <td>${
+          s.role === "admin"
+            ? t("roleAdmin")
+            : s.role === "tournament"
+            ? t("roleTournament")
+            : s.role === "management"
+            ? t("roleManagement")
+            : t("roleStaff")
+        }</td>
         <td>${
           CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.username === s.username
             ? ""
