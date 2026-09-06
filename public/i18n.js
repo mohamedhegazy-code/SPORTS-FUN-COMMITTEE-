@@ -579,6 +579,7 @@ const I18N = {
     mgmtSelectAllEvents: "Select all",
     mgmtClearEvents: "Clear all",
     mgmtNoEventsSelected: "No events selected — use \"Select all\" above to show them.",
+    mgmtFilterAlsoAppliesToTournaments: "This also filters the Tournament activity table below.",
   },
   ar: {
     appTitle: "أهلاوي — التسجيل الإلكتروني ونظام النقاط",
@@ -1160,6 +1161,7 @@ const I18N = {
     mgmtSelectAllEvents: "تحديد الكل",
     mgmtClearEvents: "إلغاء التحديد",
     mgmtNoEventsSelected: "لم يتم تحديد أي فعالية — استخدم \"تحديد الكل\" أعلاه لعرضها.",
+    mgmtFilterAlsoAppliesToTournaments: "هذا التحديد يُطبَّق أيضاً على جدول نشاط البطولات أدناه.",
   },
 };
 

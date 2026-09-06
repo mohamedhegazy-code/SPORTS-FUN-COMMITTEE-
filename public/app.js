@@ -1873,6 +1873,7 @@ function monthLabel(key) {
 // dashboard reload but not a full log-out/new-session.
 const MGMT_TRENDS_STORAGE_KEY = "mgmtTrendsSelectedEvents";
 let MGMT_EVENT_TRENDS_ALL = [];
+let MGMT_TOURNAMENT_ROWS_ALL = [];
 let MGMT_TRENDS_SELECTED_IDS = new Set();
 function loadMgmtTrendsSelection() {
   try {
@@ -1906,6 +1907,7 @@ function eventTrendsSectionHtml(rows, selectedIds) {
             )
             .join("")}
         </div>
+        <p class="hint-note">${t("mgmtFilterAlsoAppliesToTournaments")}</p>
       </div>`
     : "";
   const filtered = rows.filter((r) => selectedIds.has(r.eventId));
@@ -1929,34 +1931,63 @@ function eventTrendsSectionHtml(rows, selectedIds) {
     : `<p class="dashboard-empty-note">${t(rows.length ? "mgmtNoEventsSelected" : "noEventsYet")}</p>`;
   return `<h3>${t("mgmtEventTrends")}</h3>${filterHtml}${tableOrEmpty}`;
 }
-function renderEventTrendsSection() {
-  const container = document.getElementById("mgmt-event-trends-section");
-  if (!container) return;
-  container.innerHTML = eventTrendsSectionHtml(MGMT_EVENT_TRENDS_ALL, MGMT_TRENDS_SELECTED_IDS);
-  container.querySelectorAll("[data-trend-event-id]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = Number(cb.dataset.trendEventId);
-      if (cb.checked) MGMT_TRENDS_SELECTED_IDS.add(id);
-      else MGMT_TRENDS_SELECTED_IDS.delete(id);
-      saveMgmtTrendsSelection();
-      renderEventTrendsSection();
+// The Tournament activity table (per-event rows only, not the four total
+// tiles above it) is filtered by this exact same event selection - one
+// checklist drives both tables, so narrowing down to a handful of events
+// narrows both at once instead of needing two separate filters.
+function tournamentActivityTableHtml(allRows, selectedIds) {
+  const filtered = allRows.filter((r) => selectedIds.has(r.eventId));
+  const tournRows = filtered
+    .map(
+      (r) => `<tr>
+      <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
+      <td>${escapeAttr(r.date)}</td>
+      <td>${r.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual")}</td>
+      <td class="num">${fmt(r.participantCount)}</td>
+      <td>${escapeAttr(tournamentStatusLabel(r.status))}</td>
+    </tr>`
+    )
+    .join("");
+  return filtered.length
+    ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
+      <thead><tr><th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("fieldMode")}</th><th>${t("mgmtColParticipants")}</th><th>${t("colStatus")}</th></tr></thead>
+      <tbody>${tournRows}</tbody>
+    </table></div>`
+    : `<p class="dashboard-empty-note">${t(allRows.length ? "mgmtNoEventsSelected" : "mgmtNoTournamentsYet")}</p>`;
+}
+function renderMgmtEventFilterViews() {
+  const trendsContainer = document.getElementById("mgmt-event-trends-section");
+  if (trendsContainer) {
+    trendsContainer.innerHTML = eventTrendsSectionHtml(MGMT_EVENT_TRENDS_ALL, MGMT_TRENDS_SELECTED_IDS);
+    trendsContainer.querySelectorAll("[data-trend-event-id]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const id = Number(cb.dataset.trendEventId);
+        if (cb.checked) MGMT_TRENDS_SELECTED_IDS.add(id);
+        else MGMT_TRENDS_SELECTED_IDS.delete(id);
+        saveMgmtTrendsSelection();
+        renderMgmtEventFilterViews();
+      });
     });
-  });
-  const selectAllBtn = document.getElementById("mgmt-trends-select-all");
-  if (selectAllBtn) {
-    selectAllBtn.addEventListener("click", () => {
-      MGMT_TRENDS_SELECTED_IDS = new Set(MGMT_EVENT_TRENDS_ALL.map((r) => r.eventId));
-      saveMgmtTrendsSelection();
-      renderEventTrendsSection();
-    });
+    const selectAllBtn = document.getElementById("mgmt-trends-select-all");
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener("click", () => {
+        MGMT_TRENDS_SELECTED_IDS = new Set(MGMT_EVENT_TRENDS_ALL.map((r) => r.eventId));
+        saveMgmtTrendsSelection();
+        renderMgmtEventFilterViews();
+      });
+    }
+    const clearAllBtn = document.getElementById("mgmt-trends-clear-all");
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener("click", () => {
+        MGMT_TRENDS_SELECTED_IDS = new Set();
+        saveMgmtTrendsSelection();
+        renderMgmtEventFilterViews();
+      });
+    }
   }
-  const clearAllBtn = document.getElementById("mgmt-trends-clear-all");
-  if (clearAllBtn) {
-    clearAllBtn.addEventListener("click", () => {
-      MGMT_TRENDS_SELECTED_IDS = new Set();
-      saveMgmtTrendsSelection();
-      renderEventTrendsSection();
-    });
+  const tournContainer = document.getElementById("mgmt-tournament-activity-table");
+  if (tournContainer) {
+    tournContainer.innerHTML = tournamentActivityTableHtml(MGMT_TOURNAMENT_ROWS_ALL, MGMT_TRENDS_SELECTED_IDS);
   }
 }
 async function loadManagementDashboard() {
@@ -2020,17 +2051,10 @@ function renderManagementDashboard(data) {
         : ""
     }`;
 
-  const tournRows = ta.rows
-    .map(
-      (r) => `<tr>
-      <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
-      <td>${escapeAttr(r.date)}</td>
-      <td>${r.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual")}</td>
-      <td class="num">${fmt(r.participantCount)}</td>
-      <td>${escapeAttr(tournamentStatusLabel(r.status))}</td>
-    </tr>`
-    )
-    .join("");
+  // Per-event rows filtered by the exact same selection as Event
+  // performance trends above (see renderMgmtEventFilterViews()) - the four
+  // total tiles below stay as absolute totals across every event.
+  MGMT_TOURNAMENT_ROWS_ALL = ta.rows;
   const tournamentHtml = `
     <h3>${t("mgmtTournamentActivity")}</h3>
     <div class="stat-row">
@@ -2039,17 +2063,10 @@ function renderManagementDashboard(data) {
       <div class="stat"><div class="n">${ta.completionRate === null ? "—" : ta.completionRate + "%"}</div><div class="l">${t("mgmtCompletionRate")}</div></div>
       <div class="stat"><div class="n">${fmt(ta.totalParticipants)}</div><div class="l">${t("mgmtTotalParticipants")}</div></div>
     </div>
-    ${
-      ta.rows.length
-        ? `<div class="dashboard-table-wrap"><table class="dashboard-table">
-      <thead><tr><th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("fieldMode")}</th><th>${t("mgmtColParticipants")}</th><th>${t("colStatus")}</th></tr></thead>
-      <tbody>${tournRows}</tbody>
-    </table></div>`
-        : `<p class="dashboard-empty-note">${t("mgmtNoTournamentsYet")}</p>`
-    }`;
+    <div id="mgmt-tournament-activity-table"></div>`;
 
   wrap.innerHTML = `${growthHtml}<hr style="margin:18px 0;border-color:var(--border);" />${trendsHtml}<hr style="margin:18px 0;border-color:var(--border);" />${pointsHtml}<hr style="margin:18px 0;border-color:var(--border);" />${tournamentHtml}`;
-  renderEventTrendsSection();
+  renderMgmtEventFilterViews();
 }
 
 // Per-event auto-report: a picker plus the report body, with a link to
