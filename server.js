@@ -1428,6 +1428,79 @@ app.delete("/api/me/dependents/:id", requireMember, (req, res) => {
   res.json({ dependents: member.dependents });
 });
 
+// Linking family members by club ID is different from dependents above: it
+// connects two EXISTING club member accounts (e.g. a spouse or adult child
+// who already has their own membership number, and possibly their own
+// login) into the same familyGroup, so poolingKey() pools their points
+// together automatically - no separate "merge points" logic needed.
+app.post("/api/me/family/link", requireMember, (req, res) => {
+  const db = req.db;
+  const me = db.members[req.member.membershipNumber];
+  const otherId = String(req.body.membershipNumber || "").trim();
+  if (!otherId) return res.status(400).json({ error: "Club member ID is required" });
+  if (otherId === me.membershipNumber) {
+    return res.status(400).json({ error: "You can't link your own club member ID to yourself" });
+  }
+  const other = db.members[otherId];
+  if (!other) return res.status(404).json({ error: "No club member found with that ID" });
+
+  const myGroup = me.familyGroup && me.familyGroup.trim() ? me.familyGroup.trim() : null;
+  const otherGroup = other.familyGroup && other.familyGroup.trim() ? other.familyGroup.trim() : null;
+  if (myGroup && otherGroup && myGroup !== otherGroup) {
+    // Both are already pooled with someone else under different groups -
+    // silently merging those two existing families together is more likely
+    // to be a typo than what either member actually wants, so this asks
+    // them to sort it out with the committee instead of guessing.
+    return res.status(400).json({
+      error: "That member is already linked to a different family group. Contact the committee to merge them.",
+    });
+  }
+  // Whichever of the two already has a group wins (so linking a third or
+  // fourth member later keeps joining the same established group); if
+  // neither has one yet, mint a new one from the initiating member's ID.
+  const sharedGroup = myGroup || otherGroup || `FAM-${me.membershipNumber}`;
+  me.familyGroup = sharedGroup;
+  other.familyGroup = sharedGroup;
+  writeDb(db);
+  res.json({
+    familyGroup: sharedGroup,
+    poolMembers: membersInPool(db, poolingKey(db, me.membershipNumber)).map((m) => ({
+      membershipNumber: m.membershipNumber,
+      name: m.name,
+    })),
+  });
+});
+
+// Undoes a link: only removes the TARGET member from the shared group (their
+// own familyGroup field is cleared), leaving everyone else in the pool
+// untouched. Either side of a link can undo it - there's no separate
+// "owner" of a family group once two members are joined.
+app.post("/api/me/family/unlink", requireMember, (req, res) => {
+  const db = req.db;
+  const me = db.members[req.member.membershipNumber];
+  const targetId = String(req.body.membershipNumber || "").trim();
+  if (!targetId) return res.status(400).json({ error: "Club member ID is required" });
+  const target = db.members[targetId];
+  if (!target) return res.status(404).json({ error: "No club member found with that ID" });
+  const myKey = poolingKey(db, me.membershipNumber);
+  if (poolingKey(db, targetId) !== myKey || targetId === me.membershipNumber) {
+    return res.status(400).json({ error: "That member isn't linked to your family group" });
+  }
+  target.familyGroup = "";
+  // If that was the last other member in the group, there's no pool left to
+  // be part of - clear my own familyGroup too instead of leaving me "pooled"
+  // with nobody.
+  const remaining = membersInPool(db, myKey).filter((m) => m.membershipNumber !== targetId);
+  if (remaining.length <= 1) me.familyGroup = "";
+  writeDb(db);
+  res.json({
+    poolMembers: membersInPool(db, poolingKey(db, me.membershipNumber)).map((m) => ({
+      membershipNumber: m.membershipNumber,
+      name: m.name,
+    })),
+  });
+});
+
 app.get("/api/me/registrations", requireMember, async (req, res) => {
   const db = req.db;
   const regs = db.registrations.filter((r) => r.membershipNumber === req.member.membershipNumber);

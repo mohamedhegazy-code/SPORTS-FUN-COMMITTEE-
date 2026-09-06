@@ -366,6 +366,7 @@ function setLang(lang) {
   if (CURRENT_SESSION && CURRENT_SESSION.type === "member") {
     renderAttendeesChecklist();
     renderFamilyList();
+    loadFamilyPoolMembers();
     loadMyRegistrations();
     // Same "don't mark as read unless the tab is actually open" guard as
     // updateUIForSession() - a language toggle shouldn't silently clear
@@ -530,6 +531,7 @@ function updateUIForSession() {
       document.getElementById("mp-points-disabled-note").classList.remove("hidden");
     }
     renderFamilyList();
+    loadFamilyPoolMembers();
     loadMyRegistrations();
     // Only fetch (and thus mark-as-read) the chat thread if the Member
     // Profile tab is actually the one on screen - otherwise this would
@@ -1362,6 +1364,85 @@ document.getElementById("mp-redeem").addEventListener("click", async () => {
     if (!result.sufficientBalance) text += " " + t("warnInsufficient");
     showMsg(msg, text, result.sufficientBalance);
     loadMyBalance();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+// ------------------------------------------------- my family (linked IDs) --
+// Distinct from the dependents below: these are OTHER club members (their
+// own membershipNumber, possibly their own login) linked into the same
+// familyGroup so points pool together server-side (see poolingKey() and
+// /api/me/family/link|unlink in server.js). Loaded independently of
+// loadMyBalance() so the linked-members list still works even when the
+// points system itself is toggled off (pointsVisible() === false).
+let FAMILY_POOL_MEMBERS = [];
+async function loadFamilyPoolMembers() {
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  if (!member) {
+    FAMILY_POOL_MEMBERS = [];
+    renderFamilyLinkedList();
+    return;
+  }
+  try {
+    const snap = await api("/api/me/balance");
+    FAMILY_POOL_MEMBERS = (snap.poolMembers || []).filter((m) => m.membershipNumber !== member.membershipNumber);
+  } catch (e) {
+    FAMILY_POOL_MEMBERS = [];
+  }
+  renderFamilyLinkedList();
+}
+// Refreshes both the linked-members list and (when points are visible) the
+// balance hero's pool note - called after a successful link/unlink so the
+// UI reflects the new pool immediately instead of waiting for a reload.
+async function refreshFamilyAndBalance() {
+  await loadFamilyPoolMembers();
+  if (pointsVisible()) loadMyBalance();
+}
+function renderFamilyLinkedList() {
+  const wrap = document.getElementById("mp-family-linked-list");
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  if (!wrap || !member) return;
+  wrap.innerHTML = FAMILY_POOL_MEMBERS.length
+    ? FAMILY_POOL_MEMBERS.map(
+        (m) => `<div class="family-item" data-member-id="${escapeAttr(m.membershipNumber)}">
+        <span class="name">${escapeAttr(m.name)} (#${escapeAttr(m.membershipNumber)})</span>
+        <button class="secondary fam-unlink" data-member-id="${escapeAttr(m.membershipNumber)}" style="margin-top:0;padding:6px 12px;font-size:0.8rem;">${t("btnUnlink")}</button>
+      </div>`
+      ).join("")
+    : `<p style="color:var(--muted);font-size:0.85rem;">${t("noLinkedFamilyMembersYet")}</p>`;
+  wrap.querySelectorAll(".fam-unlink").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(t("confirmUnlinkFamilyMember"))) return;
+      try {
+        await api("/api/me/family/unlink", {
+          method: "POST",
+          body: JSON.stringify({ membershipNumber: btn.dataset.memberId }),
+        });
+        showMsg(document.getElementById("fam-link-msg"), t("famUnlinked"), true);
+        refreshFamilyAndBalance();
+      } catch (e) {
+        showMsg(document.getElementById("fam-link-msg"), e.message, false);
+      }
+    });
+  });
+}
+document.getElementById("fam-link-add").addEventListener("click", async () => {
+  const idInput = document.getElementById("fam-link-id");
+  const membershipNumber = idInput.value.trim();
+  const msg = document.getElementById("fam-link-msg");
+  if (!membershipNumber) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  try {
+    await api("/api/me/family/link", {
+      method: "POST",
+      body: JSON.stringify({ membershipNumber }),
+    });
+    idInput.value = "";
+    showMsg(msg, t("famLinked"), true);
+    refreshFamilyAndBalance();
   } catch (e) {
     showMsg(msg, e.message, false);
   }

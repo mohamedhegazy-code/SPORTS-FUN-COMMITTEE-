@@ -192,6 +192,17 @@
 
     <div class="card hidden" id="mp-family-card">
       <h2 data-i18n="myFamilyTitle">My family</h2>
+
+      <h3 style="margin-top:4px;" data-i18n="myFamilyLinkedTitle">Linked club members</h3>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myFamilyLinkedIntro">Already a club member with their own membership number — a spouse or adult child, for example? Link their club member ID here so your points pool together.</p>
+      <div id="mp-family-linked-list"></div>
+      <div class="grid-2" style="align-items:end;">
+        <div><label data-i18n="fieldClubMemberId">Club member ID</label><input id="fam-link-id" placeholder="e.g. 10234" /></div>
+        <div><button class="secondary" id="fam-link-add" style="margin-top:10px;" data-i18n="btnLinkFamilyMember">Link family member</button></div>
+      </div>
+      <div class="msg" id="fam-link-msg"></div>
+
+      <h3 style="margin-top:20px;" data-i18n="myFamilyDependentsTitle">Dependents without their own club ID</h3>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myFamilyIntro">Add family members here, then pick who's attending when you register for an event. They don't need their own login — everyone's points pool into your balance.</p>
       <div id="mp-family-list"></div>
       <div class="grid-2" style="align-items:end;">
