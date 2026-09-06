@@ -333,6 +333,20 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.view));
 });
 
+// Header "Log In" button: only shown to signed-out visitors (see
+// updateSessionBadge). Jumps straight to the Register tab's member-login
+// card (the "Already have an account?" form) and focuses its membership
+// number field, rather than making the visitor scroll past the sign-up
+// form or hunt for the Register tab themselves.
+document.getElementById("header-login-btn").addEventListener("click", () => {
+  switchTab("register");
+  const membershipField = document.getElementById("li-membership");
+  if (membershipField) {
+    membershipField.scrollIntoView({ behavior: "smooth", block: "center" });
+    membershipField.focus();
+  }
+});
+
 document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
 document.getElementById("lang-ar").addEventListener("click", () => setLang("ar"));
 function setLang(lang) {
@@ -453,11 +467,14 @@ async function checkSession() {
 function updateSessionBadge() {
   const badge = document.getElementById("session-badge");
   const text = document.getElementById("session-badge-text");
+  const headerLoginBtn = document.getElementById("header-login-btn");
   if (!CURRENT_SESSION) {
     badge.classList.add("hidden");
+    if (headerLoginBtn) headerLoginBtn.classList.remove("hidden");
     return;
   }
   badge.classList.remove("hidden");
+  if (headerLoginBtn) headerLoginBtn.classList.add("hidden");
   if (CURRENT_SESSION.type === "member") {
     text.textContent = `${t("sessionAsMember")} ${CURRENT_SESSION.member.name} (#${CURRENT_SESSION.member.membershipNumber})`;
   } else {
