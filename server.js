@@ -140,6 +140,13 @@ const BRANDING_UPLOADS_DIR = path.join(__dirname, "public", "uploads", "branding
 fs.mkdirSync(BRANDING_UPLOADS_DIR, { recursive: true });
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
+// ---------------------------------------------------------- landing page ---
+// Every section the Events landing page can show. "events" (the actual
+// listing members register from) can be reordered like any other section
+// but can never be turned off - see the /api/admin/landing/sections handler
+// below, which forces it back to enabled no matter what's posted.
+const LANDING_SECTION_KEYS = ["hero", "events", "about", "news", "community", "spotlight", "gallery", "sponsors"];
+
 const brandingLogoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, BRANDING_UPLOADS_DIR),
   filename: (req, file, cb) => {
@@ -347,6 +354,57 @@ function readDb() {
   if (!HEX_COLOR_RE.test(db.settings.theme.primaryColor || "")) db.settings.theme.primaryColor = "#8B0000";
   if (!HEX_COLOR_RE.test(db.settings.theme.accentColor || "")) db.settings.theme.accentColor = "#C9A227";
   if (typeof db.settings.theme.logoUrl !== "string") db.settings.theme.logoUrl = "";
+  // Landing page customization: an editable hero banner, an optional About
+  // block, a sponsors/partners strip, a photo gallery, and the order/
+  // visibility of every section on the Events landing page. Defaults here
+  // reproduce the page exactly as it looked before this existed (hero,
+  // events, news, community, spotlight all on; about/gallery/sponsors off
+  // until the admin fills them in and switches them on), so a deploy that's
+  // never touched this setting looks identical to before.
+  db.landingPage = db.landingPage || {};
+  db.landingPage.hero = db.landingPage.hero || {};
+  if (typeof db.landingPage.hero.headlineEn !== "string") db.landingPage.hero.headlineEn = "Welcome to Ahlawy";
+  if (typeof db.landingPage.hero.headlineAr !== "string") db.landingPage.hero.headlineAr = "أهلاً بكم في أهلاوي";
+  if (typeof db.landingPage.hero.taglineEn !== "string") {
+    db.landingPage.hero.taglineEn = "Register for club sports activities, earn points, and stay connected with the community.";
+  }
+  if (typeof db.landingPage.hero.taglineAr !== "string") {
+    db.landingPage.hero.taglineAr = "سجّل في الأنشطة الرياضية بالنادي، اجمع النقاط، وابقَ على تواصل مع المجتمع.";
+  }
+  db.landingPage.about = db.landingPage.about || {};
+  if (typeof db.landingPage.about.titleEn !== "string") db.landingPage.about.titleEn = "About us";
+  if (typeof db.landingPage.about.titleAr !== "string") db.landingPage.about.titleAr = "من نحن";
+  if (typeof db.landingPage.about.bodyEn !== "string") db.landingPage.about.bodyEn = "";
+  if (typeof db.landingPage.about.bodyAr !== "string") db.landingPage.about.bodyAr = "";
+  if (typeof db.landingPage.about.photo !== "string") db.landingPage.about.photo = "";
+  db.landingPage.gallery = db.landingPage.gallery || [];
+  db.landingPage.sponsors = db.landingPage.sponsors || [];
+  db.nextIds.galleryPhoto = db.nextIds.galleryPhoto || 1;
+  db.nextIds.sponsor = db.nextIds.sponsor || 1;
+  // Section order/visibility - stored as an array, so array order IS render
+  // order. Repairs itself if a key is missing (new deploy picking up a
+  // section that didn't exist yet) or unknown (stale data) rather than
+  // trusting old data blindly.
+  const defaultLandingSections = [
+    { key: "hero", enabled: true },
+    { key: "events", enabled: true },
+    { key: "about", enabled: false },
+    { key: "news", enabled: true },
+    { key: "community", enabled: true },
+    { key: "spotlight", enabled: true },
+    { key: "gallery", enabled: false },
+    { key: "sponsors", enabled: false },
+  ];
+  if (!Array.isArray(db.landingPage.sections)) {
+    db.landingPage.sections = defaultLandingSections;
+  } else {
+    const known = db.landingPage.sections.filter((s) => s && LANDING_SECTION_KEYS.includes(s.key));
+    const seenKeys = new Set(known.map((s) => s.key));
+    for (const def of defaultLandingSections) {
+      if (!seenKeys.has(def.key)) known.push(def);
+    }
+    db.landingPage.sections = known.map((s) => ({ key: s.key, enabled: s.key === "events" ? true : !!s.enabled }));
+  }
   db.sessions = db.sessions || {};
   return db;
 }
@@ -1310,6 +1368,115 @@ app.get("/api/community-stats", (req, res) => {
     .sort((a, b) => b.balance - a.balance)
     .slice(0, 5);
   res.json({ totalMembers, eventsHeld, topEarners });
+});
+
+// -------------------------------------------------------------------------
+// LANDING PAGE CUSTOMIZATION
+// -------------------------------------------------------------------------
+// Hero banner text, About block, sponsors/partners, photo gallery, and the
+// order/visibility of every section on the Events landing page. Read side
+// is folded into GET /api/settings (see below) since the public landing
+// page already fetches that once at load; these are just the admin write
+// endpoints. All reuse uploadEventPhoto for photos/logos, same as news and
+// spotlights above.
+app.put("/api/admin/landing/hero", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const { headlineEn, headlineAr, taglineEn, taglineAr } = req.body;
+  if (!headlineEn || !headlineEn.trim()) return res.status(400).json({ error: "An English headline is required" });
+  db.landingPage.hero = {
+    headlineEn: headlineEn.trim(),
+    headlineAr: (headlineAr || "").trim(),
+    taglineEn: (taglineEn || "").trim(),
+    taglineAr: (taglineAr || "").trim(),
+  };
+  writeDb(db);
+  res.json({ hero: db.landingPage.hero });
+});
+
+app.put("/api/admin/landing/about", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
+  const db = req.db;
+  const { titleEn, titleAr, bodyEn, bodyAr, removePhoto } = req.body;
+  db.landingPage.about = {
+    titleEn: (titleEn || "").trim() || db.landingPage.about.titleEn,
+    titleAr: (titleAr || "").trim(),
+    bodyEn: (bodyEn || "").trim(),
+    bodyAr: (bodyAr || "").trim(),
+    photo: req.file ? `/uploads/events/${req.file.filename}` : removePhoto === "true" ? "" : db.landingPage.about.photo,
+  };
+  writeDb(db);
+  res.json({ about: db.landingPage.about });
+});
+
+app.post("/api/admin/landing/gallery", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
+  const db = req.db;
+  if (!req.file) return res.status(400).json({ error: "A photo is required" });
+  const item = {
+    id: db.nextIds.galleryPhoto++,
+    photo: `/uploads/events/${req.file.filename}`,
+    captionEn: (req.body.captionEn || "").trim(),
+    captionAr: (req.body.captionAr || "").trim(),
+    createdAt: new Date().toISOString(),
+  };
+  db.landingPage.gallery.push(item);
+  writeDb(db);
+  res.status(201).json(item);
+});
+
+app.delete("/api/admin/landing/gallery/:id", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const before = db.landingPage.gallery.length;
+  db.landingPage.gallery = db.landingPage.gallery.filter((g) => g.id !== id);
+  if (db.landingPage.gallery.length === before) return res.status(404).json({ error: "No such gallery photo" });
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+app.post("/api/admin/landing/sponsors", requireStaffRole("admin"), uploadEventPhoto.single("logo"), (req, res) => {
+  const db = req.db;
+  const name = (req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Sponsor name is required" });
+  const sponsor = {
+    id: db.nextIds.sponsor++,
+    name,
+    url: (req.body.url || "").trim(),
+    logo: req.file ? `/uploads/events/${req.file.filename}` : "",
+    createdAt: new Date().toISOString(),
+  };
+  db.landingPage.sponsors.push(sponsor);
+  writeDb(db);
+  res.status(201).json(sponsor);
+});
+
+app.delete("/api/admin/landing/sponsors/:id", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const before = db.landingPage.sponsors.length;
+  db.landingPage.sponsors = db.landingPage.sponsors.filter((s) => s.id !== id);
+  if (db.landingPage.sponsors.length === before) return res.status(404).json({ error: "No such sponsor" });
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+// Replaces the whole section order/visibility list in one call - simplest
+// contract for a reorder-by-arrows admin UI that always has the full list
+// in hand anyway. "events" is forced back to enabled regardless of what's
+// posted: turning off the actual event listing would make the site
+// pointless, so that's not a mistake this endpoint will let happen.
+app.put("/api/admin/landing/sections", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const sections = req.body.sections;
+  const keys = Array.isArray(sections) ? sections.map((s) => s && s.key) : [];
+  const keySet = new Set(keys);
+  const valid =
+    Array.isArray(sections) &&
+    sections.length === LANDING_SECTION_KEYS.length &&
+    keySet.size === LANDING_SECTION_KEYS.length &&
+    LANDING_SECTION_KEYS.every((k) => keySet.has(k));
+  if (!valid) return res.status(400).json({ error: "sections must include every landing page section exactly once" });
+  db.landingPage.sections = sections.map((s) => ({ key: s.key, enabled: s.key === "events" ? true : !!s.enabled }));
+  writeDb(db);
+  res.json({ sections: db.landingPage.sections });
 });
 
 // -------------------------------------------------------------------------
@@ -2317,7 +2484,11 @@ function themePayload(db) {
 
 app.get("/api/settings", (req, res) => {
   const db = readDb();
-  res.json({ pointsVisibleToMembers: db.settings.pointsVisibleToMembers, theme: themePayload(db) });
+  res.json({
+    pointsVisibleToMembers: db.settings.pointsVisibleToMembers,
+    theme: themePayload(db),
+    landingPage: db.landingPage,
+  });
 });
 
 app.put("/api/settings", requireStaffRole("admin"), (req, res) => {

@@ -15,6 +15,19 @@ let SETTINGS = {
 function pointsVisible() {
   return !!(SETTINGS && SETTINGS.pointsVisibleToMembers);
 }
+// Landing page customization: hero banner text, About block, sponsors, photo
+// gallery, and section order/visibility. Mirrors SETTINGS.landingPage once
+// loaded (see loadSettings()/applySettingsToUI()) - kept as its own variable
+// just so admin-panel code reads "LANDING_PAGE" instead of reaching into
+// SETTINGS every time.
+let LANDING_PAGE = null;
+const LANDING_SECTION_DEFAULT_ORDER = ["hero", "events", "about", "news", "community", "spotlight", "gallery", "sponsors"];
+// Same EN/AR-pick pattern used everywhere else for admin-authored bilingual
+// content (news titles, spotlight blurbs): prefer the current language,
+// fall back to whichever one was actually filled in.
+function bilingual(en, ar) {
+  return currentLang === "ar" ? ar || en || "" : en || ar || "";
+}
 
 // ----------------------------------------------------------------- utils --
 // Exact server-side messages that mean "your session cookie no longer maps
@@ -359,6 +372,8 @@ function setLang(lang) {
   renderNewsList(NEWS_DATA);
   renderSpotlightGrid(SPOTLIGHTS_DATA);
   renderCommunityStats(COMMUNITY_STATS);
+  applyLandingPageToUI();
+  renderLandingSectionsAdminList();
   renderLadder();
   if (document.getElementById("mp-result").classList.contains("hidden") === false) {
     renderTierDropdown();
@@ -405,6 +420,94 @@ function applySettingsToUI() {
   const toggle = document.getElementById("settings-points-visible");
   if (toggle) toggle.checked = show;
   applyThemeToUI();
+  applyLandingPageToUI();
+}
+
+// ------------------------------------------------------------ landing page --
+// Renders the admin-customized hero text, About block, gallery, sponsors,
+// and section order/visibility onto the public Events landing page. Called
+// after every settings load and after every landing-page admin save, so the
+// public page and the admin form never drift out of sync with each other.
+function applyLandingPageToUI() {
+  const lp = SETTINGS && SETTINGS.landingPage;
+  if (!lp) return;
+  LANDING_PAGE = lp;
+
+  const headlineEl = document.getElementById("landing-hero-headline");
+  const taglineEl = document.getElementById("landing-hero-tagline");
+  if (headlineEl) headlineEl.textContent = bilingual(lp.hero.headlineEn, lp.hero.headlineAr);
+  if (taglineEl) taglineEl.textContent = bilingual(lp.hero.taglineEn, lp.hero.taglineAr);
+
+  const aboutTitleEl = document.getElementById("landing-about-title");
+  const aboutBodyEl = document.getElementById("landing-about-body");
+  const aboutPhotoEl = document.getElementById("landing-about-photo");
+  if (aboutTitleEl) aboutTitleEl.textContent = bilingual(lp.about.titleEn, lp.about.titleAr) || t("aboutUsTitle");
+  if (aboutBodyEl) aboutBodyEl.textContent = bilingual(lp.about.bodyEn, lp.about.bodyAr);
+  if (aboutPhotoEl) {
+    if (lp.about.photo) {
+      aboutPhotoEl.src = lp.about.photo;
+      aboutPhotoEl.classList.remove("hidden");
+    } else {
+      aboutPhotoEl.removeAttribute("src");
+      aboutPhotoEl.classList.add("hidden");
+    }
+  }
+
+  renderGalleryGrid(lp.gallery || []);
+  renderSponsorsStrip(lp.sponsors || []);
+  applyLandingSectionOrder(lp.sections || []);
+}
+
+function renderGalleryGrid(items) {
+  const wrap = document.getElementById("gallery-grid");
+  const empty = document.getElementById("gallery-empty");
+  if (!wrap) return;
+  if (empty) empty.classList.toggle("hidden", items.length > 0);
+  wrap.innerHTML = items
+    .map((g) => {
+      const caption = bilingual(g.captionEn, g.captionAr);
+      return `<div class="gallery-card">
+        <img class="photo" src="${escapeAttr(g.photo)}" alt="" />
+        ${caption ? `<div class="caption">${escapeAttr(caption)}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+}
+
+function renderSponsorsStrip(items) {
+  const wrap = document.getElementById("sponsors-strip");
+  const empty = document.getElementById("sponsors-empty");
+  if (!wrap) return;
+  if (empty) empty.classList.toggle("hidden", items.length > 0);
+  wrap.innerHTML = items
+    .map((s) => {
+      const logoHtml = s.logo
+        ? `<img src="${escapeAttr(s.logo)}" alt="" />`
+        : `<div style="font-weight:700;color:var(--red-dark);">${escapeAttr(s.name)}</div>`;
+      const inner = `${logoHtml}<div class="name">${escapeAttr(s.name)}</div>`;
+      return s.url
+        ? `<a class="sponsor-item" href="${escapeAttr(s.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+        : `<div class="sponsor-item">${inner}</div>`;
+    })
+    .join("");
+}
+
+// Moves each landing-page section's wrapper element (see the
+// data-landing-section attributes in index.html) into the config's order,
+// and shows/hides it per the config's enabled flag - except "events", which
+// always shows regardless of what's stored (see the matching guard on the
+// server, /api/admin/landing/sections).
+function applyLandingSectionOrder(sections) {
+  const parent = document.getElementById("view-events");
+  if (!parent) return;
+  const list = sections && sections.length ? sections : LANDING_SECTION_DEFAULT_ORDER.map((key) => ({ key, enabled: true }));
+  list.forEach((s) => {
+    const el = parent.querySelector(`[data-landing-section="${s.key}"]`);
+    if (!el) return;
+    parent.appendChild(el);
+    const alwaysOn = s.key === "events";
+    el.classList.toggle("hidden", !alwaysOn && !s.enabled);
+  });
 }
 
 // Branding: colors are just CSS custom properties, so overriding them at
@@ -603,6 +706,7 @@ function updateUIForSession() {
       loadNewsAdminList();
       loadSpotlightAdminList();
       applySettingsToUI();
+      populateLandingAdminForms();
     }
   } else {
     document.getElementById("admin-chat-badge").classList.add("hidden");
@@ -3205,6 +3309,297 @@ document.getElementById("spotlight-submit").addEventListener("click", async () =
     photoInput.value = "";
     await loadSpotlightAdminList();
     await loadCommunityContent();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+// ----------------------------------------------------- admin: landing page --
+// Fills in the Landing Page admin tab's form fields/lists from the current
+// SETTINGS.landingPage (already fetched by loadSettings()/applySettingsToUI()
+// - this just puts it into the editable inputs, separate from
+// applyLandingPageToUI() which renders the same data onto the public page).
+function populateLandingAdminForms() {
+  const lp = SETTINGS && SETTINGS.landingPage;
+  if (!lp) return;
+  LANDING_PAGE = lp;
+  const heroHeadlineEn = document.getElementById("hero-headline-en");
+  if (heroHeadlineEn) {
+    heroHeadlineEn.value = lp.hero.headlineEn || "";
+    document.getElementById("hero-headline-ar").value = lp.hero.headlineAr || "";
+    document.getElementById("hero-tagline-en").value = lp.hero.taglineEn || "";
+    document.getElementById("hero-tagline-ar").value = lp.hero.taglineAr || "";
+  }
+  const aboutTitleEn = document.getElementById("about-title-en");
+  if (aboutTitleEn) {
+    aboutTitleEn.value = lp.about.titleEn || "";
+    document.getElementById("about-title-ar").value = lp.about.titleAr || "";
+    document.getElementById("about-body-en").value = lp.about.bodyEn || "";
+    document.getElementById("about-body-ar").value = lp.about.bodyAr || "";
+    const preview = document.getElementById("about-photo-preview");
+    const previewWrap = document.getElementById("about-photo-preview-wrap");
+    const removeBtn = document.getElementById("about-remove-photo-btn");
+    if (lp.about.photo) {
+      preview.src = lp.about.photo;
+      previewWrap.classList.remove("hidden");
+      removeBtn.classList.remove("hidden");
+    } else {
+      previewWrap.classList.add("hidden");
+      removeBtn.classList.add("hidden");
+    }
+  }
+  renderLandingSectionsAdminList();
+  renderGalleryAdminList(lp.gallery || []);
+  renderSponsorsAdminList(lp.sponsors || []);
+}
+
+const LANDING_SECTION_LABEL_KEYS = {
+  hero: "landingSecHero",
+  events: "landingSecEvents",
+  about: "landingSecAbout",
+  news: "landingSecNews",
+  community: "landingSecCommunity",
+  spotlight: "landingSecSpotlight",
+  gallery: "landingSecGallery",
+  sponsors: "landingSecSponsors",
+};
+function renderLandingSectionsAdminList() {
+  const wrap = document.getElementById("landing-sections-list");
+  if (!wrap || !LANDING_PAGE) return;
+  const sections = LANDING_PAGE.sections || [];
+  wrap.innerHTML = sections
+    .map((s, i) => {
+      const label = t(LANDING_SECTION_LABEL_KEYS[s.key] || s.key);
+      const locked = s.key === "events";
+      return `<div class="landing-section-row" data-index="${i}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span style="flex:1;font-size:0.9rem;">${escapeAttr(label)}</span>
+        ${
+          locked
+            ? `<span class="hint-note" style="margin:0;">${escapeAttr(t("landingSecAlwaysShown"))}</span>`
+            : `<label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);"><input type="checkbox" class="landing-sec-enabled" data-index="${i}" ${s.enabled ? "checked" : ""} /> ${escapeAttr(t("landingSecShown"))}</label>`
+        }
+        <button type="button" class="secondary landing-sec-up" data-index="${i}" ${i === 0 ? "disabled" : ""} style="padding:4px 10px;margin-top:0;">&uarr;</button>
+        <button type="button" class="secondary landing-sec-down" data-index="${i}" ${i === sections.length - 1 ? "disabled" : ""} style="padding:4px 10px;margin-top:0;">&darr;</button>
+      </div>`;
+    })
+    .join("");
+  wrap.querySelectorAll(".landing-sec-up").forEach((btn) => {
+    btn.addEventListener("click", () => moveLandingSection(Number(btn.dataset.index), -1));
+  });
+  wrap.querySelectorAll(".landing-sec-down").forEach((btn) => {
+    btn.addEventListener("click", () => moveLandingSection(Number(btn.dataset.index), 1));
+  });
+  wrap.querySelectorAll(".landing-sec-enabled").forEach((cb) => {
+    cb.addEventListener("change", () => toggleLandingSection(Number(cb.dataset.index), cb.checked));
+  });
+}
+async function saveLandingSections(sections) {
+  const msg = document.getElementById("landing-sections-msg");
+  try {
+    const result = await api("/api/admin/landing/sections", { method: "PUT", body: JSON.stringify({ sections }) });
+    SETTINGS.landingPage.sections = result.sections;
+    LANDING_PAGE.sections = result.sections;
+    renderLandingSectionsAdminList();
+    applyLandingSectionOrder(result.sections);
+  } catch (e) {
+    if (msg) showMsg(msg, e.message, false);
+  }
+}
+function moveLandingSection(index, dir) {
+  const sections = LANDING_PAGE.sections.slice();
+  const newIndex = index + dir;
+  if (newIndex < 0 || newIndex >= sections.length) return;
+  const [item] = sections.splice(index, 1);
+  sections.splice(newIndex, 0, item);
+  saveLandingSections(sections);
+}
+function toggleLandingSection(index, enabled) {
+  const sections = LANDING_PAGE.sections.slice();
+  sections[index] = { ...sections[index], enabled };
+  saveLandingSections(sections);
+}
+
+document.getElementById("hero-save-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("hero-msg");
+  const headlineEn = document.getElementById("hero-headline-en").value.trim();
+  if (!headlineEn) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  try {
+    const result = await api("/api/admin/landing/hero", {
+      method: "PUT",
+      body: JSON.stringify({
+        headlineEn,
+        headlineAr: document.getElementById("hero-headline-ar").value.trim(),
+        taglineEn: document.getElementById("hero-tagline-en").value.trim(),
+        taglineAr: document.getElementById("hero-tagline-ar").value.trim(),
+      }),
+    });
+    SETTINGS.landingPage.hero = result.hero;
+    LANDING_PAGE.hero = result.hero;
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+document.getElementById("about-save-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("about-msg");
+  const fd = new FormData();
+  fd.append("titleEn", document.getElementById("about-title-en").value.trim());
+  fd.append("titleAr", document.getElementById("about-title-ar").value.trim());
+  fd.append("bodyEn", document.getElementById("about-body-en").value.trim());
+  fd.append("bodyAr", document.getElementById("about-body-ar").value.trim());
+  const fileInput = document.getElementById("about-photo-file");
+  if (fileInput.files[0]) fd.append("photo", fileInput.files[0]);
+  try {
+    const result = await api("/api/admin/landing/about", { method: "PUT", body: fd });
+    SETTINGS.landingPage.about = result.about;
+    LANDING_PAGE.about = result.about;
+    fileInput.value = "";
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("about-remove-photo-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("about-msg");
+  const fd = new FormData();
+  fd.append("titleEn", document.getElementById("about-title-en").value.trim());
+  fd.append("titleAr", document.getElementById("about-title-ar").value.trim());
+  fd.append("bodyEn", document.getElementById("about-body-en").value.trim());
+  fd.append("bodyAr", document.getElementById("about-body-ar").value.trim());
+  fd.append("removePhoto", "true");
+  try {
+    const result = await api("/api/admin/landing/about", { method: "PUT", body: fd });
+    SETTINGS.landingPage.about = result.about;
+    LANDING_PAGE.about = result.about;
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+function renderGalleryAdminList(items) {
+  const wrap = document.getElementById("gallery-admin-list");
+  if (!wrap) return;
+  if (!items.length) {
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.innerHTML = items
+    .map(
+      (g) => `<div class="content-admin-item" data-id="${g.id}">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <img src="${escapeAttr(g.photo)}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;" />
+        <div class="sub">${escapeAttr(truncate(bilingual(g.captionEn, g.captionAr), 50))}</div>
+      </div>
+      <button class="secondary gallery-delete" data-id="${g.id}" style="margin-top:0;">${escapeAttr(t("btnRemove"))}</button>
+    </div>`
+    )
+    .join("");
+  wrap.querySelectorAll(".gallery-delete").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(t("confirmRemovePhoto"))) return;
+      try {
+        await api("/api/admin/landing/gallery/" + btn.dataset.id, { method: "DELETE" });
+        SETTINGS.landingPage.gallery = (SETTINGS.landingPage.gallery || []).filter((x) => x.id !== Number(btn.dataset.id));
+        LANDING_PAGE.gallery = SETTINGS.landingPage.gallery;
+        renderGalleryAdminList(LANDING_PAGE.gallery);
+        applyLandingPageToUI();
+      } catch (e) {
+        /* ignore - list stays as-is if delete fails */
+      }
+    });
+  });
+}
+document.getElementById("gallery-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("gallery-msg");
+  const fileInput = document.getElementById("gallery-photo-file");
+  if (!fileInput.files[0]) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  const fd = new FormData();
+  fd.append("photo", fileInput.files[0]);
+  fd.append("captionEn", document.getElementById("gallery-caption-en").value.trim());
+  fd.append("captionAr", document.getElementById("gallery-caption-ar").value.trim());
+  try {
+    const item = await api("/api/admin/landing/gallery", { method: "POST", body: fd });
+    SETTINGS.landingPage.gallery = [...(SETTINGS.landingPage.gallery || []), item];
+    LANDING_PAGE.gallery = SETTINGS.landingPage.gallery;
+    fileInput.value = "";
+    document.getElementById("gallery-caption-en").value = "";
+    document.getElementById("gallery-caption-ar").value = "";
+    renderGalleryAdminList(LANDING_PAGE.gallery);
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+function renderSponsorsAdminList(items) {
+  const wrap = document.getElementById("sponsors-admin-list");
+  if (!wrap) return;
+  if (!items.length) {
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.innerHTML = items
+    .map(
+      (s) => `<div class="content-admin-item" data-id="${s.id}">
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${s.logo ? `<img src="${escapeAttr(s.logo)}" alt="" style="width:52px;height:52px;object-fit:contain;border-radius:6px;" />` : ""}
+        <div class="title">${escapeAttr(s.name)}</div>
+      </div>
+      <button class="secondary sponsor-delete" data-id="${s.id}" style="margin-top:0;">${escapeAttr(t("btnRemove"))}</button>
+    </div>`
+    )
+    .join("");
+  wrap.querySelectorAll(".sponsor-delete").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(t("confirmRemoveSponsor"))) return;
+      try {
+        await api("/api/admin/landing/sponsors/" + btn.dataset.id, { method: "DELETE" });
+        SETTINGS.landingPage.sponsors = (SETTINGS.landingPage.sponsors || []).filter((x) => x.id !== Number(btn.dataset.id));
+        LANDING_PAGE.sponsors = SETTINGS.landingPage.sponsors;
+        renderSponsorsAdminList(LANDING_PAGE.sponsors);
+        applyLandingPageToUI();
+      } catch (e) {
+        /* ignore - list stays as-is if delete fails */
+      }
+    });
+  });
+}
+document.getElementById("sponsor-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("sponsor-msg");
+  const name = document.getElementById("sponsor-name").value.trim();
+  if (!name) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  const fd = new FormData();
+  fd.append("name", name);
+  fd.append("url", document.getElementById("sponsor-url").value.trim());
+  const fileInput = document.getElementById("sponsor-logo-file");
+  if (fileInput.files[0]) fd.append("logo", fileInput.files[0]);
+  try {
+    const item = await api("/api/admin/landing/sponsors", { method: "POST", body: fd });
+    SETTINGS.landingPage.sponsors = [...(SETTINGS.landingPage.sponsors || []), item];
+    LANDING_PAGE.sponsors = SETTINGS.landingPage.sponsors;
+    document.getElementById("sponsor-name").value = "";
+    document.getElementById("sponsor-url").value = "";
+    fileInput.value = "";
+    renderSponsorsAdminList(LANDING_PAGE.sponsors);
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
   } catch (e) {
     showMsg(msg, e.message, false);
   }

@@ -44,23 +44,33 @@
 
   <!-- ============================= EVENTS (landing page) ============================= -->
   <section id="view-events" class="view active">
-    <div class="hero-banner">
-      <h2 data-i18n="heroWelcome">Welcome to Ahlawy</h2>
-      <p data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
+    <div class="hero-banner" data-landing-section="hero">
+      <h2 id="landing-hero-headline" data-i18n="heroWelcome">Welcome to Ahlawy</h2>
+      <p id="landing-hero-tagline" data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
     </div>
 
-    <div id="featured-events-section" class="hidden">
-      <h2 class="section-title" data-i18n="featuredEventsTitle">Coming up next</h2>
-      <div class="event-grid featured" id="featured-events-grid"></div>
+    <div data-landing-section="events">
+      <div id="featured-events-section" class="hidden">
+        <h2 class="section-title" data-i18n="featuredEventsTitle">Coming up next</h2>
+        <div class="event-grid featured" id="featured-events-grid"></div>
+      </div>
+
+      <h2 class="section-title" data-i18n="allEventsTitle">All upcoming events</h2>
+      <div class="card" id="events-empty">
+        <p style="color:var(--muted);" data-i18n="eventsEmpty">No upcoming events right now — check back soon.</p>
+      </div>
+      <div class="event-grid" id="events-grid"></div>
     </div>
 
-    <h2 class="section-title" data-i18n="allEventsTitle">All upcoming events</h2>
-    <div class="card" id="events-empty">
-      <p style="color:var(--muted);" data-i18n="eventsEmpty">No upcoming events right now — check back soon.</p>
+    <div id="about-section" class="hidden" data-landing-section="about" style="margin-top:30px;">
+      <h2 class="section-title" id="landing-about-title" data-i18n="aboutUsTitle">About us</h2>
+      <div class="card">
+        <img id="landing-about-photo" class="hidden" alt="" style="max-width:100%;border-radius:10px;margin-bottom:14px;" />
+        <p id="landing-about-body" style="color:var(--muted);white-space:pre-wrap;"></p>
+      </div>
     </div>
-    <div class="event-grid" id="events-grid"></div>
 
-    <div id="news-section" style="margin-top:30px;">
+    <div id="news-section" data-landing-section="news" style="margin-top:30px;">
       <h2 class="section-title" data-i18n="newsTitle">Committee News</h2>
       <p class="section-sub" data-i18n="newsIntro">Announcements and updates from the Sports Entertainment Committee.</p>
       <div class="card hidden" id="news-empty">
@@ -69,7 +79,7 @@
       <div id="news-list"></div>
     </div>
 
-    <div id="community-section" style="margin-top:30px;">
+    <div id="community-section" data-landing-section="community" style="margin-top:30px;">
       <h2 class="section-title" data-i18n="communityTitle">Community</h2>
       <p class="section-sub" data-i18n="communityIntro">A quick look at the Ahlawy community.</p>
       <div class="stat-row" id="community-stats-row" style="margin-bottom:16px;"></div>
@@ -79,13 +89,30 @@
       </div>
     </div>
 
-    <div id="spotlight-section" style="margin-top:30px;">
+    <div id="spotlight-section" data-landing-section="spotlight" style="margin-top:30px;">
       <h2 class="section-title" data-i18n="spotlightTitle">Community Spotlight</h2>
       <p class="section-sub" data-i18n="spotlightIntro">Members who make Ahlawy what it is.</p>
       <div class="card hidden" id="spotlight-empty">
         <p style="color:var(--muted);" data-i18n="noSpotlightsYet">No spotlights yet.</p>
       </div>
       <div class="spotlight-grid" id="spotlight-grid"></div>
+    </div>
+
+    <div id="gallery-section" class="hidden" data-landing-section="gallery" style="margin-top:30px;">
+      <h2 class="section-title" data-i18n="galleryTitle">Photo Gallery</h2>
+      <p class="section-sub" data-i18n="galleryIntro">Moments from Ahlawy events.</p>
+      <div class="card hidden" id="gallery-empty">
+        <p style="color:var(--muted);" data-i18n="noGalleryPhotosYet">No photos yet.</p>
+      </div>
+      <div class="gallery-grid" id="gallery-grid"></div>
+    </div>
+
+    <div id="sponsors-section" class="hidden" data-landing-section="sponsors" style="margin-top:30px;">
+      <h2 class="section-title" data-i18n="sponsorsTitle">Our Sponsors &amp; Partners</h2>
+      <div class="card hidden" id="sponsors-empty">
+        <p style="color:var(--muted);" data-i18n="noSponsorsYet">No sponsors listed yet.</p>
+      </div>
+      <div class="sponsor-strip" id="sponsors-strip"></div>
     </div>
   </section>
 
@@ -347,6 +374,10 @@
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 4.5h14v9H8.5L4.5 16.5v-3H3v-9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span data-i18n="adminTabContent">Content &amp; Chat</span>
           <span id="admin-tab-badge-content" class="admin-tab-badge hidden">0</span>
+        </button>
+        <button class="admin-tab admin-full-only" type="button" data-admin-tab="landing" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 12.5l4-4 3 3 4.5-4.5 3.5 3.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="6.3" cy="7" r="1.1" fill="currentColor"/></svg>
+          <span data-i18n="adminTabLanding">Landing Page</span>
         </button>
         <button class="admin-tab admin-full-only" type="button" data-admin-tab="settings" role="tab">
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3.3v1.8M10 14.9v1.8M16.7 10h-1.8M5.1 10H3.3M14.7 5.3l-1.3 1.3M6.6 13.4l-1.3 1.3M14.7 14.7l-1.3-1.3M6.6 6.6L5.3 5.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -664,6 +695,79 @@
           <button class="primary" id="spotlight-submit" data-i18n="btnAddSpotlight">Add spotlight</button>
           <div class="msg" id="spotlight-msg"></div>
           <div id="spotlight-admin-list" style="margin-top:16px;"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden" data-admin-panel="landing">
+        <div class="card">
+          <h2 data-i18n="landingSectionsTitle">Landing page sections</h2>
+          <p class="section-sub" data-i18n="landingSectionsIntro">Control what shows on the Events landing page, and in what order. The events listing always stays visible — that's the whole point of the site.</p>
+          <div id="landing-sections-list"></div>
+          <div class="msg" id="landing-sections-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2 data-i18n="heroAdminTitle">Hero banner</h2>
+          <p class="hint-note" data-i18n="heroAdminHint">The big welcome message at the top of the landing page.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldHeadlineEn">Headline (EN)</label><input id="hero-headline-en" /></div>
+            <div><label data-i18n="fieldHeadlineAr">Headline (AR)</label><input id="hero-headline-ar" dir="rtl" /></div>
+          </div>
+          <div class="grid-2">
+            <div><label data-i18n="fieldTaglineEn">Tagline (EN)</label><input id="hero-tagline-en" /></div>
+            <div><label data-i18n="fieldTaglineAr">Tagline (AR)</label><input id="hero-tagline-ar" dir="rtl" /></div>
+          </div>
+          <button class="primary" id="hero-save-btn" data-i18n="btnSaveHero">Save hero banner</button>
+          <div class="msg" id="hero-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2 data-i18n="aboutAdminTitle">About us</h2>
+          <p class="hint-note" data-i18n="aboutAdminHint">A short block introducing the committee. Turn it on or off in the section list above.</p>
+          <div class="grid-2">
+            <div><label data-i18n="fieldAboutTitleEn">Title (EN)</label><input id="about-title-en" /></div>
+            <div><label data-i18n="fieldAboutTitleAr">Title (AR)</label><input id="about-title-ar" dir="rtl" /></div>
+          </div>
+          <label data-i18n="fieldAboutBodyEn">Body (EN)</label>
+          <textarea id="about-body-en" rows="3"></textarea>
+          <label data-i18n="fieldAboutBodyAr">Body (AR)</label>
+          <textarea id="about-body-ar" dir="rtl" rows="3"></textarea>
+          <label data-i18n="fieldPhoto">Photo (optional)</label>
+          <div id="about-photo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="about-photo-preview" alt="" style="max-height:120px;border-radius:8px;" /></div>
+          <input type="file" id="about-photo-file" accept="image/*" />
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="primary" id="about-save-btn" data-i18n="btnSaveAbout">Save About section</button>
+            <button class="secondary hidden" id="about-remove-photo-btn" data-i18n="btnRemovePhoto">Remove photo</button>
+          </div>
+          <div class="msg" id="about-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2 data-i18n="galleryAdminTitle">Photo gallery</h2>
+          <p class="hint-note" data-i18n="galleryAdminHint">A gallery of event photos on the landing page. Turn it on or off in the section list above.</p>
+          <div id="gallery-admin-list" style="margin-bottom:14px;"></div>
+          <label data-i18n="fieldPhoto">Photo</label>
+          <input type="file" id="gallery-photo-file" accept="image/*" />
+          <div class="grid-2">
+            <div><label data-i18n="fieldGalleryCaptionEn">Caption (EN, optional)</label><input id="gallery-caption-en" /></div>
+            <div><label data-i18n="fieldGalleryCaptionAr">Caption (AR, optional)</label><input id="gallery-caption-ar" dir="rtl" /></div>
+          </div>
+          <button class="primary" id="gallery-add-btn" data-i18n="btnAddGalleryPhoto">Add photo</button>
+          <div class="msg" id="gallery-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2 data-i18n="sponsorsAdminTitle">Sponsors &amp; partners</h2>
+          <p class="hint-note" data-i18n="sponsorsAdminHint">Logos shown in a strip on the landing page. Turn it on or off in the section list above.</p>
+          <div id="sponsors-admin-list" style="margin-bottom:14px;"></div>
+          <div class="grid-2">
+            <div><label data-i18n="fieldSponsorName">Name</label><input id="sponsor-name" /></div>
+            <div><label data-i18n="fieldSponsorUrl">Website (optional)</label><input id="sponsor-url" placeholder="https://..." /></div>
+          </div>
+          <label data-i18n="fieldSponsorLogo">Logo</label>
+          <input type="file" id="sponsor-logo-file" accept="image/*" />
+          <button class="primary" id="sponsor-add-btn" data-i18n="btnAddSponsor">Add sponsor</button>
+          <div class="msg" id="sponsor-msg"></div>
         </div>
       </div>
 
