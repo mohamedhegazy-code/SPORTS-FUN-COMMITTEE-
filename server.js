@@ -650,12 +650,19 @@ function balanceSnapshot(db, membershipNumber) {
 // Member sign-up: creates the member's account (and profile) in one step.
 app.post("/api/auth/signup", async (req, res) => {
   const db = readDb();
-  const { membershipNumber, name, password, familyGroup, phone } = req.body;
+  const { membershipNumber, name, password, familyGroup, phone, email } = req.body;
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
   }
   if (String(password).length < 6) {
     return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
+  // Optional - only a light shape check (not full RFC validation) so a
+  // genuine typo like "ahmed@gmail" is caught without rejecting anything
+  // unusual that's still a real address.
+  const trimmedEmail = (email || "").trim();
+  if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return res.status(400).json({ error: "That doesn't look like a valid email address" });
   }
   const existing = db.members[membershipNumber];
   if (existing && existing.passwordHash) {
@@ -664,7 +671,7 @@ app.post("/api/auth/signup", async (req, res) => {
   // `existing` with no passwordHash means an admin imported this member
   // ahead of time (see /api/admin/members/import) - this is them claiming
   // that profile rather than starting from scratch, so keep whatever was
-  // already on file (family group, phone, dependents) unless they're
+  // already on file (family group, phone, email, dependents) unless they're
   // explicitly overriding it here.
   const passwordHash = await bcrypt.hash(password, 10);
   db.members[membershipNumber] = {
@@ -672,6 +679,7 @@ app.post("/api/auth/signup", async (req, res) => {
     name,
     familyGroup: familyGroup || (existing ? existing.familyGroup : "") || "",
     phone: phone || (existing ? existing.phone : "") || "",
+    email: trimmedEmail || (existing ? existing.email : "") || "",
     passwordHash,
     dependents: (existing && existing.dependents) || [],
   };
@@ -2175,6 +2183,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         membershipNumber: m.membershipNumber,
         name: m.name,
         phone: m.phone || "",
+        email: m.email || "",
         familyGroup: m.familyGroup || "",
         hasLoggedInAccount: !!m.passwordHash,
         balance: snap ? snap.balance : 0,

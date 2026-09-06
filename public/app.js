@@ -1067,6 +1067,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const password = document.getElementById("su-password").value;
   const familyGroup = document.getElementById("su-family").value.trim();
   const phone = document.getElementById("su-phone").value.trim();
+  const email = document.getElementById("su-email").value.trim();
   const msg = document.getElementById("su-msg");
   if (!membershipNumber || !name || !password) {
     showMsg(msg, t("errFillFields"), false);
@@ -1079,7 +1080,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, email }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;
@@ -2302,7 +2303,7 @@ function renderDirectoryTable() {
     return;
   }
   const rows = DIRECTORY_DATA.map((m, i) => {
-    const searchBlob = escapeAttr(`${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup}`.toLowerCase());
+    const searchBlob = escapeAttr(`${m.name} ${m.membershipNumber} ${m.phone} ${m.email || ""} ${m.familyGroup}`.toLowerCase());
     const dependentsHtml = m.dependents.length
       ? `<ul class="directory-list">${m.dependents.map((d) => `<li>${escapeAttr(d.name)}</li>`).join("")}</ul>`
       : `<p class="dashboard-empty-note">${t("noDependents")}</p>`;
@@ -2322,6 +2323,7 @@ function renderDirectoryTable() {
         <td>${escapeAttr(m.membershipNumber)}</td>
         <td>${escapeAttr(m.name)}</td>
         <td>${escapeAttr(m.phone)}</td>
+        <td>${escapeAttr(m.email || "")}</td>
         <td>${escapeAttr(m.familyGroup)}</td>
         <td class="num">${fmt(m.balance)}</td>
         <td class="num">${fmt(m.registeredCount)}</td>
@@ -2329,7 +2331,7 @@ function renderDirectoryTable() {
         <td><button class="secondary" data-directory-toggle="${i}" style="padding:3px 10px;font-size:0.78rem;">${t("btnDetails")}</button></td>
       </tr>
       <tr data-directory-row data-search="${searchBlob}" data-directory-detail="${i}" data-open="false" class="hidden">
-        <td colspan="8">
+        <td colspan="9">
           <div class="grid-2">
             <div><h4 style="margin:6px 0;">${t("colFamilyMembers")}</h4>${dependentsHtml}</div>
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
@@ -2339,7 +2341,7 @@ function renderDirectoryTable() {
   }).join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
-      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colPhone")}</th>
+      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
       <th>${t("colFamilyGroup")}</th><th>${t("colPointsBalance")}</th><th>${t("colRegistrations")}</th>
       <th>${t("colCheckedIn")}</th><th></th>
     </tr></thead>
