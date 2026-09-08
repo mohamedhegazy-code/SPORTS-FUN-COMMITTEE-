@@ -625,7 +625,9 @@ function updateUIForSession() {
   document.getElementById("mp-family-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-registrations-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-chat-card").classList.toggle("hidden", !isMember);
+  document.getElementById("mp-security-card").classList.toggle("hidden", !isMember);
   if (isMember) {
+    renderRecoveryPinStatus("mp-recovery-pin-status", CURRENT_SESSION.member.hasRecoveryPin);
     if (pointsVisible()) {
       document.getElementById("mp-points-disabled-note").classList.add("hidden");
       loadMyBalance();
@@ -707,6 +709,7 @@ function updateUIForSession() {
       loadSpotlightAdminList();
       applySettingsToUI();
       populateLandingAdminForms();
+      renderRecoveryPinStatus("staff-recovery-pin-status", CURRENT_SESSION.staff.hasRecoveryPin);
     }
   } else {
     document.getElementById("admin-chat-badge").classList.add("hidden");
@@ -5193,6 +5196,211 @@ document.getElementById("cp-submit").addEventListener("click", async () => {
     showMsg(msg, t("okPasswordChanged"), true);
     document.getElementById("cp-old").value = "";
     document.getElementById("cp-new").value = "";
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+// Member-side "Change my password" (Member Profile → Account & security) -
+// same endpoint as the staff cp-* card above, just a separate form/ids so
+// the two surfaces don't fight over the same inputs.
+document.getElementById("mp-cp-submit").addEventListener("click", async () => {
+  const oldPassword = document.getElementById("mp-cp-old").value;
+  const newPassword = document.getElementById("mp-cp-new").value;
+  const msg = document.getElementById("mp-cp-msg");
+  if (!oldPassword || !newPassword) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  if (newPassword.length < 6) {
+    showMsg(msg, t("errPasswordShort"), false);
+    return;
+  }
+  try {
+    await api("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+    showMsg(msg, t("okPasswordChanged"), true);
+    document.getElementById("mp-cp-old").value = "";
+    document.getElementById("mp-cp-new").value = "";
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+// ------------------------------------------------------------ recovery PIN --
+// Lets a member or staff/admin account set (or remove) a short PIN of their
+// own choosing while logged in, so they can later reset their own password
+// via the "Forgot your password?" link on the sign-in screen instead of
+// waiting on an admin. See /api/me/recovery-pin, /api/staff/recovery-pin,
+// /api/auth/forgot-password, /api/auth/staff-forgot-password in server.js.
+function renderRecoveryPinStatus(elId, hasPin) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = hasPin ? t("recoveryPinStatusSet") : t("recoveryPinStatusNotSet");
+}
+
+async function saveRecoveryPin({ passwordId, pinId, msgId, statusId, sessionKey, endpoint }) {
+  const password = document.getElementById(passwordId).value;
+  const pin = document.getElementById(pinId).value.trim();
+  const msg = document.getElementById(msgId);
+  if (!password || !pin) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  if (pin.length < 4) {
+    showMsg(msg, t("errRecoveryPinShort"), false);
+    return;
+  }
+  try {
+    const result = await api(endpoint, { method: "POST", body: JSON.stringify({ password, pin }) });
+    if (CURRENT_SESSION && CURRENT_SESSION[sessionKey]) CURRENT_SESSION[sessionKey].hasRecoveryPin = result.hasRecoveryPin;
+    renderRecoveryPinStatus(statusId, result.hasRecoveryPin);
+    showMsg(msg, t("okRecoveryPinSaved"), true);
+    document.getElementById(passwordId).value = "";
+    document.getElementById(pinId).value = "";
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+async function clearRecoveryPin({ passwordId, msgId, statusId, sessionKey, endpoint }) {
+  const password = document.getElementById(passwordId).value;
+  const msg = document.getElementById(msgId);
+  if (!password) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  if (!confirm(t("confirmClearRecoveryPin"))) return;
+  try {
+    const result = await api(endpoint, { method: "POST", body: JSON.stringify({ password, pin: "" }) });
+    if (CURRENT_SESSION && CURRENT_SESSION[sessionKey]) CURRENT_SESSION[sessionKey].hasRecoveryPin = result.hasRecoveryPin;
+    renderRecoveryPinStatus(statusId, result.hasRecoveryPin);
+    showMsg(msg, t("okRecoveryPinCleared"), true);
+    document.getElementById(passwordId).value = "";
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+
+document.getElementById("mp-pin-save").addEventListener("click", () =>
+  saveRecoveryPin({
+    passwordId: "mp-pin-password",
+    pinId: "mp-pin-new",
+    msgId: "mp-pin-msg",
+    statusId: "mp-recovery-pin-status",
+    sessionKey: "member",
+    endpoint: "/api/me/recovery-pin",
+  })
+);
+document.getElementById("mp-pin-clear").addEventListener("click", () =>
+  clearRecoveryPin({
+    passwordId: "mp-pin-password",
+    msgId: "mp-pin-msg",
+    statusId: "mp-recovery-pin-status",
+    sessionKey: "member",
+    endpoint: "/api/me/recovery-pin",
+  })
+);
+document.getElementById("staff-pin-save").addEventListener("click", () =>
+  saveRecoveryPin({
+    passwordId: "staff-pin-password",
+    pinId: "staff-pin-new",
+    msgId: "staff-pin-msg",
+    statusId: "staff-recovery-pin-status",
+    sessionKey: "staff",
+    endpoint: "/api/staff/recovery-pin",
+  })
+);
+document.getElementById("staff-pin-clear").addEventListener("click", () =>
+  clearRecoveryPin({
+    passwordId: "staff-pin-password",
+    msgId: "staff-pin-msg",
+    statusId: "staff-recovery-pin-status",
+    sessionKey: "staff",
+    endpoint: "/api/staff/recovery-pin",
+  })
+);
+
+// --------------------------------------------------- forgot password modal --
+// One shared modal for all three sign-in screens (member Register tab,
+// Gate Scanner, Admin) - which endpoint it calls and which id field it asks
+// for depends on which link opened it.
+let FORGOT_PASSWORD_TYPE = "member";
+
+function openForgotPasswordModal(type) {
+  FORGOT_PASSWORD_TYPE = type;
+  document.getElementById("fp-id").value = "";
+  document.getElementById("fp-pin").value = "";
+  document.getElementById("fp-new-password").value = "";
+  const msg = document.getElementById("fp-msg");
+  msg.textContent = "";
+  msg.classList.remove("show", "ok", "err");
+  const idLabel = document.getElementById("fp-id-label");
+  const idInput = document.getElementById("fp-id");
+  const intro = document.getElementById("fp-intro");
+  if (type === "staff") {
+    idLabel.setAttribute("data-i18n", "fieldUsername");
+    idLabel.textContent = t("fieldUsername");
+    idInput.placeholder = "";
+    intro.textContent = t("forgotPasswordIntroStaff");
+  } else {
+    idLabel.setAttribute("data-i18n", "fieldMembership");
+    idLabel.textContent = t("fieldMembership");
+    idInput.placeholder = "e.g. 10234";
+    intro.textContent = t("forgotPasswordIntroMember");
+  }
+  document.getElementById("forgot-password-modal").classList.remove("hidden");
+}
+function closeForgotPasswordModal() {
+  document.getElementById("forgot-password-modal").classList.add("hidden");
+}
+document.getElementById("forgot-password-modal-close").addEventListener("click", closeForgotPasswordModal);
+document.getElementById("li-forgot-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openForgotPasswordModal("member");
+});
+document.getElementById("scan-forgot-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openForgotPasswordModal("staff");
+});
+document.getElementById("admin-forgot-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openForgotPasswordModal("staff");
+});
+
+document.getElementById("fp-submit").addEventListener("click", async () => {
+  const id = document.getElementById("fp-id").value.trim();
+  const pin = document.getElementById("fp-pin").value;
+  const newPassword = document.getElementById("fp-new-password").value;
+  const msg = document.getElementById("fp-msg");
+  if (!id || !pin || !newPassword) {
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  if (newPassword.length < 6) {
+    showMsg(msg, t("errPasswordShort"), false);
+    return;
+  }
+  try {
+    if (FORGOT_PASSWORD_TYPE === "staff") {
+      const result = await api("/api/auth/staff-forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ username: id, pin, newPassword }),
+      });
+      CURRENT_SESSION = { type: "staff", staff: result.staff };
+    } else {
+      const result = await api("/api/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ membershipNumber: id, pin, newPassword }),
+      });
+      CURRENT_SESSION = { type: "member", member: result.member };
+    }
+    SESSION_EXPIRY_HANDLED = false;
+    showMsg(msg, t("okPasswordReset"), true);
+    updateUIForSession();
+    setTimeout(closeForgotPasswordModal, 1200);
   } catch (e) {
     showMsg(msg, e.message, false);
   }

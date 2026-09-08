@@ -465,13 +465,13 @@ function writeDb(db) {
 // Never send a password hash back to a client.
 function publicMember(m) {
   if (!m) return m;
-  const { passwordHash, ...rest } = m;
-  return rest;
+  const { passwordHash, recoveryPinHash, ...rest } = m;
+  return { ...rest, hasRecoveryPin: !!recoveryPinHash };
 }
 function publicStaff(s) {
   if (!s) return s;
-  const { passwordHash, ...rest } = s;
-  return rest;
+  const { passwordHash, recoveryPinHash, ...rest } = s;
+  return { ...rest, hasRecoveryPin: !!recoveryPinHash };
 }
 
 // ------------------------------------------------------------- sessions ---
@@ -874,6 +874,106 @@ app.post("/api/staff/members/:membershipNumber/reset-password", requireStaffRole
   member.passwordHash = await bcrypt.hash(newPassword, 10);
   writeDb(db);
   res.json({ ok: true, member: publicMember(member) });
+});
+
+// -------------------------------------------------------------------------
+// SELF-SERVICE PASSWORD RECOVERY (recovery PIN, no email/SMS infra needed)
+// -------------------------------------------------------------------------
+// A member or staff/admin account can optionally set a short "recovery PIN"
+// for itself while logged in (below). Anyone who later forgets their
+// password can reset it themselves at /api/auth/forgot-password (member) or
+// /api/auth/staff-forgot-password (staff/admin) by proving they know both
+// the account id AND that PIN - no admin involved. An account that never
+// set a PIN still falls back to the existing admin-mediated reset above.
+const MIN_PIN_LENGTH = 4;
+
+app.post("/api/me/recovery-pin", requireMember, async (req, res) => {
+  const db = req.db;
+  const member = req.member;
+  const { password, pin } = req.body;
+  if (!(await bcrypt.compare(password || "", member.passwordHash))) {
+    return res.status(401).json({ error: "Current password is incorrect" });
+  }
+  const trimmedPin = String(pin || "").trim();
+  if (!trimmedPin) {
+    member.recoveryPinHash = null;
+  } else {
+    if (trimmedPin.length < MIN_PIN_LENGTH) {
+      return res.status(400).json({ error: `Recovery PIN must be at least ${MIN_PIN_LENGTH} characters` });
+    }
+    member.recoveryPinHash = await bcrypt.hash(trimmedPin, 10);
+  }
+  writeDb(db);
+  res.json({ ok: true, hasRecoveryPin: !!member.recoveryPinHash });
+});
+
+// Any staff role (not just admin) can protect their own account this way.
+app.post("/api/staff/recovery-pin", requireStaffRole("staff"), async (req, res) => {
+  const db = req.db;
+  const staff = req.staff;
+  const { password, pin } = req.body;
+  if (!(await bcrypt.compare(password || "", staff.passwordHash))) {
+    return res.status(401).json({ error: "Current password is incorrect" });
+  }
+  const trimmedPin = String(pin || "").trim();
+  if (!trimmedPin) {
+    staff.recoveryPinHash = null;
+  } else {
+    if (trimmedPin.length < MIN_PIN_LENGTH) {
+      return res.status(400).json({ error: `Recovery PIN must be at least ${MIN_PIN_LENGTH} characters` });
+    }
+    staff.recoveryPinHash = await bcrypt.hash(trimmedPin, 10);
+  }
+  writeDb(db);
+  res.json({ ok: true, hasRecoveryPin: !!staff.recoveryPinHash });
+});
+
+// Public (logged-out) recovery endpoints. Shares the same rate limiter as
+// login - a wrong PIN counts against the same per-IP throttle as a wrong
+// password, so brute-forcing a short PIN this way is no easier than
+// brute-forcing a password.
+app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
+  const db = readDb();
+  const { membershipNumber, pin, newPassword } = req.body;
+  const member = db.members[membershipNumber];
+  if (!member || !member.recoveryPinHash) {
+    return res.status(400).json({
+      error: "No recovery PIN is set for this membership number. Please contact the committee to reset your password.",
+    });
+  }
+  if (!(await bcrypt.compare(pin || "", member.recoveryPinHash))) {
+    return res.status(401).json({ error: "Incorrect club member ID or recovery PIN" });
+  }
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters" });
+  }
+  member.passwordHash = await bcrypt.hash(newPassword, 10);
+  writeDb(db);
+  const token = createSession("member", membershipNumber);
+  setSessionCookie(req, res, token);
+  res.json({ ok: true, member: publicMember(member) });
+});
+
+app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) => {
+  const db = readDb();
+  const { username, pin, newPassword } = req.body;
+  const staff = db.staffAccounts[username];
+  if (!staff || !staff.recoveryPinHash) {
+    return res.status(400).json({
+      error: "No recovery PIN is set for this account. Please ask an admin to reset your password.",
+    });
+  }
+  if (!(await bcrypt.compare(pin || "", staff.recoveryPinHash))) {
+    return res.status(401).json({ error: "Incorrect username or recovery PIN" });
+  }
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters" });
+  }
+  staff.passwordHash = await bcrypt.hash(newPassword, 10);
+  writeDb(db);
+  const token = createSession("staff", username, staff.role);
+  setSessionCookie(req, res, token);
+  res.json({ ok: true, staff: publicStaff(staff) });
 });
 
 // -------------------------------------------------------------------------

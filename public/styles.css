@@ -388,6 +388,8 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .attendee-row input[type="checkbox"] { width: auto; accent-color: var(--red); }
 .attendee-row label { margin: 0; font-size: 0.92rem; color: var(--text); cursor: pointer; }
 .hint-note { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+.hint-note a { color: var(--red); text-decoration: underline; }
+.hint-note a:hover { color: var(--red-dark); }
 
 /* -------------------------------------------------------------- qr list --- */
 .qr-entry {

@@ -146,7 +146,7 @@
         <input id="li-password" type="password" />
         <button class="primary" id="li-submit" data-i18n="btnLogin">Log in</button>
         <div class="msg" id="li-msg"></div>
-        <p class="hint-note" data-i18n="forgotPasswordHint">Forgot your password? Contact the committee (phone/WhatsApp or in person) with your membership number and they'll reset it for you.</p>
+        <p class="hint-note"><a href="#" id="li-forgot-link" data-i18n="linkForgotPassword">Forgot your password?</a></p>
       </div>
     </div>
 
@@ -255,6 +255,31 @@
       </div>
       <div class="msg" id="mp-chat-msg"></div>
     </div>
+
+    <div class="card hidden" id="mp-security-card">
+      <h2 data-i18n="accountSecurityTitle">Account &amp; security</h2>
+
+      <h3 style="margin-top:4px;" data-i18n="changePasswordTitle">Change my password</h3>
+      <label data-i18n="fieldOldPassword">Current password</label>
+      <input id="mp-cp-old" type="password" />
+      <label data-i18n="fieldNewPassword">New password</label>
+      <input id="mp-cp-new" type="password" placeholder="At least 6 characters" />
+      <button class="primary" id="mp-cp-submit" data-i18n="btnChangePassword">Change password</button>
+      <div class="msg" id="mp-cp-msg"></div>
+
+      <h3 style="margin-top:20px;" data-i18n="recoveryPinTitle">Recovery PIN</h3>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="recoveryPinIntro">Set a short PIN so you can reset your own password later if you forget it, without contacting the committee.</p>
+      <p class="hint-note" id="mp-recovery-pin-status"></p>
+      <label data-i18n="fieldCurrentPasswordConfirm">Current password (to confirm it's you)</label>
+      <input id="mp-pin-password" type="password" />
+      <label data-i18n="fieldRecoveryPin">Recovery PIN</label>
+      <input id="mp-pin-new" placeholder="At least 4 characters" />
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button class="primary" id="mp-pin-save" data-i18n="btnSaveRecoveryPin">Save recovery PIN</button>
+        <button class="secondary" id="mp-pin-clear" data-i18n="btnClearRecoveryPin">Remove recovery PIN</button>
+      </div>
+      <div class="msg" id="mp-pin-msg"></div>
+    </div>
   </section>
 
   <!-- ============================= LADDER ============================= -->
@@ -303,6 +328,7 @@
       <br/>
       <button class="primary" id="scan-unlock" data-i18n="btnLogin">Log in</button>
       <div class="msg" id="scan-lock-msg"></div>
+      <p class="hint-note"><a href="#" id="scan-forgot-link" data-i18n="linkForgotPassword">Forgot your password?</a></p>
     </div>
 
     <div id="scan-panel" class="hidden">
@@ -341,6 +367,7 @@
       <br/>
       <button class="primary" id="admin-unlock" data-i18n="btnLogin">Log in</button>
       <div class="msg" id="admin-lock-msg"></div>
+      <p class="hint-note"><a href="#" id="admin-forgot-link" data-i18n="linkForgotPassword">Forgot your password?</a></p>
     </div>
 
     <div id="admin-denied" class="card hidden">
@@ -822,6 +849,21 @@
           <button class="primary" id="cp-submit" data-i18n="btnChangePassword">Change password</button>
           <div class="msg" id="cp-msg"></div>
         </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4" y="3.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M10 11.5v2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="recoveryPinTitle">Recovery PIN</span></h2>
+          <p class="section-sub" data-i18n="recoveryPinIntroStaff">Set a short PIN so you can reset your own password later if you forget it, without asking another admin.</p>
+          <p class="hint-note" id="staff-recovery-pin-status"></p>
+          <label data-i18n="fieldCurrentPasswordConfirm">Current password (to confirm it's you)</label>
+          <input id="staff-pin-password" type="password" />
+          <label data-i18n="fieldRecoveryPin">Recovery PIN</label>
+          <input id="staff-pin-new" placeholder="At least 4 characters" />
+          <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+            <button class="primary" id="staff-pin-save" data-i18n="btnSaveRecoveryPin">Save recovery PIN</button>
+            <button class="secondary" id="staff-pin-clear" data-i18n="btnClearRecoveryPin">Remove recovery PIN</button>
+          </div>
+          <div class="msg" id="staff-pin-msg"></div>
+        </div>
       </div>
 
       <div class="admin-tab-panel hidden mgmt-tab-only" data-admin-panel="management">
@@ -847,6 +889,22 @@
   <div class="modal-box">
     <button class="modal-close" id="event-modal-close" aria-label="Close">&times;</button>
     <div id="event-modal-content"></div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="forgot-password-modal">
+  <div class="modal-box">
+    <button class="modal-close" id="forgot-password-modal-close" aria-label="Close">&times;</button>
+    <h2 data-i18n="forgotPasswordTitle">Reset your password</h2>
+    <p id="fp-intro" style="color:var(--muted);font-size:0.85rem;"></p>
+    <label id="fp-id-label" data-i18n="fieldMembership">Membership number</label>
+    <input id="fp-id" />
+    <label data-i18n="fieldRecoveryPin">Recovery PIN</label>
+    <input id="fp-pin" type="password" />
+    <label data-i18n="fieldNewPassword">New password</label>
+    <input id="fp-new-password" type="password" placeholder="At least 6 characters" />
+    <button class="primary" id="fp-submit" data-i18n="btnResetPassword">Reset password</button>
+    <div class="msg" id="fp-msg"></div>
   </div>
 </div>
 
