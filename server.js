@@ -1212,7 +1212,7 @@ app.get("/api/events", (req, res) => {
 
 app.post(
   "/api/events",
-  requireStaffRole("admin"),
+  requireStaffRole(["tournament"]),
   uploadEventPhoto.single("coverPhoto"),
   (req, res) => {
     const db = req.db;
@@ -1283,7 +1283,7 @@ app.post(
 // added at that point.
 app.put(
   "/api/events/:eventId",
-  requireStaffRole("admin"),
+  requireStaffRole(["tournament"]),
   uploadEventPhoto.single("coverPhoto"),
   (req, res) => {
     const db = req.db;
