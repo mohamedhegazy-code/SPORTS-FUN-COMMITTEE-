@@ -375,6 +375,24 @@ function setLang(lang) {
   applyLandingPageToUI();
   renderLandingSectionsAdminList();
   renderLadder();
+  // Tournament admin panel (progress stepper, setup/schedule cards, setup
+  // preview) has its own render function driven by the TOURNAMENT_DATA
+  // global rather than by setLang's usual per-section calls above - without
+  // this it stays in whatever language it was last loaded in, and once the
+  // page's dir flips to rtl that stale content renders with bidi artifacts.
+  // Safe to call unconditionally: it no-ops into the (possibly hidden)
+  // #tourn-body element whether or not a tournament is currently loaded.
+  renderTournamentBody();
+  // Same gap on the public/member-facing tournament viewer: re-render
+  // whichever of the list or an open tournament's detail is currently
+  // showing, using PUBLIC_TOURNAMENT_OPEN_EVENT_ID to know which.
+  if (document.getElementById("view-tournaments").classList.contains("active")) {
+    if (PUBLIC_TOURNAMENT_OPEN_EVENT_ID != null) {
+      openPublicTournament(PUBLIC_TOURNAMENT_OPEN_EVENT_ID);
+    } else {
+      renderPublicTournamentsList();
+    }
+  }
   if (document.getElementById("mp-result").classList.contains("hidden") === false) {
     renderTierDropdown();
   }
@@ -4790,6 +4808,10 @@ async function awardTournamentPoints() {
 // no action controls, since members can only look, not record results.
 // =====================================================================
 let PUBLIC_TOURNAMENTS_LIST = [];
+// Which public tournament detail (if any) is currently open, so setLang()
+// can re-render it in the new language without guessing. null means the
+// list view is showing instead.
+let PUBLIC_TOURNAMENT_OPEN_EVENT_ID = null;
 // Which event ids currently have a tournament - kept in sync via
 // refreshTournamentEventIds() (called from loadEvents(), so it's already
 // fresh by the time event cards/modals render) so the Events/Annual views
@@ -4801,6 +4823,7 @@ async function refreshTournamentEventIds() {
 }
 
 async function loadPublicTournamentsList() {
+  PUBLIC_TOURNAMENT_OPEN_EVENT_ID = null;
   await refreshTournamentEventIds();
   document.getElementById("tourn-public-detail").classList.add("hidden");
   document.getElementById("tourn-public-list").classList.remove("hidden");
@@ -4839,10 +4862,12 @@ function renderPublicTournamentsList() {
   });
 }
 document.getElementById("tourn-public-back").addEventListener("click", () => {
+  PUBLIC_TOURNAMENT_OPEN_EVENT_ID = null;
   document.getElementById("tourn-public-detail").classList.add("hidden");
   document.getElementById("tourn-public-list").classList.remove("hidden");
 });
 async function openPublicTournament(eventId) {
+  PUBLIC_TOURNAMENT_OPEN_EVENT_ID = eventId;
   const wrap = document.getElementById("tourn-public-detail-body");
   document.getElementById("tourn-public-list").classList.add("hidden");
   document.getElementById("tourn-public-detail").classList.remove("hidden");
