@@ -1,4 +1,4 @@
-// Ahlawy Online Registration & Points System
+// MyAhlawy Online Registration & Points System
 // Al Ahly Club - Sports Entertainment Committee, Fifth Settlement
 //
 // Simple, self-contained Node/Express app. Data persists to data/db.json
@@ -363,8 +363,8 @@ function readDb() {
   // never touched this setting looks identical to before.
   db.landingPage = db.landingPage || {};
   db.landingPage.hero = db.landingPage.hero || {};
-  if (typeof db.landingPage.hero.headlineEn !== "string") db.landingPage.hero.headlineEn = "Welcome to Ahlawy";
-  if (typeof db.landingPage.hero.headlineAr !== "string") db.landingPage.hero.headlineAr = "أهلاً بكم في أهلاوي";
+  if (typeof db.landingPage.hero.headlineEn !== "string") db.landingPage.hero.headlineEn = "Welcome to MyAhlawy";
+  if (typeof db.landingPage.hero.headlineAr !== "string") db.landingPage.hero.headlineAr = "أهلاً بكم في ماي أهلاوي";
   if (typeof db.landingPage.hero.taglineEn !== "string") {
     db.landingPage.hero.taglineEn = "Register for club sports activities, earn points, and stay connected with the community.";
   }
@@ -3932,5 +3932,5 @@ app.use((err, req, res, next) => {
 
 bootstrapAdmin();
 app.listen(PORT, () => {
-  console.log(`Ahlawy points system running at http://localhost:${PORT}`);
+  console.log(`MyAhlawy points system running at http://localhost:${PORT}`);
 });
