@@ -373,6 +373,8 @@ const I18N = {
     fieldTournamentFormat: "Format",
     tournamentFormatKnockout: "Knockout only",
     tournamentFormatGroups: "Group stage + knockout",
+    tournamentFormatCasual: "Fun session (no results tracked)",
+    tournCasualCreateHint: "No seeding, scores or standings - just track who shows up. Participation points still apply automatically once someone's checked in at the gate, same as any other event.",
     fieldNumGroups: "Number of groups",
     fieldAdvancePerGroup: "Advance per group",
     btnCreateTournament: "Create tournament",
@@ -415,6 +417,12 @@ const I18N = {
     confirmDeleteTournament: "Delete this tournament? Any results entered so far are lost - this can't be undone (though any points already awarded stay on the registrations until you change them elsewhere).",
     tournamentDeleted: "Tournament deleted.",
     btnDeleteTournament: "Delete tournament",
+    btnEndSession: "End session",
+    btnReopenSession: "Reopen session",
+    tournSessionEnded: "Session ended.",
+    tournSessionReopened: "Session reopened.",
+    tournStatusCasual: "Fun session",
+    tournCasualPublicHint: "Just a fun session - no scores or standings, just who's playing.",
 
     // Court/time scheduling, real scores + goal difference, attendance
     scheduleSetupHint: "Optional - fill in courts, minutes per match and a start time to get an auto-generated court/time schedule for every match. Leave blank for a tournament with no assigned courts or times.",
@@ -1034,6 +1042,8 @@ const I18N = {
     fieldTournamentFormat: "النظام",
     tournamentFormatKnockout: "خروج المغلوب فقط",
     tournamentFormatGroups: "دور مجموعات ثم خروج المغلوب",
+    tournamentFormatCasual: "جلسة ترفيهية (بدون نتائج)",
+    tournCasualCreateHint: "بدون بذر أو نتائج أو ترتيب — فقط تسجيل من حضر. نقاط المشاركة تُمنح تلقائيًا بمجرد تسجيل الدخول عند البوابة، تمامًا كأي فعالية أخرى.",
     fieldNumGroups: "عدد المجموعات",
     fieldAdvancePerGroup: "المتأهلون من كل مجموعة",
     btnCreateTournament: "إنشاء البطولة",
@@ -1076,6 +1086,12 @@ const I18N = {
     confirmDeleteTournament: "حذف هذه البطولة؟ ستُفقد كل النتائج المُدخلة حتى الآن — لا يمكن التراجع عن هذا الإجراء (مع بقاء أي نقاط أُضيفت سابقًا كما هي على التسجيلات إلى أن تُغيّرها من مكان آخر).",
     tournamentDeleted: "تم حذف البطولة.",
     btnDeleteTournament: "حذف البطولة",
+    btnEndSession: "إنهاء الجلسة",
+    btnReopenSession: "إعادة فتح الجلسة",
+    tournSessionEnded: "تم إنهاء الجلسة.",
+    tournSessionReopened: "تمت إعادة فتح الجلسة.",
+    tournStatusCasual: "جلسة ترفيهية",
+    tournCasualPublicHint: "مجرد جلسة ترفيهية — بدون نتائج أو ترتيب، فقط من سيشارك.",
 
     // جدول الملاعب والأوقات، النتائج الحقيقية وفارق الأهداف، الحضور
     scheduleSetupHint: "اختياري — أدخل عدد الملاعب ومدة المباراة ووقت البداية للحصول على جدول ملاعب وأوقات تلقائي لكل مباراة. اتركها فارغة لبطولة بدون ملاعب أو أوقات محددة.",

@@ -2665,7 +2665,14 @@ app.put("/api/settings/theme", requireStaffRole("admin"), uploadLogo.single("log
 //     knockout: { rounds: [ [{id,a,b,winnerId,scoreA,scoreB,note,court,time,bye}, ...], ... ] } | null,
 //     standings: [{entrantId, rank}] | null,   // set once knockout completes
 //     pointsAwardedAt: isoString | null,
-//     status: "setup"|"team-setup"|"seeding"|"groups"|"knockout"|"completed" }
+//     status: "setup"|"team-setup"|"seeding"|"groups"|"knockout"|"casual"|"completed" }
+//   "casual" is a fourth tournament format (alongside "knockout"/"groups")
+//   for a no-results "just for fun" session - entrants/teams and attendance
+//   work exactly as normal, but there's no seeding, generated bracket,
+//   scores or standings. Its status goes team-setup (team mode only) ->
+//   "casual" (active) -> "completed" (a manual admin toggle, purely for
+//   display - see PUT .../casual-status), skipping "seeding"/"groups"/
+//   "knockout" entirely.
 //
 // An "entrant" is either one registration (individual mode: entrant id is
 // "reg" + registrationId) or one team (team mode: entrant id is the team's
@@ -3144,7 +3151,9 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (r
   }
   const { mode, format } = req.body;
   if (mode !== "individual" && mode !== "team") return res.status(400).json({ error: "mode must be 'individual' or 'team'" });
-  if (format !== "knockout" && format !== "groups") return res.status(400).json({ error: "format must be 'knockout' or 'groups'" });
+  if (format !== "knockout" && format !== "groups" && format !== "casual") {
+    return res.status(400).json({ error: "format must be 'knockout', 'groups' or 'casual'" });
+  }
   let numGroups = null;
   let advancePerGroup = null;
   if (format === "groups") {
@@ -3199,7 +3208,12 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (r
     standings: null,
     pointsAwardedAt: null,
     attendance: {},
-    status: mode === "team" ? "team-setup" : "seeding",
+    // Casual ("just for fun") tournaments skip seeding entirely - there's no
+    // bracket/groups to order entrants for - so an individual-mode one goes
+    // straight to "casual" (the active, attendance-only session), and a
+    // team-mode one still needs the team-setup step first (see PUT .../teams
+    // below for the matching transition once teams are saved).
+    status: mode === "team" ? "team-setup" : format === "casual" ? "casual" : "seeding",
   };
   reconcileSeedOrder(db, t);
   db.tournaments.push(t);
@@ -3249,7 +3263,7 @@ app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole(["tournament"]
   }
   if (teams.length < 2) return res.status(400).json({ error: "Define at least 2 teams (with at least one member each) before continuing" });
   t.teams = teams;
-  t.status = "seeding";
+  t.status = t.format === "casual" ? "casual" : "seeding";
   reconcileSeedOrder(db, t);
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
@@ -3323,6 +3337,7 @@ app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tourname
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.format === "casual") return res.status(400).json({ error: "Fun sessions don't use a generated bracket - just track attendance" });
   if (t.groups || t.knockout) return res.status(400).json({ error: "Already generated for this tournament" });
   const entrants = reconcileSeedOrder(db, t);
   if (entrants.length < 2) return res.status(400).json({ error: "Need at least 2 entrants to generate a tournament" });
@@ -3375,6 +3390,29 @@ app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament
   t.lastGroupSlotEnd = null;
   t.status = "seeding";
   reconcileSeedOrder(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Casual ("just for fun") tournaments only: there's no bracket/groups to
+// finish, so "completed" here is purely a manual admin toggle for display
+// purposes (the public list badge, the Management Dashboard's completion
+// rate) - no standings are computed and no points are auto-awarded, since
+// participation points already accrue automatically via the event's normal
+// gate check-in regardless of this toggle. Reversible either direction, so
+// an admin who ends a session by mistake (or wants to reopen it for a late
+// arrival) isn't stuck.
+app.put("/api/admin/tournaments/:eventId/casual-status", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.format !== "casual") return res.status(400).json({ error: "This isn't a fun/casual session" });
+  const { status } = req.body;
+  if (status !== "casual" && status !== "completed") return res.status(400).json({ error: "status must be 'casual' or 'completed'" });
+  if (t.status !== "casual" && t.status !== "completed") {
+    return res.status(400).json({ error: "Finish setting up teams before ending or reopening this session" });
+  }
+  t.status = status;
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
@@ -3514,6 +3552,7 @@ app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tour
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);
   if (!t || t.status !== "completed") return res.status(400).json({ error: "This tournament isn't completed yet" });
+  if (!t.standings) return res.status(400).json({ error: "No standings to award points from" });
   const entrants = tournamentEntrants(db, t);
   let updated = 0;
   for (const standing of t.standings) {
@@ -3779,6 +3818,7 @@ function reportDocLabels(lang) {
       seeding: L("Seeding", "الترتيب التصنيفي"),
       groups: L("Group stage", "دور المجموعات"),
       knockout: L("Knockout", "خروج المغلوب"),
+      casual: L("In progress (fun session)", "جارية (جلسة ترفيهية)"),
       completed: L("Completed", "اكتملت"),
     };
     return map[status] || status;
@@ -3881,10 +3921,22 @@ async function buildEventReportDocx(report, lang) {
     children.push(
       statTable([
         [L("Mode", "النوع"), report.tournament.mode === "team" ? L("Team", "فرق") : L("Individual", "فردي")],
-        [L("Format", "النظام"), report.tournament.format === "groups" ? L("Groups", "مجموعات") : L("Knockout", "خروج المغلوب")],
+        [
+          L("Format", "النظام"),
+          report.tournament.format === "groups"
+            ? L("Groups", "مجموعات")
+            : report.tournament.format === "casual"
+            ? L("Fun session (no results tracked)", "جلسة ترفيهية (بدون نتائج)")
+            : L("Knockout", "خروج المغلوب"),
+        ],
         [L("Status", "الحالة"), statusLabel(report.tournament.status)],
         [L("Participants", "عدد المشاركين"), report.tournament.participantCount],
-        [L("Winner", "الفائز"), report.tournament.winnerLabel || L("Not decided yet", "لم يتحدد بعد")],
+        [
+          L("Winner", "الفائز"),
+          report.tournament.format === "casual"
+            ? L("N/A (fun session)", "غير متاح (جلسة ترفيهية)")
+            : report.tournament.winnerLabel || L("Not decided yet", "لم يتحدد بعد"),
+        ],
       ])
     );
     if (report.tournament.standings && report.tournament.standings.length) {

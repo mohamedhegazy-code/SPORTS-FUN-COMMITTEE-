@@ -117,6 +117,21 @@
   .bracket-slot:last-of-type { border-bottom: none; }
   .bracket-slot.winner { background: #fff4d6; color: var(--red); }
   .bracket-footer { padding: 8px 16px; font-size: 0.95rem; color: var(--muted); background: #faf8f3; }
+  /* Fun/casual sessions: a plain attendee grid instead of a bracket or
+     standings table - big cards readable from across the room, colored by
+     whether the person has checked in as present. */
+  .casual-attendance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .casual-att-card {
+    background: var(--card-bg); border-radius: 14px; padding: 18px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2); border-inline-start: 6px solid var(--border);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+  }
+  .casual-att-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(0,0,0,0.28); }
+  .casual-att-card.att-present { border-inline-start-color: var(--gold); }
+  .casual-att-name { font-size: 1.2rem; font-weight: 700; color: #222; }
+  .casual-att-status { font-size: 0.95rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .casual-att-card.att-present .casual-att-status { color: var(--red); }
   /* Team mode: numbered player roster under a team's name - readable from
      across the room but clearly secondary to the team name itself. */
   .team-roster { font-size: 0.62rem; font-weight: 400; color: var(--muted); margin-top: 4px; line-height: 1.4; }

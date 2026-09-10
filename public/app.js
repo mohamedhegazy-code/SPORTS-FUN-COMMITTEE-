@@ -2077,6 +2077,7 @@ function tournamentStatusLabel(status) {
     seeding: t("tournStepSeeding"),
     groups: t("tournStepGroups"),
     knockout: t("tournStepKnockout"),
+    casual: t("tournStatusCasual"),
     completed: t("tournStepCompleted"),
   };
   return map[status] || status;
@@ -2566,13 +2567,19 @@ async function loadHubTournamentSummary() {
     } else {
       const tn = data.tournament;
       const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-      const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
-      const statusLabel = tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress");
-      const standingsHtml = tn.standings
-        ? `<table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${tn.standings
-            .map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`)
-            .join("")}</tbody></table>`
-        : `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
+      const formatLabel = tournamentFormatLabel(tn.format);
+      const statusLabel = tournamentActiveStatusLabel(tn);
+      let standingsHtml;
+      if (tn.format === "casual") {
+        const presentCount = (tn.attendance || []).filter((a) => a.status === "present").length;
+        standingsHtml = `<p class="hint-note">${presentCount}/${(tn.attendance || []).length} ${t("adminTournamentAttendance")}</p>`;
+      } else {
+        standingsHtml = tn.standings
+          ? `<table><thead><tr><th>${t("colPosition")}</th><th>${t("colName")}</th></tr></thead><tbody>${tn.standings
+              .map((s) => `<tr><td>${s.rank}</td><td>${escapeAttr(s.label)}</td></tr>`)
+              .join("")}</tbody></table>`
+          : `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
+      }
       wrap.innerHTML = `
         <div class="tourn-summary">
           <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
@@ -3742,6 +3749,8 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "award-points") awardTournamentPoints();
   else if (action === "set-attendance") setTournamentAttendance(Number(btn.dataset.registrationId), btn.dataset.status);
   else if (action === "update-schedule") updateTournamentSchedule();
+  else if (action === "end-casual-session") setCasualSessionStatus("completed");
+  else if (action === "reopen-casual-session") setCasualSessionStatus("casual");
 });
 document.getElementById("tourn-body").addEventListener("change", (e) => {
   if (e.target.id === "tourn-format") toggleTournamentGroupFields();
@@ -3793,6 +3802,27 @@ const TOURN_ICON = {
   live: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.5"/><path d="M8.3 6.8l5 3.2-5 3.2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
   standings: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5l2.2 4.6 5 .7-3.6 3.6.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.6 5-.7L10 2.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
 };
+// Shared format/status badge text - a tiny helper rather than repeating the
+// same ternary at every place a tournament badge is rendered (admin hub
+// summary, admin tournament hero, the public list, the public detail page).
+// "casual" ("just for fun", see below) is a third format alongside
+// knockout/groups, and gets its own status wording while active since
+// "In progress" implies matches are actually being played.
+function tournamentFormatLabel(format) {
+  if (format === "groups") return t("tournamentFormatGroups");
+  if (format === "casual") return t("tournamentFormatCasual");
+  return t("tournamentFormatKnockout");
+}
+// Deliberately NOT named tournamentStatusLabel - that name is already taken
+// (above, ~line 2074) by the Management Dashboard's helper, which maps a raw
+// status string ("team-setup"/"seeding"/.../"completed") to its stepper
+// label. This one takes the whole tournament object because a casual
+// session's badge also depends on its format, not just its status.
+function tournamentActiveStatusLabel(tn) {
+  if (tn.status === "completed") return t("tournStatusCompleted");
+  if (tn.format === "casual") return t("tournStatusCasual");
+  return t("tournStatusInProgress");
+}
 function tournCardHtml(icon, title, bodyHtml, extraClass) {
   if (!bodyHtml) return "";
   return `
@@ -3833,6 +3863,10 @@ function renderTournamentBody() {
     refreshCreateSetupPreview();
     return;
   }
+  if (TOURNAMENT_DATA.format === "casual") {
+    renderCasualTournamentBody(body);
+    return;
+  }
   // Operational order, not build order: logistics (Setup & Schedule) are
   // decided first and stay editable throughout; Teams/Seeding is whichever
   // pre-generation step is active; Attendance (day-of check-in) sits right
@@ -3861,7 +3895,7 @@ function renderTournamentBody() {
   const standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), standingsContent, "tourn-card-standings");
 
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-  const formatLabel = TOURNAMENT_DATA.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+  const formatLabel = tournamentFormatLabel(TOURNAMENT_DATA.format);
   const matchesLink = TOURNAMENT_DATA.schedule
     ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
     : "";
@@ -3880,6 +3914,60 @@ function renderTournamentBody() {
     ${standingsCard}
   `;
   refreshEditSetupPreview();
+}
+
+// "Just for fun" sessions: no seeding, no generated bracket, no scores or
+// standings - only entrants/teams and attendance, which is the whole point
+// (a casual kickabout where people just want to show up and play, not chase
+// a ranking). Deliberately its own small render path rather than threading
+// "casual" through every branch of renderTournamentBody() above - the two
+// have almost nothing in common past the shared team-setup step and the
+// attendance card, both reused as-is below.
+function renderCasualTournamentBody(body) {
+  const tn = TOURNAMENT_DATA;
+  const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
+  const formatLabel = tournamentFormatLabel(tn.format);
+  const statusLabel = tournamentActiveStatusLabel(tn);
+  let mainContent;
+  if (tn.status === "team-setup" || (tn.mode === "team" && TOURN_EDITING_TEAMS)) {
+    mainContent = tournCardHtml(TOURN_ICON.teams, t("tournCardTeamsTitle"), renderTournamentTeamSetup(), "tourn-card-teams");
+  } else {
+    const attendanceCard = renderTournamentAttendance() ||
+      `<p class="hint-note">${t("tournamentEntrantCountHint").replace("{count}", TOURNAMENT_REGISTRATIONS.length)}</p>`;
+    const editTeamsBtn = tn.mode === "team" && tn.status !== "completed"
+      ? `<button class="secondary small" data-tourn-action="edit-teams">${t("btnEditTeams")}</button>`
+      : "";
+    const toggleBtn = tn.status === "completed"
+      ? `<button class="secondary small" data-tourn-action="reopen-casual-session">${t("btnReopenSession")}</button>`
+      : `<button class="secondary small" data-tourn-action="end-casual-session">${t("btnEndSession")}</button>`;
+    mainContent = `
+      ${attendanceCard}
+      <div class="tourn-summary" style="margin-top:10px;">${editTeamsBtn}${toggleBtn}</div>
+    `;
+  }
+  body.innerHTML = `
+    <div class="tourn-summary tourn-hero">
+      <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+      <span class="tourn-summary-badge">${escapeAttr(formatLabel)}</span>
+      <span class="tourn-summary-badge">${escapeAttr(statusLabel)}</span>
+      <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
+    </div>
+    ${mainContent}
+  `;
+}
+async function setCasualSessionStatus(status) {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/casual-status", {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    });
+    TOURNAMENT_DATA = data.tournament;
+    showMsg(msg, status === "completed" ? t("tournSessionEnded") : t("tournSessionReopened"), true);
+    renderTournamentBody();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
 }
 
 // Present/absent check-in for the actual players in this tournament -
@@ -4219,6 +4307,7 @@ function renderTournamentCreateForm() {
         <select id="tourn-format">
           <option value="knockout">${t("tournamentFormatKnockout")}</option>
           <option value="groups">${t("tournamentFormatGroups")}</option>
+          <option value="casual">${t("tournamentFormatCasual")}</option>
         </select>
       </div>
     </div>
@@ -4226,26 +4315,34 @@ function renderTournamentCreateForm() {
       <div><label>${t("fieldNumGroups")}</label><input id="tourn-num-groups" type="number" min="2" value="2" /></div>
       <div><label>${t("fieldAdvancePerGroup")}</label><input id="tourn-advance-per-group" type="number" min="1" value="2" /></div>
     </div>
-    <div class="grid-2">
-      <div><label>${t("fieldWinPoints")}</label><input id="tourn-win-points" type="number" min="0" value="3" /></div>
-      <div><label>${t("fieldDrawPoints")}</label><input id="tourn-draw-points" type="number" min="0" value="1" /></div>
-      <div><label>${t("fieldLossPoints")}</label><input id="tourn-loss-points" type="number" min="0" value="0" /></div>
+    <p class="hint-note" id="tourn-casual-hint" style="display:none;">${t("tournCasualCreateHint")}</p>
+    <div id="tourn-match-config-fields">
+      <div class="grid-2">
+        <div><label>${t("fieldWinPoints")}</label><input id="tourn-win-points" type="number" min="0" value="3" /></div>
+        <div><label>${t("fieldDrawPoints")}</label><input id="tourn-draw-points" type="number" min="0" value="1" /></div>
+        <div><label>${t("fieldLossPoints")}</label><input id="tourn-loss-points" type="number" min="0" value="0" /></div>
+      </div>
+      <p class="hint-note" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
+      <div class="grid-2">
+        <div><label>${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+        <div><label>${t("fieldMatchMinutes")}</label><input id="tourn-match-minutes" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+        <div><label>${t("fieldStartTime")}</label><input id="tourn-start-time" type="time" /></div>
+        <div><label>${t("fieldBreakMinutes")}</label><input id="tourn-break-minutes" type="number" min="0" placeholder="0" /></div>
+        <div><label>${t("fieldAvailableHours")}</label><input id="tourn-available-hours" type="number" min="0" step="0.5" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+      </div>
+      <div id="tourn-setup-preview"></div>
     </div>
-    <p class="hint-note" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
-    <div class="grid-2">
-      <div><label>${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
-      <div><label>${t("fieldMatchMinutes")}</label><input id="tourn-match-minutes" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
-      <div><label>${t("fieldStartTime")}</label><input id="tourn-start-time" type="time" /></div>
-      <div><label>${t("fieldBreakMinutes")}</label><input id="tourn-break-minutes" type="number" min="0" placeholder="0" /></div>
-      <div><label>${t("fieldAvailableHours")}</label><input id="tourn-available-hours" type="number" min="0" step="0.5" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
-    </div>
-    <div id="tourn-setup-preview"></div>
     <button class="primary" style="margin-top:10px;" data-tourn-action="create-tournament">${t("btnCreateTournament")}</button>
   `;
 }
 function toggleTournamentGroupFields() {
   const format = document.getElementById("tourn-format").value;
   document.getElementById("tourn-group-fields").style.display = format === "groups" ? "grid" : "none";
+  const casual = format === "casual";
+  const matchConfig = document.getElementById("tourn-match-config-fields");
+  if (matchConfig) matchConfig.style.display = casual ? "none" : "";
+  const casualHint = document.getElementById("tourn-casual-hint");
+  if (casualHint) casualHint.style.display = casual ? "" : "none";
 }
 async function createTournament() {
   const msg = document.getElementById("tourn-msg");
@@ -4256,24 +4353,28 @@ async function createTournament() {
     body.numGroups = Number(document.getElementById("tourn-num-groups").value);
     body.advancePerGroup = Number(document.getElementById("tourn-advance-per-group").value);
   }
-  const courts = document.getElementById("tourn-courts").value.trim();
-  const matchMinutes = document.getElementById("tourn-match-minutes").value.trim();
-  const startTime = document.getElementById("tourn-start-time").value.trim();
-  if (courts || matchMinutes || startTime) {
-    body.courts = Number(courts);
-    body.matchMinutes = Number(matchMinutes);
-    body.startTime = startTime;
-    const breakMinutes = document.getElementById("tourn-break-minutes").value.trim();
-    if (breakMinutes) body.breakMinutes = Number(breakMinutes);
+  // A fun session skips all of this entirely - no matches means no courts/
+  // timing/win-draw-loss points to set up.
+  if (format !== "casual") {
+    const courts = document.getElementById("tourn-courts").value.trim();
+    const matchMinutes = document.getElementById("tourn-match-minutes").value.trim();
+    const startTime = document.getElementById("tourn-start-time").value.trim();
+    if (courts || matchMinutes || startTime) {
+      body.courts = Number(courts);
+      body.matchMinutes = Number(matchMinutes);
+      body.startTime = startTime;
+      const breakMinutes = document.getElementById("tourn-break-minutes").value.trim();
+      if (breakMinutes) body.breakMinutes = Number(breakMinutes);
+    }
+    const winPoints = document.getElementById("tourn-win-points").value.trim();
+    const drawPoints = document.getElementById("tourn-draw-points").value.trim();
+    const lossPoints = document.getElementById("tourn-loss-points").value.trim();
+    const availableHours = document.getElementById("tourn-available-hours").value.trim();
+    if (winPoints) body.winPoints = Number(winPoints);
+    if (drawPoints) body.drawPoints = Number(drawPoints);
+    if (lossPoints) body.lossPoints = Number(lossPoints);
+    if (availableHours) body.availableHours = Number(availableHours);
   }
-  const winPoints = document.getElementById("tourn-win-points").value.trim();
-  const drawPoints = document.getElementById("tourn-draw-points").value.trim();
-  const lossPoints = document.getElementById("tourn-loss-points").value.trim();
-  const availableHours = document.getElementById("tourn-available-hours").value.trim();
-  if (winPoints) body.winPoints = Number(winPoints);
-  if (drawPoints) body.drawPoints = Number(drawPoints);
-  if (lossPoints) body.lossPoints = Number(lossPoints);
-  if (availableHours) body.availableHours = Number(availableHours);
   try {
     const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "POST", body: JSON.stringify(body) });
     TOURNAMENT_DATA = data.tournament;
@@ -4308,7 +4409,7 @@ async function deleteTournament() {
 // requires touching the rows that actually need to change, and a Cancel
 // button returns to the seeding view without submitting anything.
 function renderTournamentTeamSetup() {
-  const editing = TOURNAMENT_DATA.status === "seeding" && TOURN_EDITING_TEAMS;
+  const editing = (TOURNAMENT_DATA.status === "seeding" || TOURNAMENT_DATA.status === "casual") && TOURN_EDITING_TEAMS;
   const teamNameByReg = {};
   if (editing) {
     (TOURNAMENT_DATA.teams || []).forEach((team) => {
@@ -4836,8 +4937,8 @@ function renderPublicTournamentsList() {
   empty.classList.toggle("hidden", PUBLIC_TOURNAMENTS_LIST.length > 0);
   grid.innerHTML = PUBLIC_TOURNAMENTS_LIST.map((tn) => {
     const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-    const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
-    const statusLabel = tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress");
+    const formatLabel = tournamentFormatLabel(tn.format);
+    const statusLabel = tournamentActiveStatusLabel(tn);
     return `
     <div class="event-card" data-event-id="${tn.eventId}">
       <div class="body">
@@ -4891,12 +4992,14 @@ function renderPublicTournamentBody(tn, eventId) {
   const meta = PUBLIC_TOURNAMENTS_LIST.find((x) => x.eventId === eventId);
   const ev = EVENTS_DATA.find((e) => e.id === eventId);
   const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-  const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
+  const formatLabel = tournamentFormatLabel(tn.format);
   let notStartedHtml = "";
   let groupsCard = "";
   let bracketCard = "";
   let standingsCard = "";
-  if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
+  if (tn.format === "casual") {
+    notStartedHtml = `<p class="hint-note">${t("tournCasualPublicHint")}</p>`;
+  } else if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
     notStartedHtml = `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
   } else if (tn.status === "groups") {
     groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups, tn.entrants), "tourn-card-live");
@@ -4920,7 +5023,7 @@ function renderPublicTournamentBody(tn, eventId) {
         ${ev ? `<button class="secondary small" id="tourn-public-view-event-btn" style="margin-inline-start:auto;">${t("btnViewEventDetails")}</button>` : ""}
       </div>
     </div>
-    ${renderTournamentProgressStepper(tn)}
+    ${tn.format === "casual" ? "" : renderTournamentProgressStepper(tn)}
     ${notStartedHtml}
     ${groupsCard}
     ${bracketCard}

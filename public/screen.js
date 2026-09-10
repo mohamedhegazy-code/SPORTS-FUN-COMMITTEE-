@@ -69,6 +69,26 @@
       </div>`;
   }
 
+  function attStatusLabel(status) {
+    return status === "present" ? t("attStatusPresent") : status === "absent" ? t("attStatusAbsent") : t("attStatusNotYet");
+  }
+  // Fun/casual sessions have no groups, bracket, or standings - just a
+  // big-screen-friendly grid of who's here, mirroring the admin/public
+  // attendance list but laid out for a TV rather than a scrolling page.
+  function renderCasualAttendance(attendance) {
+    const list = attendance || [];
+    if (!list.length) return `<div class="empty-state"><h2>${esc(t("tournPublicEmpty"))}</h2></div>`;
+    const cards = list
+      .map(
+        (a) => `<div class="casual-att-card ${a.status === "present" ? "att-present" : "att-other"}">
+          <span class="casual-att-name">${esc(a.name)}</span>
+          <span class="casual-att-status">${esc(attStatusLabel(a.status))}</span>
+        </div>`
+      )
+      .join("");
+    return `<div class="section-title">${esc(t("adminTournamentAttendance"))}</div><div class="casual-attendance-grid">${cards}</div>`;
+  }
+
   function renderGroups(groups, entrants) {
     if (!groups || !groups.length) return "";
     const cards = groups
@@ -167,10 +187,14 @@
         return;
       }
       const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-      const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : t("tournamentFormatKnockout");
-      const statusLabel = tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress");
+      const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : tn.format === "casual" ? t("tournamentFormatCasual") : t("tournamentFormatKnockout");
+      const statusLabel = tn.format === "casual"
+        ? (tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusCasual"))
+        : (tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress"));
       let inner = "";
-      if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
+      if (tn.format === "casual") {
+        inner = renderCasualAttendance(tn.attendance);
+      } else if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
         inner = `<div class="empty-state"><h2>${esc(t("tournPublicNotStarted"))}</h2></div>`;
       } else if (tn.status === "groups") {
         inner = renderGroups(tn.groups, tn.entrants);
