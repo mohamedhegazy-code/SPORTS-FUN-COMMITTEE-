@@ -107,13 +107,35 @@ app.use(
     setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
   })
 );
+// Uploaded photos (event covers/recaps/gallery, branding logo) live on the
+// persistent data/ volume, not under public/ - see the comment above
+// EVENT_UPLOADS_DIR below for why. This mount keeps their public URLs at
+// the same "/uploads/..." prefix clients already have stored, just backed
+// by data/uploads/ instead of public/uploads/.
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "data", "uploads"), {
+    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+  })
+);
 
 // ------------------------------------------------------ event photo uploads --
-// Event cover photos and after-event recap photos are stored as plain files
-// on disk (not base64 in db.json, to keep the JSON store small) and served
-// back out via the static /public mount above, since they live under
-// public/uploads/events/.
-const EVENT_UPLOADS_DIR = path.join(__dirname, "public", "uploads", "events");
+// Event cover photos, after-event recap photos, and gallery photos are
+// stored as plain files on disk (not base64 in db.json, to keep the JSON
+// store small).
+//
+// IMPORTANT: these live under data/uploads/, NOT public/uploads/, and are
+// served via the dedicated /uploads static route below instead of the
+// public/ static mount. That's deliberate: data/ is the directory Railway's
+// persistent volume is mounted at (same place db.json and its backups live
+// - see DB_PATH/DB_BACKUP_DIR above/below), which survives redeploys.
+// public/ is rebuilt from git on every deploy and does NOT survive - files
+// written there (as this used to do) get silently wiped the next time the
+// app redeploys, leaving old photo URLs 404ing. The URL path handed out to
+// clients is still "/uploads/events/..." / "/uploads/branding/..." (see the
+// static mount below), so nothing elsewhere in the app or in already-stored
+// URLs needed to change - only where the bytes physically live.
+const EVENT_UPLOADS_DIR = path.join(__dirname, "data", "uploads", "events");
 fs.mkdirSync(EVENT_UPLOADS_DIR, { recursive: true });
 
 const eventPhotoStorage = multer.diskStorage({
@@ -134,9 +156,9 @@ const uploadEventPhoto = multer({
 });
 
 // ------------------------------------------------------------- branding ---
-// Admin-set logo, stored on disk the same way event photos are (served back
-// out via the static /public mount).
-const BRANDING_UPLOADS_DIR = path.join(__dirname, "public", "uploads", "branding");
+// Admin-set logo, stored on disk the same way event photos are - see the
+// data/ vs public/ note above the event-uploads block.
+const BRANDING_UPLOADS_DIR = path.join(__dirname, "data", "uploads", "branding");
 fs.mkdirSync(BRANDING_UPLOADS_DIR, { recursive: true });
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
