@@ -391,6 +391,13 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .hint-note a { color: var(--red); text-decoration: underline; }
 .hint-note a:hover { color: var(--red-dark); }
 
+/* Landing page section list: mouse drag-to-reorder (see renderLandingSectionsAdminList in app.js). */
+.landing-section-row { cursor: grab; transition: opacity 0.15s ease, border-color 0.15s ease; }
+.landing-section-row:active { cursor: grabbing; }
+.landing-section-row.dragging { opacity: 0.4; }
+.landing-section-row.drag-over { border-top: 2px solid var(--red); }
+.landing-drag-handle { color: var(--muted); font-size: 0.95rem; line-height: 1; padding-inline-end: 2px; user-select: none; }
+
 /* -------------------------------------------------------------- qr list --- */
 .qr-entry {
   border: 1px solid var(--border); border-radius: 10px; padding: 14px;

@@ -3391,6 +3391,12 @@ const LANDING_SECTION_LABEL_KEYS = {
   gallery: "landingSecGallery",
   sponsors: "landingSecSponsors",
 };
+// Index of the row currently being mouse-dragged, while a drag is in
+// progress - shared across the drag*/drop handlers wired up below, and
+// reset (via dragend, which always fires - even on a drop outside any
+// valid target) so a stray leftover value can never cause a later drop to
+// silently reorder from the wrong row.
+let landingDragIndex = null;
 function renderLandingSectionsAdminList() {
   const wrap = document.getElementById("landing-sections-list");
   if (!wrap || !LANDING_PAGE) return;
@@ -3399,7 +3405,8 @@ function renderLandingSectionsAdminList() {
     .map((s, i) => {
       const label = t(LANDING_SECTION_LABEL_KEYS[s.key] || s.key);
       const locked = s.key === "events";
-      return `<div class="landing-section-row" data-index="${i}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+      return `<div class="landing-section-row" draggable="true" data-index="${i}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span class="landing-drag-handle" title="${escapeAttr(t("landingSecDragHint"))}">&#10021;</span>
         <span style="flex:1;font-size:0.9rem;">${escapeAttr(label)}</span>
         ${
           locked
@@ -3420,6 +3427,39 @@ function renderLandingSectionsAdminList() {
   wrap.querySelectorAll(".landing-sec-enabled").forEach((cb) => {
     cb.addEventListener("change", () => toggleLandingSection(Number(cb.dataset.index), cb.checked));
   });
+  // Mouse drag-to-reorder, on top of the up/down buttons above (which stay
+  // for anyone on a touchscreen/keyboard, where native HTML drag-and-drop
+  // doesn't work). Plain browser drag events - no library needed.
+  wrap.querySelectorAll(".landing-section-row").forEach((row) => {
+    row.addEventListener("dragstart", (e) => {
+      landingDragIndex = Number(row.dataset.index);
+      row.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      // Firefox refuses to start a drag at all unless dataTransfer carries
+      // something - the value itself is unused, the module-level
+      // landingDragIndex above is what drop() actually reads.
+      e.dataTransfer.setData("text/plain", String(landingDragIndex));
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      wrap.querySelectorAll(".landing-section-row").forEach((r) => r.classList.remove("drag-over"));
+      landingDragIndex = null;
+    });
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault(); // required - a dragover with no preventDefault() rejects the drop
+      e.dataTransfer.dropEffect = "move";
+      if (Number(row.dataset.index) !== landingDragIndex) row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("drag-over");
+      const targetIndex = Number(row.dataset.index);
+      if (landingDragIndex === null || landingDragIndex === targetIndex) return;
+      reorderLandingSection(landingDragIndex, targetIndex);
+      landingDragIndex = null;
+    });
+  });
 }
 async function saveLandingSections(sections) {
   const msg = document.getElementById("landing-sections-msg");
@@ -3439,6 +3479,14 @@ function moveLandingSection(index, dir) {
   if (newIndex < 0 || newIndex >= sections.length) return;
   const [item] = sections.splice(index, 1);
   sections.splice(newIndex, 0, item);
+  saveLandingSections(sections);
+}
+// Same idea as moveLandingSection above, but to an arbitrary drop target
+// rather than one step up/down - used by the drag-and-drop handlers.
+function reorderLandingSection(fromIndex, toIndex) {
+  const sections = LANDING_PAGE.sections.slice();
+  const [item] = sections.splice(fromIndex, 1);
+  sections.splice(toIndex, 0, item);
   saveLandingSections(sections);
 }
 function toggleLandingSection(index, enabled) {
