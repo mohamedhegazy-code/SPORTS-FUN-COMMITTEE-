@@ -3601,7 +3601,7 @@ function renderGalleryAdminList(items) {
     .map(
       (g) => `<div class="content-admin-item" data-id="${g.id}">
       <div style="display:flex;align-items:center;gap:10px;">
-        <img src="${escapeAttr(g.photo)}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;" />
+        <img src="${escapeAttr(g.photo)}" alt="" style="width:52px;height:52px;object-fit:cover;object-position:center;border-radius:6px;" />
         <div class="sub">${escapeAttr(truncate(bilingual(g.captionEn, g.captionAr), 50))}</div>
       </div>
       <button class="secondary gallery-delete" data-id="${g.id}" style="margin-top:0;">${escapeAttr(t("btnRemove"))}</button>
@@ -3660,7 +3660,7 @@ function renderSponsorsAdminList(items) {
     .map(
       (s) => `<div class="content-admin-item" data-id="${s.id}">
       <div style="display:flex;align-items:center;gap:10px;">
-        ${s.logo ? `<img src="${escapeAttr(s.logo)}" alt="" style="width:52px;height:52px;object-fit:contain;border-radius:6px;" />` : ""}
+        ${s.logo ? `<img src="${escapeAttr(s.logo)}" alt="" style="width:52px;height:52px;object-fit:contain;object-position:center;border-radius:6px;" />` : ""}
         <div class="title">${escapeAttr(s.name)}</div>
       </div>
       <button class="secondary sponsor-delete" data-id="${s.id}" style="margin-top:0;">${escapeAttr(t("btnRemove"))}</button>
