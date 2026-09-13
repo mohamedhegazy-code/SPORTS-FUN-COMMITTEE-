@@ -167,7 +167,7 @@ const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 // listing members register from) can be reordered like any other section
 // but can never be turned off - see the /api/admin/landing/sections handler
 // below, which forces it back to enabled no matter what's posted.
-const LANDING_SECTION_KEYS = ["hero", "events", "about", "news", "community", "spotlight", "gallery", "sponsors"];
+const LANDING_SECTION_KEYS = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors"];
 
 const brandingLogoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, BRANDING_UPLOADS_DIR),
@@ -410,6 +410,11 @@ function readDb() {
   const defaultLandingSections = [
     { key: "hero", enabled: true },
     { key: "events", enabled: true },
+    // A preview (most recent few) of the same past-events data the Annual
+    // Activities tab shows in full - see /api/events and isPastEvent() -
+    // not admin-curated content, so it's on by default like news/community/
+    // spotlight rather than off like about/gallery/sponsors.
+    { key: "annual", enabled: true },
     { key: "about", enabled: false },
     { key: "news", enabled: true },
     { key: "community", enabled: true },

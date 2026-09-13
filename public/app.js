@@ -21,7 +21,7 @@ function pointsVisible() {
 // just so admin-panel code reads "LANDING_PAGE" instead of reaching into
 // SETTINGS every time.
 let LANDING_PAGE = null;
-const LANDING_SECTION_DEFAULT_ORDER = ["hero", "events", "about", "news", "community", "spotlight", "gallery", "sponsors"];
+const LANDING_SECTION_DEFAULT_ORDER = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors"];
 // Same EN/AR-pick pattern used everywhere else for admin-authored bilingual
 // content (news titles, spotlight blurbs): prefer the current language,
 // fall back to whichever one was actually filled in.
@@ -360,6 +360,11 @@ document.getElementById("header-login-btn").addEventListener("click", () => {
   }
 });
 
+// Landing page "Annual Activities" section's "See all" button - jumps to
+// the full, unbounded Annual Activities tab (see renderLandingAnnualPreview
+// above for why the landing section itself only shows a handful).
+document.getElementById("landing-annual-viewall").addEventListener("click", () => switchTab("annual"));
+
 document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
 document.getElementById("lang-ar").addEventListener("click", () => setLang("ar"));
 function setLang(lang) {
@@ -368,6 +373,7 @@ function setLang(lang) {
   renderEventDropdowns();
   renderEventsGrid();
   renderAnnualGrid();
+  renderLandingAnnualPreview();
   renderFeaturedEvents();
   renderNewsList(NEWS_DATA);
   renderSpotlightGrid(SPOTLIGHTS_DATA);
@@ -751,6 +757,7 @@ async function loadEvents() {
   renderEventDropdowns();
   renderEventsGrid();
   renderAnnualGrid();
+  renderLandingAnnualPreview();
   renderFeaturedEvents();
   loadCommunityContent();
 }
@@ -1000,6 +1007,26 @@ function renderAnnualGrid() {
   empty.classList.toggle("hidden", past.length > 0);
   grid.innerHTML = past.map((ev) => eventCardHtml(ev, true)).join("");
   wireEventCardButtons(grid, past, true);
+}
+// The landing page's "Annual Activities" section: a bounded preview (most
+// recent few, newest first) of the same past-events data the standalone
+// Annual Activities tab shows in full (renderAnnualGrid above) - not a
+// separate data source, and not admin-curated content like Gallery/News.
+// Kept short deliberately: the standalone tab has no limit at all and is
+// meant to grow forever as a full history, but embedding that whole
+// unbounded list directly in the homepage would make it longer every year;
+// a "View all" link (wired up further down) sends anyone who wants the
+// full list to that tab instead.
+const LANDING_ANNUAL_PREVIEW_COUNT = 6;
+function renderLandingAnnualPreview() {
+  const grid = document.getElementById("landing-annual-grid");
+  const empty = document.getElementById("landing-annual-empty");
+  if (!grid) return;
+  const past = EVENTS_DATA.filter((ev) => isPastEvent(ev) && !ev.parentEventId).sort((a, b) => b.date.localeCompare(a.date));
+  const preview = past.slice(0, LANDING_ANNUAL_PREVIEW_COUNT);
+  empty.classList.toggle("hidden", preview.length > 0);
+  grid.innerHTML = preview.map((ev) => eventCardHtml(ev, true)).join("");
+  wireEventCardButtons(grid, preview, true);
 }
 // The 3 soonest upcoming events, featured prominently at the top of the
 // landing page ("coming up next") - a subset of the same data as the full
@@ -3384,6 +3411,7 @@ function populateLandingAdminForms() {
 const LANDING_SECTION_LABEL_KEYS = {
   hero: "landingSecHero",
   events: "landingSecEvents",
+  annual: "landingSecAnnual",
   about: "landingSecAbout",
   news: "landingSecNews",
   community: "landingSecCommunity",
