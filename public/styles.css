@@ -335,7 +335,19 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .event-card .photo {
   width: 100%;
   aspect-ratio: 16 / 10;
-  background: linear-gradient(135deg, #f1ece2, #e7e0d2) center / cover no-repeat;
+  /* "center top" rather than dead center: these are candid event photos of
+     people, often shot in portrait orientation and squeezed into this
+     landscape frame, so a plain center crop trims equally off the top and
+     bottom - which chops heads when someone's positioned near the top of
+     the shot (very common), while there's usually spare floor/background
+     at the bottom that can afford to go instead. Anchoring to the top
+     means nothing above the crop is EVER trimmed - all the overflow comes
+     off the bottom - which trades a little extra leg-room loss for heads
+     that never get cut, the better trade for photos of people. Same
+     reasoning applied to every other photo-of-people frame below (gallery,
+     news, modal hero/recap strip) - just not the Spotlight avatar, which
+     is normally an already-centered headshot, not a candid crowd photo. */
+  background: linear-gradient(135deg, #f1ece2, #e7e0d2) center top / cover no-repeat;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -367,12 +379,12 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 }
 .modal-close:hover { color: var(--red); }
 .modal-box .photo-hero {
-  width: 100%; max-height: 280px; object-fit: cover; object-position: center; border-radius: 10px; margin-bottom: 14px;
+  width: 100%; max-height: 280px; object-fit: cover; object-position: center top; border-radius: 10px; margin-bottom: 14px;
 }
 .modal-box h2 { margin-top: 0; }
 .modal-box .desc { font-size: 0.92rem; line-height: 1.6; white-space: pre-wrap; }
 .photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 12px; }
-.photo-gallery img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; object-position: center; border-radius: 6px; border: 1px solid var(--border); }
+.photo-gallery img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; object-position: center top; border-radius: 6px; border: 1px solid var(--border); }
 .event-badge {
   display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 20px;
   background: var(--gold); color: #fff; margin-bottom: 8px;
@@ -472,7 +484,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 }
 .news-item:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
 .news-item .photo {
-  width: 110px; height: 110px; flex-shrink: 0; border-radius: 8px; object-fit: cover; object-position: center;
+  width: 110px; height: 110px; flex-shrink: 0; border-radius: 8px; object-fit: cover; object-position: center top;
   background: linear-gradient(135deg, #f1ece2, #e7e0d2);
 }
 .news-item .body { flex: 1; min-width: 0; }
@@ -510,7 +522,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .gallery-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.12); }
-.gallery-card .photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: center; display: block; }
+.gallery-card .photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: center top; display: block; }
 .gallery-card .caption { padding: 10px 12px; font-size: 0.82rem; color: var(--muted); }
 
 /* ----------------------------------------------------------- sponsors --- */
