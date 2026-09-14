@@ -306,21 +306,32 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
    overlay in the site's own red/gold theme tokens so the bold headline
    stays readable over almost any photo - plus a stat pill that floats over
    its corner on wide screens and stacks below it on narrow ones. */
+/* Outer colored "band" the whole hero region sits on - a wider grid of the
+   photo card (left) plus a sidebar (right, stats pill + Upcoming Events
+   card), modeled on a two-column hero/sidebar reference layout the user
+   shared. Kept in the site's own maroon/gold palette rather than the
+   reference's own colors (an explicit choice - see the CTA-row comment
+   below for the same theme-token approach applied here). */
 .hero-banner {
   position: relative;
   margin-bottom: 46px;
-  padding-bottom: 8px;
+  padding: 22px;
+  border-radius: 26px;
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 65%, #3a0000 100%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 22px;
 }
 .hero-photo-card {
   position: relative;
-  border-radius: 22px;
+  border-radius: 18px;
   overflow: hidden;
-  min-height: 300px;
+  min-height: 320px;
   padding: 34px 32px;
   display: flex;
   align-items: flex-end;
   background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 55%, #3a0000 100%) center / cover no-repeat;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 .hero-photo-overlay {
   position: absolute; inset: 0;
@@ -396,6 +407,18 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   color: #fff;
 }
 .hero-cta-btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
+/* Right column: the stats pill floats (position: absolute, against
+   .hero-banner - its nearest positioned ancestor) so it overlaps the top
+   edge of the sidebar the way it already overlapped the photo card's
+   corner before this redesign; .hero-side-col itself stays position:static
+   so it isn't itself a positioning context. padding-top on the column
+   leaves room below the pill for the Upcoming Events card underneath it. */
+.hero-side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 30px;
+}
 .hero-stats-pill {
   display: flex;
   gap: 0;
@@ -405,10 +428,10 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
   position: absolute;
   top: -22px;
-  right: 32px;
+  right: 22px;
   z-index: 2;
 }
-[dir="rtl"] .hero-stats-pill { right: auto; left: 32px; }
+[dir="rtl"] .hero-stats-pill { right: auto; left: 22px; }
 .hero-stats-pill .hs {
   padding: 0 18px;
   text-align: center;
@@ -419,14 +442,64 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 [dir="rtl"] .hero-stats-pill .hs:last-child { border-left: none; }
 .hero-stats-pill .hs .n { font-size: 1.3rem; font-weight: 800; color: var(--red-dark); line-height: 1.1; }
 .hero-stats-pill .hs .l { font-size: 0.66rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+/* Upcoming Events sidebar card - a translucent panel (rather than a solid
+   fill) so it reads as a distinct "floating" card against the hero band's
+   own gradient behind it, echoing the reference's lighter tournaments
+   panel against its own darker page background. */
+.hero-upcoming-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+}
+.hero-upcoming-title {
+  margin: 0 0 10px;
+  color: #fff;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 1.02rem;
+}
+.hero-upcoming-list { flex: 1; display: flex; flex-direction: column; }
+.hero-upcoming-item { padding: 9px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.14); }
+.hero-upcoming-item:last-child { border-bottom: none; }
+.hero-upcoming-item .date { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.6px; color: var(--gold); }
+.hero-upcoming-item .name { margin-top: 3px; font-size: 0.86rem; font-weight: 600; color: #fff; line-height: 1.3; }
+.hero-upcoming-item .name .lang-ar { display: block; }
+.hero-upcoming-item .name .lang-en { display: block; font-size: 0.78rem; font-weight: 500; color: rgba(255, 255, 255, 0.75); margin-top: 1px; }
+.hero-upcoming-empty { color: rgba(255, 255, 255, 0.75); font-size: 0.85rem; padding: 6px 0; }
+.hero-upcoming-link {
+  margin-top: 12px;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-upcoming-link:hover { text-decoration: underline; }
+[dir="rtl"] .hero-upcoming-link span[aria-hidden] { display: inline-block; transform: scaleX(-1); }
 @media (max-width: 640px) {
-  .hero-photo-card { padding: 26px 20px 60px; min-height: 0; align-items: flex-start; }
-  /* Stays "position: relative" (not static) even though it's no longer
-     absolutely placed - a plain static sibling paints BEHIND a positioned
-     one regardless of source order, which was hiding these numbers under
-     the card above. Relative-but-not-offset keeps it in normal flow while
-     still painting on top. */
-  .hero-stats-pill { position: relative; top: 0; right: 0; margin: -40px 14px 0; justify-content: center; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); z-index: 2; }
+  .hero-banner { grid-template-columns: 1fr; padding: 16px; border-radius: 20px; gap: 16px; }
+  .hero-photo-card { padding: 26px 20px 30px; min-height: 0; align-items: flex-start; }
+  /* The pill no longer needs the old absolute-vs-static stacking-order
+     workaround this media query used to carry - now that it's a normal
+     flex child of .hero-side-col (stacked below the photo card, above the
+     Upcoming Events card) rather than a sibling of .hero-photo-card, there
+     is no competing static sibling for it to paint behind. */
+  .hero-side-col { padding-top: 0; }
+  .hero-stats-pill { position: static; margin: 0 0 4px; justify-content: center; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); }
   .hero-cta-btn { flex: 1; text-align: center; }
 }
 /* Same bold condensed display face as the hero headline (see hero-banner

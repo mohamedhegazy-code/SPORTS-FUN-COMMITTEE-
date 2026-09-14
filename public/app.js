@@ -405,6 +405,14 @@ document.getElementById("hero-cta-events").addEventListener("click", () => {
   const grid = document.getElementById("events-grid");
   (target && !target.classList.contains("hidden") ? target : grid).scrollIntoView({ behavior: "smooth", block: "start" });
 });
+// Sidebar "View full calendar" link - same destination as "View all events"
+// above, just a second entry point (matches the reference layout's sidebar
+// card having its own link rather than sharing the hero's own button).
+document.getElementById("hero-upcoming-viewall").addEventListener("click", () => {
+  const target = document.getElementById("featured-events-section");
+  const grid = document.getElementById("events-grid");
+  (target && !target.classList.contains("hidden") ? target : grid).scrollIntoView({ behavior: "smooth", block: "start" });
+});
 
 document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
 document.getElementById("lang-ar").addEventListener("click", () => setLang("ar"));
@@ -416,6 +424,7 @@ function setLang(lang) {
   renderAnnualGrid();
   renderLandingAnnualPreview();
   renderFeaturedEvents();
+  renderHeroUpcoming();
   renderNewsList(NEWS_DATA);
   renderSpotlightGrid(SPOTLIGHTS_DATA);
   renderCommunityStats(COMMUNITY_STATS);
@@ -810,6 +819,7 @@ async function loadEvents() {
   renderAnnualGrid();
   renderLandingAnnualPreview();
   renderFeaturedEvents();
+  renderHeroUpcoming();
   loadCommunityContent();
 }
 // Is this event a "parent" event day that has activities nested under it?
@@ -1155,6 +1165,41 @@ function renderHeroStats(stats) {
     <div class="hs"><div class="n">${fmt(stats.eventsHeld)}</div><div class="l">${escapeAttr(t("statEventsHeld"))}</div></div>
     <div class="hs"><div class="n">${fmt(upcoming)}</div><div class="l">${escapeAttr(t("statUpcomingEvents"))}</div></div>
   `;
+}
+// Compact "SEP 22" / equivalent-Arabic style date badge for the hero
+// sidebar's Upcoming Events list - anchored to local midnight like
+// weekdayName() above, for the same reason (a bare "YYYY-MM-DD" string
+// parses as UTC and can shift a day depending on the viewer's timezone).
+function shortDateBadge(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return "";
+  const s = d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { month: "short", day: "numeric" });
+  return currentLang === "ar" ? s : s.toUpperCase();
+}
+// The hero sidebar's "Upcoming Events" card - a compact list of the same
+// soonest-first upcoming events renderFeaturedEvents() shows in full-size
+// cards below the hero (same data/filter, no extra request), styled as a
+// quick-glance list with a date badge instead of a full event card.
+function renderHeroUpcoming() {
+  const list = document.getElementById("hero-upcoming-list");
+  if (!list) return;
+  const upcoming = (EVENTS_DATA || [])
+    .filter((ev) => isUpcoming(ev) && !ev.parentEventId)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 4);
+  if (!upcoming.length) {
+    list.innerHTML = `<div class="hero-upcoming-empty">${escapeAttr(t("heroUpcomingEmpty"))}</div>`;
+    return;
+  }
+  list.innerHTML = upcoming
+    .map(
+      (ev) => `<div class="hero-upcoming-item">
+        <div class="date">${escapeAttr(shortDateBadge(ev.date))}${ev.endDate && ev.endDate !== ev.date ? ` &ndash; ${escapeAttr(shortDateBadge(ev.endDate))}` : ""}</div>
+        <div class="name">${eventNameHtml(ev)}</div>
+      </div>`
+    )
+    .join("");
 }
 function renderNewsList(posts) {
   const wrap = document.getElementById("news-list");
