@@ -90,6 +90,36 @@ function showMsg(el, text, ok) {
   el.classList.remove("ok", "err");
   el.classList.add("show", ok ? "ok" : "err");
 }
+// Visually highlights whichever of the given required-field ids are
+// currently empty (red border), in addition to the existing text error
+// message shown via showMsg(msg, t("errFillFields"), false) - so a visitor
+// sees exactly which field(s) need attention, not just a general notice.
+// Focuses the first empty one. Each highlighted field clears itself the
+// moment it's edited (see the delegated listener below).
+function highlightMissingFields(fieldIds) {
+  let firstEmpty = null;
+  (fieldIds || []).forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const isEmpty =
+      el.type === "checkbox" ? !el.checked : el.type === "file" ? !(el.files && el.files.length) : !String(el.value || "").trim();
+    if (isEmpty) {
+      el.classList.add("field-missing");
+      if (!firstEmpty) firstEmpty = el;
+    }
+  });
+  if (firstEmpty) firstEmpty.focus();
+}
+document.addEventListener("input", (e) => {
+  if (e.target.classList && e.target.classList.contains("field-missing")) {
+    e.target.classList.remove("field-missing");
+  }
+});
+document.addEventListener("change", (e) => {
+  if (e.target.classList && e.target.classList.contains("field-missing")) {
+    e.target.classList.remove("field-missing");
+  }
+});
 function fmt(n) {
   return Number(n || 0).toLocaleString(currentLang === "ar" ? "ar-EG" : "en-US");
 }
@@ -365,6 +395,17 @@ document.getElementById("header-login-btn").addEventListener("click", () => {
 // above for why the landing section itself only shows a handful).
 document.getElementById("landing-annual-viewall").addEventListener("click", () => switchTab("annual"));
 
+// Hero banner CTA buttons - "Register now" jumps to the Register tab (same
+// destination as the header's own Log In button/tab), "View all events"
+// just scrolls down to the events grid already on this same landing page
+// rather than navigating anywhere.
+document.getElementById("hero-cta-register").addEventListener("click", () => switchTab("register"));
+document.getElementById("hero-cta-events").addEventListener("click", () => {
+  const target = document.getElementById("featured-events-section");
+  const grid = document.getElementById("events-grid");
+  (target && !target.classList.contains("hidden") ? target : grid).scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
 document.getElementById("lang-ar").addEventListener("click", () => setLang("ar"));
 function setLang(lang) {
@@ -378,6 +419,7 @@ function setLang(lang) {
   renderNewsList(NEWS_DATA);
   renderSpotlightGrid(SPOTLIGHTS_DATA);
   renderCommunityStats(COMMUNITY_STATS);
+  renderHeroStats(COMMUNITY_STATS);
   applyLandingPageToUI();
   renderLandingSectionsAdminList();
   renderLadder();
@@ -461,6 +503,15 @@ function applyLandingPageToUI() {
   const taglineEl = document.getElementById("landing-hero-tagline");
   if (headlineEl) headlineEl.textContent = bilingual(lp.hero.headlineEn, lp.hero.headlineAr);
   if (taglineEl) taglineEl.textContent = bilingual(lp.hero.taglineEn, lp.hero.taglineAr);
+  const heroPhotoCard = document.getElementById("hero-photo-card");
+  if (heroPhotoCard) {
+    // No photo set: leave the inline background-image off entirely, so the
+    // card falls back to the plain club-color gradient defined in CSS
+    // (.hero-photo-card's own background) rather than an empty url(). When
+    // a photo IS set, .hero-photo-overlay (a separate absolutely-positioned
+    // layer on top) is what tints it in the club's own colors.
+    heroPhotoCard.style.backgroundImage = lp.hero.photo ? `url("${lp.hero.photo}")` : "";
+  }
 
   const aboutTitleEl = document.getElementById("landing-about-title");
   const aboutBodyEl = document.getElementById("landing-about-body");
@@ -1058,6 +1109,7 @@ async function loadCommunityContent() {
     renderNewsList(NEWS_DATA);
     renderSpotlightGrid(SPOTLIGHTS_DATA);
     renderCommunityStats(COMMUNITY_STATS);
+    renderHeroStats(COMMUNITY_STATS);
   } catch (e) {
     /* landing page still works without news/spotlights/stats if this fails */
   }
@@ -1088,6 +1140,21 @@ function renderCommunityStats(stats) {
       </div>`
     )
     .join("");
+}
+// Small stat pill that floats over the hero photo's corner - members,
+// events held, and events currently open for registration. Reuses the
+// same COMMUNITY_STATS the Community section's stat row already loads
+// (see loadCommunityContent) - no extra request - plus a live count off
+// the already-loaded EVENTS_DATA for the "upcoming" figure.
+function renderHeroStats(stats) {
+  const wrap = document.getElementById("hero-stats-pill");
+  if (!wrap || !stats) return;
+  const upcoming = (EVENTS_DATA || []).filter((ev) => isUpcoming(ev) && !ev.parentEventId).length;
+  wrap.innerHTML = `
+    <div class="hs"><div class="n">${fmt(stats.totalMembers)}</div><div class="l">${escapeAttr(t("statTotalMembers"))}</div></div>
+    <div class="hs"><div class="n">${fmt(stats.eventsHeld)}</div><div class="l">${escapeAttr(t("statEventsHeld"))}</div></div>
+    <div class="hs"><div class="n">${fmt(upcoming)}</div><div class="l">${escapeAttr(t("statUpcomingEvents"))}</div></div>
+  `;
 }
 function renderNewsList(posts) {
   const wrap = document.getElementById("news-list");
@@ -1265,6 +1332,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const email = document.getElementById("su-email").value.trim();
   const msg = document.getElementById("su-msg");
   if (!membershipNumber || !name || !password) {
+    highlightMissingFields(["su-membership", "su-name", "su-password"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -1292,6 +1360,7 @@ document.getElementById("li-submit").addEventListener("click", async () => {
   const password = document.getElementById("li-password").value;
   const msg = document.getElementById("li-msg");
   if (!membershipNumber || !password) {
+    highlightMissingFields(["li-membership", "li-password"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -1401,6 +1470,7 @@ document.getElementById("reg-submit").addEventListener("click", async () => {
   const eventId = document.getElementById("reg-event").value;
   const msg = document.getElementById("reg-msg");
   if (!eventId) {
+    highlightMissingFields(["reg-event"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -1584,6 +1654,7 @@ document.getElementById("fam-link-add").addEventListener("click", async () => {
   const membershipNumber = idInput.value.trim();
   const msg = document.getElementById("fam-link-msg");
   if (!membershipNumber) {
+    highlightMissingFields(["fam-link-id"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -1636,6 +1707,7 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   const name = nameInput.value.trim();
   const msg = document.getElementById("fam-msg");
   if (!name) {
+    highlightMissingFields(["fam-name"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -1888,6 +1960,7 @@ async function staffLogin(usernameId, passwordId, msgId) {
   const password = document.getElementById(passwordId).value;
   const msg = document.getElementById(msgId);
   if (!username || !password) {
+    highlightMissingFields([usernameId, passwordId]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -2759,7 +2832,10 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   const phone = document.getElementById("member-add-phone").value.trim();
   const familyGroup = document.getElementById("member-add-family").value.trim();
   const eventId = document.getElementById("member-add-event").value;
-  if (!membershipNumber || !name) return showMsg(msg, t("pleaseFillMembershipAndName"), false);
+  if (!membershipNumber || !name) {
+    highlightMissingFields(["member-add-number", "member-add-name"]);
+    return showMsg(msg, t("pleaseFillMembershipAndName"), false);
+  }
   try {
     const result = await api("/api/admin/members", {
       method: "POST",
@@ -3061,6 +3137,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   const photoInput = document.getElementById("ev-photo");
   const msg = document.getElementById("ev-msg");
   if (!nameEn || !date) {
+    highlightMissingFields(["ev-name-en", "ev-date"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -3172,6 +3249,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   const photoInput = document.getElementById("ev-edit-photo");
   if (!eventId) return;
   if (!nameEn || !date) {
+    highlightMissingFields(["ev-edit-name-en", "ev-edit-date"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -3279,6 +3357,7 @@ document.getElementById("news-submit").addEventListener("click", async () => {
   const photoInput = document.getElementById("news-photo");
   const msg = document.getElementById("news-msg");
   if (!titleEn || !bodyEn) {
+    highlightMissingFields(["news-title-en", "news-body-en"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -3347,6 +3426,7 @@ document.getElementById("spotlight-submit").addEventListener("click", async () =
   const photoInput = document.getElementById("spotlight-photo");
   const msg = document.getElementById("spotlight-msg");
   if (!name) {
+    highlightMissingFields(["spotlight-name"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -3384,6 +3464,17 @@ function populateLandingAdminForms() {
     document.getElementById("hero-headline-ar").value = lp.hero.headlineAr || "";
     document.getElementById("hero-tagline-en").value = lp.hero.taglineEn || "";
     document.getElementById("hero-tagline-ar").value = lp.hero.taglineAr || "";
+    const heroPreview = document.getElementById("hero-photo-preview");
+    const heroPreviewWrap = document.getElementById("hero-photo-preview-wrap");
+    const heroRemoveBtn = document.getElementById("hero-remove-photo-btn");
+    if (lp.hero.photo) {
+      heroPreview.src = lp.hero.photo;
+      heroPreviewWrap.classList.remove("hidden");
+      heroRemoveBtn.classList.remove("hidden");
+    } else {
+      heroPreviewWrap.classList.add("hidden");
+      heroRemoveBtn.classList.add("hidden");
+    }
   }
   const aboutTitleEn = document.getElementById("about-title-en");
   if (aboutTitleEn) {
@@ -3527,21 +3618,42 @@ document.getElementById("hero-save-btn").addEventListener("click", async () => {
   const msg = document.getElementById("hero-msg");
   const headlineEn = document.getElementById("hero-headline-en").value.trim();
   if (!headlineEn) {
+    highlightMissingFields(["hero-headline-en"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
+  const fd = new FormData();
+  fd.append("headlineEn", headlineEn);
+  fd.append("headlineAr", document.getElementById("hero-headline-ar").value.trim());
+  fd.append("taglineEn", document.getElementById("hero-tagline-en").value.trim());
+  fd.append("taglineAr", document.getElementById("hero-tagline-ar").value.trim());
+  const fileInput = document.getElementById("hero-photo-file");
+  if (fileInput.files[0]) fd.append("photo", fileInput.files[0]);
   try {
-    const result = await api("/api/admin/landing/hero", {
-      method: "PUT",
-      body: JSON.stringify({
-        headlineEn,
-        headlineAr: document.getElementById("hero-headline-ar").value.trim(),
-        taglineEn: document.getElementById("hero-tagline-en").value.trim(),
-        taglineAr: document.getElementById("hero-tagline-ar").value.trim(),
-      }),
-    });
+    const result = await api("/api/admin/landing/hero", { method: "PUT", body: fd });
     SETTINGS.landingPage.hero = result.hero;
     LANDING_PAGE.hero = result.hero;
+    fileInput.value = "";
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("hero-remove-photo-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("hero-msg");
+  const fd = new FormData();
+  fd.append("headlineEn", document.getElementById("hero-headline-en").value.trim());
+  fd.append("headlineAr", document.getElementById("hero-headline-ar").value.trim());
+  fd.append("taglineEn", document.getElementById("hero-tagline-en").value.trim());
+  fd.append("taglineAr", document.getElementById("hero-tagline-ar").value.trim());
+  fd.append("removePhoto", "true");
+  try {
+    const result = await api("/api/admin/landing/hero", { method: "PUT", body: fd });
+    SETTINGS.landingPage.hero = result.hero;
+    LANDING_PAGE.hero = result.hero;
+    populateLandingAdminForms();
     applyLandingPageToUI();
     showMsg(msg, t("settingsSaved"), true);
   } catch (e) {
@@ -3627,6 +3739,7 @@ document.getElementById("gallery-add-btn").addEventListener("click", async () =>
   const msg = document.getElementById("gallery-msg");
   const fileInput = document.getElementById("gallery-photo-file");
   if (!fileInput.files[0]) {
+    highlightMissingFields(["gallery-photo-file"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -3686,6 +3799,7 @@ document.getElementById("sponsor-add-btn").addEventListener("click", async () =>
   const msg = document.getElementById("sponsor-msg");
   const name = document.getElementById("sponsor-name").value.trim();
   if (!name) {
+    highlightMissingFields(["sponsor-name"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5332,6 +5446,7 @@ document.getElementById("sa-submit").addEventListener("click", async () => {
   const role = document.getElementById("sa-role").value;
   const msg = document.getElementById("sa-msg");
   if (!username || !name || !password) {
+    highlightMissingFields(["sa-username", "sa-name", "sa-password"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5360,6 +5475,7 @@ document.getElementById("rp-submit").addEventListener("click", async () => {
   const newPassword = document.getElementById("rp-password").value;
   const msg = document.getElementById("rp-msg");
   if (!membership || !newPassword) {
+    highlightMissingFields(["rp-membership", "rp-password"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5385,6 +5501,7 @@ document.getElementById("cp-submit").addEventListener("click", async () => {
   const newPassword = document.getElementById("cp-new").value;
   const msg = document.getElementById("cp-msg");
   if (!oldPassword || !newPassword) {
+    highlightMissingFields(["cp-old", "cp-new"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5413,6 +5530,7 @@ document.getElementById("mp-cp-submit").addEventListener("click", async () => {
   const newPassword = document.getElementById("mp-cp-new").value;
   const msg = document.getElementById("mp-cp-msg");
   if (!oldPassword || !newPassword) {
+    highlightMissingFields(["mp-cp-old", "mp-cp-new"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5450,6 +5568,7 @@ async function saveRecoveryPin({ passwordId, pinId, msgId, statusId, sessionKey,
   const pin = document.getElementById(pinId).value.trim();
   const msg = document.getElementById(msgId);
   if (!password || !pin) {
+    highlightMissingFields([passwordId, pinId]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5473,6 +5592,7 @@ async function clearRecoveryPin({ passwordId, msgId, statusId, sessionKey, endpo
   const password = document.getElementById(passwordId).value;
   const msg = document.getElementById(msgId);
   if (!password) {
+    highlightMissingFields([passwordId]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
@@ -5580,6 +5700,7 @@ document.getElementById("fp-submit").addEventListener("click", async () => {
   const newPassword = document.getElementById("fp-new-password").value;
   const msg = document.getElementById("fp-msg");
   if (!id || !pin || !newPassword) {
+    highlightMissingFields(["fp-id", "fp-pin", "fp-new-password"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }

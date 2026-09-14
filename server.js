@@ -77,17 +77,20 @@ app.set("trust proxy", 1);
 // that still fits this app: inline style="..." attributes are used
 // throughout the existing HTML/JS (style-src unsafe-inline), and QR codes
 // render as data: URI images (img-src data:) - the stock strict defaults
-// would silently break both.
+// would silently break both. fonts.googleapis.com/fonts.gstatic.com are
+// allowed narrowly (nothing else third-party) for the hero banner's
+// display typeface - the CSS file itself comes from googleapis, the actual
+// font file it points to from gstatic.
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         imgSrc: ["'self'", "data:"],
         connectSrc: ["'self'"],
-        fontSrc: ["'self'"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'self'"],
@@ -393,6 +396,11 @@ function readDb() {
   if (typeof db.landingPage.hero.taglineAr !== "string") {
     db.landingPage.hero.taglineAr = "سجّل في الأنشطة الرياضية بالنادي، اجمع النقاط، وابقَ على تواصل مع المجتمع.";
   }
+  // Optional full-bleed background photo behind the hero banner text - off
+  // (empty string) by default, same "self-healing" pattern as every other
+  // optional landing-page photo field, so an existing deploy that's never
+  // set one just keeps showing the plain color gradient it already had.
+  if (typeof db.landingPage.hero.photo !== "string") db.landingPage.hero.photo = "";
   db.landingPage.about = db.landingPage.about || {};
   if (typeof db.landingPage.about.titleEn !== "string") db.landingPage.about.titleEn = "About us";
   if (typeof db.landingPage.about.titleAr !== "string") db.landingPage.about.titleAr = "من نحن";
@@ -1506,15 +1514,16 @@ app.get("/api/community-stats", (req, res) => {
 // page already fetches that once at load; these are just the admin write
 // endpoints. All reuse uploadEventPhoto for photos/logos, same as news and
 // spotlights above.
-app.put("/api/admin/landing/hero", requireStaffRole("admin"), (req, res) => {
+app.put("/api/admin/landing/hero", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
   const db = req.db;
-  const { headlineEn, headlineAr, taglineEn, taglineAr } = req.body;
+  const { headlineEn, headlineAr, taglineEn, taglineAr, removePhoto } = req.body;
   if (!headlineEn || !headlineEn.trim()) return res.status(400).json({ error: "An English headline is required" });
   db.landingPage.hero = {
     headlineEn: headlineEn.trim(),
     headlineAr: (headlineAr || "").trim(),
     taglineEn: (taglineEn || "").trim(),
     taglineAr: (taglineAr || "").trim(),
+    photo: req.file ? `/uploads/events/${req.file.filename}` : removePhoto === "true" ? "" : db.landingPage.hero.photo,
   };
   writeDb(db);
   res.json({ hero: db.landingPage.hero });

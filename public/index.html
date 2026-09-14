@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>MyAhlawy — Online Registration &amp; Points</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -45,8 +48,19 @@
   <!-- ============================= EVENTS (landing page) ============================= -->
   <section id="view-events" class="view active">
     <div class="hero-banner" data-landing-section="hero">
-      <h2 id="landing-hero-headline" data-i18n="heroWelcome">Welcome to Ahlawy</h2>
-      <p id="landing-hero-tagline" data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
+      <div class="hero-photo-card" id="hero-photo-card">
+        <div class="hero-photo-overlay"></div>
+        <div class="hero-photo-content">
+          <span class="hero-eyebrow" data-i18n="heroEyebrow">Al Ahly Club &middot; Sports Entertainment Committee</span>
+          <h2 id="landing-hero-headline" data-i18n="heroWelcome">Welcome to Ahlawy</h2>
+          <p id="landing-hero-tagline" data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
+          <div class="hero-cta-row">
+            <button type="button" class="hero-cta-btn primary" id="hero-cta-register" data-i18n="heroCtaRegister">Register now</button>
+            <button type="button" class="hero-cta-btn secondary" id="hero-cta-events" data-i18n="heroCtaEvents">View all events</button>
+          </div>
+        </div>
+      </div>
+      <div class="hero-stats-pill" id="hero-stats-pill"></div>
     </div>
 
     <div data-landing-section="events">
@@ -137,11 +151,11 @@
     <div id="reg-auth" class="grid-2">
       <div class="card">
         <h2 data-i18n="signupTitle">Create your account</h2>
-        <label data-i18n="fieldMembership">Membership number</label>
+        <label class="required-label" data-i18n="fieldMembership">Membership number</label>
         <input id="su-membership" placeholder="e.g. 10234" />
-        <label data-i18n="fieldName">Full name</label>
+        <label class="required-label" data-i18n="fieldName">Full name</label>
         <input id="su-name" placeholder="e.g. Ahmed Samir" />
-        <label data-i18n="fieldPassword">Password</label>
+        <label class="required-label" data-i18n="fieldPassword">Password</label>
         <input id="su-password" type="password" placeholder="At least 6 characters" />
         <label data-i18n="fieldFamily">Family group (optional)</label>
         <input id="su-family" placeholder="e.g. FAM-01" />
@@ -154,9 +168,9 @@
       </div>
       <div class="card">
         <h2 data-i18n="loginTitle">Already have an account?</h2>
-        <label data-i18n="fieldMembership">Membership number</label>
+        <label class="required-label" data-i18n="fieldMembership">Membership number</label>
         <input id="li-membership" placeholder="e.g. 10234" />
-        <label data-i18n="fieldPassword">Password</label>
+        <label class="required-label" data-i18n="fieldPassword">Password</label>
         <input id="li-password" type="password" />
         <button class="primary" id="li-submit" data-i18n="btnLogin">Log in</button>
         <div class="msg" id="li-msg"></div>
@@ -168,7 +182,7 @@
     <div id="reg-form" class="card hidden">
       <h2 data-i18n="regTitle">Register for an event</h2>
       <p data-i18n="regIntro" style="color:var(--muted);font-size:0.88rem;">Every participation earns at least 100 points, plus 10 for early registration. Points are awarded when your QR code is scanned at the event, not at sign-up — so register, then show up!</p>
-      <label data-i18n="fieldEvent">Event</label>
+      <label class="required-label" data-i18n="fieldEvent">Event</label>
       <select id="reg-event"></select>
       <p class="hint-note hidden" id="reg-capacity-note"></p>
 
@@ -238,7 +252,7 @@
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myFamilyLinkedIntro">Already a club member with their own membership number — a spouse or adult child, for example? Link their club member ID here so your points pool together.</p>
       <div id="mp-family-linked-list"></div>
       <div class="grid-2" style="align-items:end;">
-        <div><label data-i18n="fieldClubMemberId">Club member ID</label><input id="fam-link-id" placeholder="e.g. 10234" /></div>
+        <div><label class="required-label" data-i18n="fieldClubMemberId">Club member ID</label><input id="fam-link-id" placeholder="e.g. 10234" /></div>
         <div><button class="secondary" id="fam-link-add" style="margin-top:10px;" data-i18n="btnLinkFamilyMember">Link family member</button></div>
       </div>
       <div class="msg" id="fam-link-msg"></div>
@@ -247,7 +261,7 @@
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myFamilyIntro">Add family members here, then pick who's attending when you register for an event. They don't need their own login — everyone's points pool into your balance.</p>
       <div id="mp-family-list"></div>
       <div class="grid-2" style="align-items:end;">
-        <div><label data-i18n="fieldFamilyMemberName">Family member's name</label><input id="fam-name" placeholder="e.g. Sara Ahmed" /></div>
+        <div><label class="required-label" data-i18n="fieldFamilyMemberName">Family member's name</label><input id="fam-name" placeholder="e.g. Sara Ahmed" /></div>
         <div><button class="secondary" id="fam-add" style="margin-top:10px;" data-i18n="btnAddFamilyMember">Add family member</button></div>
       </div>
       <div class="msg" id="fam-msg"></div>
@@ -274,9 +288,9 @@
       <h2 data-i18n="accountSecurityTitle">Account &amp; security</h2>
 
       <h3 style="margin-top:4px;" data-i18n="changePasswordTitle">Change my password</h3>
-      <label data-i18n="fieldOldPassword">Current password</label>
+      <label class="required-label" data-i18n="fieldOldPassword">Current password</label>
       <input id="mp-cp-old" type="password" />
-      <label data-i18n="fieldNewPassword">New password</label>
+      <label class="required-label" data-i18n="fieldNewPassword">New password</label>
       <input id="mp-cp-new" type="password" placeholder="At least 6 characters" />
       <button class="primary" id="mp-cp-submit" data-i18n="btnChangePassword">Change password</button>
       <div class="msg" id="mp-cp-msg"></div>
@@ -284,9 +298,9 @@
       <h3 style="margin-top:20px;" data-i18n="recoveryPinTitle">Recovery PIN</h3>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="recoveryPinIntro">Set a short PIN so you can reset your own password later if you forget it, without contacting the committee.</p>
       <p class="hint-note" id="mp-recovery-pin-status"></p>
-      <label data-i18n="fieldCurrentPasswordConfirm">Current password (to confirm it's you)</label>
+      <label class="required-label" data-i18n="fieldCurrentPasswordConfirm">Current password (to confirm it's you)</label>
       <input id="mp-pin-password" type="password" />
-      <label data-i18n="fieldRecoveryPin">Recovery PIN</label>
+      <label class="required-label" data-i18n="fieldRecoveryPin">Recovery PIN</label>
       <input id="mp-pin-new" placeholder="At least 4 characters" />
       <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
         <button class="primary" id="mp-pin-save" data-i18n="btnSaveRecoveryPin">Save recovery PIN</button>
@@ -472,9 +486,9 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.8v6.4M6.8 10h6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span data-i18n="adminAddEvent">Add an event</span></h2>
           <div class="grid-2">
             <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
-            <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
+            <div><label class="required-label" data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-name-en" /></div>
             <div><label data-i18n="fieldSport">Sport</label><input id="ev-sport" /></div>
-            <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
+            <div><label class="required-label" data-i18n="fieldEventDate">Event date</label><input id="ev-date" type="date" /></div>
             <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-end-date" type="date" /></div>
             <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-start-time" type="time" /></div>
             <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-end-time" type="time" /></div>
@@ -504,9 +518,9 @@
           <div id="ev-edit-fields" class="hidden" style="margin-top:14px;">
             <div class="grid-2">
               <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-edit-name-ar" dir="rtl" /></div>
-              <div><label data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
+              <div><label class="required-label" data-i18n="fieldEventNameEn">Event name (EN)</label><input id="ev-edit-name-en" /></div>
               <div><label data-i18n="fieldSport">Sport</label><input id="ev-edit-sport" /></div>
-              <div><label data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
+              <div><label class="required-label" data-i18n="fieldEventDate">Event date</label><input id="ev-edit-date" type="date" /></div>
               <div><label data-i18n="fieldEndDate">End date (optional, for multi-day events)</label><input id="ev-edit-end-date" type="date" /></div>
               <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-edit-start-time" type="time" /></div>
               <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-edit-end-time" type="time" /></div>
@@ -576,11 +590,11 @@
           <h3 style="margin-top:0;" data-i18n="addMemberTitle">Add a member</h3>
           <div class="grid-2">
             <div>
-              <label data-i18n="fieldMembership">Membership number</label>
+              <label class="required-label" data-i18n="fieldMembership">Membership number</label>
               <input id="member-add-number" type="text" />
             </div>
             <div>
-              <label data-i18n="fieldName">Full name</label>
+              <label class="required-label" data-i18n="fieldName">Full name</label>
               <input id="member-add-name" type="text" />
             </div>
             <div>
@@ -637,8 +651,8 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="6.3" cy="10" r="3.2" stroke="currentColor" stroke-width="1.4"/><path d="M9 10h8M14 10v2.3M16.3 10v2.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminResetMemberPassword">Reset a member's password</span></h2>
           <p class="hint-note" data-i18n="resetMemberPasswordHint">For when a member forgets their password and contacts the committee. Enter their membership number and set a new temporary password, then let them know it directly.</p>
           <div class="grid-2">
-            <div><label data-i18n="fieldMembership">Membership number</label><input id="rp-membership" placeholder="e.g. 10234" /></div>
-            <div><label data-i18n="fieldNewPassword">New password</label><input id="rp-password" type="password" placeholder="At least 6 characters" /></div>
+            <div><label class="required-label" data-i18n="fieldMembership">Membership number</label><input id="rp-membership" placeholder="e.g. 10234" /></div>
+            <div><label class="required-label" data-i18n="fieldNewPassword">New password</label><input id="rp-password" type="password" placeholder="At least 6 characters" /></div>
           </div>
           <button class="primary" id="rp-submit" data-i18n="btnResetPassword">Reset password</button>
           <div class="msg" id="rp-msg"></div>
@@ -708,10 +722,10 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 8.5v3l3 .6v3.4a1 1 0 0 0 1.7.7l1.3-1.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 8.2l9-3.7v11l-9-3.7z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M17 8.3a2.2 2.2 0 0 1 0 3.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><span data-i18n="adminPostNews">Post committee news</span></h2>
           <p class="hint-note" data-i18n="postNewsHint">Short announcements that show on the Events landing page under "Committee News" — e.g. schedule changes, new sport added, general updates.</p>
           <div class="grid-2">
-            <div><label data-i18n="fieldNewsTitleEn">Title (EN)</label><input id="news-title-en" /></div>
+            <div><label class="required-label" data-i18n="fieldNewsTitleEn">Title (EN)</label><input id="news-title-en" /></div>
             <div><label data-i18n="fieldNewsTitleAr">Title (AR)</label><input id="news-title-ar" dir="rtl" /></div>
           </div>
-          <label data-i18n="fieldNewsBodyEn">Body (EN)</label>
+          <label class="required-label" data-i18n="fieldNewsBodyEn">Body (EN)</label>
           <textarea id="news-body-en" rows="3"></textarea>
           <label data-i18n="fieldNewsBodyAr">Body (AR)</label>
           <textarea id="news-body-ar" dir="rtl" rows="3"></textarea>
@@ -726,7 +740,7 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.7l2.1 4.4 4.8.7-3.5 3.4.8 4.8L10 13.7l-4.2 2.3.8-4.8-3.5-3.4 4.8-.7L10 2.7z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span data-i18n="adminSpotlights">Community spotlights</span></h2>
           <p class="hint-note" data-i18n="spotlightAdminHint">Feature a member on the Events landing page under "Community Spotlight" — a photo and a short note about them.</p>
           <div class="grid-2">
-            <div><label data-i18n="fieldSpotlightName">Member's name</label><input id="spotlight-name" placeholder="e.g. Sara Ahmed" /></div>
+            <div><label class="required-label" data-i18n="fieldSpotlightName">Member's name</label><input id="spotlight-name" placeholder="e.g. Sara Ahmed" /></div>
             <div><label data-i18n="fieldSpotlightPhoto">Photo (optional)</label><input id="spotlight-photo" type="file" accept="image/*" /></div>
           </div>
           <label data-i18n="fieldSpotlightBlurbEn">About them (EN)</label>
@@ -751,14 +765,21 @@
           <h2 data-i18n="heroAdminTitle">Hero banner</h2>
           <p class="hint-note" data-i18n="heroAdminHint">The big welcome message at the top of the landing page.</p>
           <div class="grid-2">
-            <div><label data-i18n="fieldHeadlineEn">Headline (EN)</label><input id="hero-headline-en" /></div>
+            <div><label class="required-label" data-i18n="fieldHeadlineEn">Headline (EN)</label><input id="hero-headline-en" /></div>
             <div><label data-i18n="fieldHeadlineAr">Headline (AR)</label><input id="hero-headline-ar" dir="rtl" /></div>
           </div>
           <div class="grid-2">
             <div><label data-i18n="fieldTaglineEn">Tagline (EN)</label><input id="hero-tagline-en" /></div>
             <div><label data-i18n="fieldTaglineAr">Tagline (AR)</label><input id="hero-tagline-ar" dir="rtl" /></div>
           </div>
-          <button class="primary" id="hero-save-btn" data-i18n="btnSaveHero">Save hero banner</button>
+          <label data-i18n="fieldHeroPhoto">Background photo (optional)</label>
+          <div id="hero-photo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="hero-photo-preview" alt="" style="max-height:120px;border-radius:8px;display:block;margin-inline:auto;" /></div>
+          <input type="file" id="hero-photo-file" accept="image/*" />
+          <p class="hint-note" data-i18n="heroPhotoHint">A wide action photo works best - it's tinted with the club colors behind the text, so it stays readable with almost any photo.</p>
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="primary" id="hero-save-btn" data-i18n="btnSaveHero">Save hero banner</button>
+            <button class="secondary hidden" id="hero-remove-photo-btn" data-i18n="btnRemovePhoto">Remove photo</button>
+          </div>
           <div class="msg" id="hero-msg"></div>
         </div>
 
@@ -787,7 +808,7 @@
           <h2 data-i18n="galleryAdminTitle">Photo gallery</h2>
           <p class="hint-note" data-i18n="galleryAdminHint">A gallery of event photos on the landing page. Turn it on or off in the section list above.</p>
           <div id="gallery-admin-list" style="margin-bottom:14px;"></div>
-          <label data-i18n="fieldPhoto">Photo</label>
+          <label class="required-label" data-i18n="fieldPhoto">Photo</label>
           <input type="file" id="gallery-photo-file" accept="image/*" />
           <div class="grid-2">
             <div><label data-i18n="fieldGalleryCaptionEn">Caption (EN, optional)</label><input id="gallery-caption-en" /></div>
@@ -802,7 +823,7 @@
           <p class="hint-note" data-i18n="sponsorsAdminHint">Logos shown in a strip on the landing page. Turn it on or off in the section list above.</p>
           <div id="sponsors-admin-list" style="margin-bottom:14px;"></div>
           <div class="grid-2">
-            <div><label data-i18n="fieldSponsorName">Name</label><input id="sponsor-name" /></div>
+            <div><label class="required-label" data-i18n="fieldSponsorName">Name</label><input id="sponsor-name" /></div>
             <div><label data-i18n="fieldSponsorUrl">Website (optional)</label><input id="sponsor-url" placeholder="https://..." /></div>
           </div>
           <label data-i18n="fieldSponsorLogo">Logo</label>
@@ -837,9 +858,9 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.8l6 2.2v4.3c0 4-2.6 6.9-6 7.9-3.4-1-6-3.9-6-7.9V5l6-2.2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.3 10l1.9 1.9L13 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="adminStaffAccounts">Staff &amp; admin accounts</span></h2>
           <div id="staff-accounts-table-wrap" style="overflow-x:auto;margin-bottom:14px;"></div>
           <div class="grid-2">
-            <div><label data-i18n="fieldUsername">Username</label><input id="sa-username" /></div>
-            <div><label data-i18n="fieldFullName">Full name</label><input id="sa-name" /></div>
-            <div><label data-i18n="fieldPassword">Password</label><input id="sa-password" type="password" placeholder="At least 6 characters" /></div>
+            <div><label class="required-label" data-i18n="fieldUsername">Username</label><input id="sa-username" /></div>
+            <div><label class="required-label" data-i18n="fieldFullName">Full name</label><input id="sa-name" /></div>
+            <div><label class="required-label" data-i18n="fieldPassword">Password</label><input id="sa-password" type="password" placeholder="At least 6 characters" /></div>
             <div>
               <label data-i18n="fieldRole">Role</label>
               <select id="sa-role">
@@ -856,9 +877,9 @@
 
         <div class="card">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.4"/><path d="M6.7 9V6.5a3.3 3.3 0 0 1 6.6 0V9" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="12.7" r="1.1" fill="currentColor"/></svg><span data-i18n="changePasswordTitle">Change my password</span></h2>
-          <label data-i18n="fieldOldPassword">Current password</label>
+          <label class="required-label" data-i18n="fieldOldPassword">Current password</label>
           <input id="cp-old" type="password" />
-          <label data-i18n="fieldNewPassword">New password</label>
+          <label class="required-label" data-i18n="fieldNewPassword">New password</label>
           <input id="cp-new" type="password" placeholder="At least 6 characters" />
           <button class="primary" id="cp-submit" data-i18n="btnChangePassword">Change password</button>
           <div class="msg" id="cp-msg"></div>
@@ -868,9 +889,9 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4" y="3.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M10 11.5v2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="recoveryPinTitle">Recovery PIN</span></h2>
           <p class="section-sub" data-i18n="recoveryPinIntroStaff">Set a short PIN so you can reset your own password later if you forget it, without asking another admin.</p>
           <p class="hint-note" id="staff-recovery-pin-status"></p>
-          <label data-i18n="fieldCurrentPasswordConfirm">Current password (to confirm it's you)</label>
+          <label class="required-label" data-i18n="fieldCurrentPasswordConfirm">Current password (to confirm it's you)</label>
           <input id="staff-pin-password" type="password" />
-          <label data-i18n="fieldRecoveryPin">Recovery PIN</label>
+          <label class="required-label" data-i18n="fieldRecoveryPin">Recovery PIN</label>
           <input id="staff-pin-new" placeholder="At least 4 characters" />
           <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
             <button class="primary" id="staff-pin-save" data-i18n="btnSaveRecoveryPin">Save recovery PIN</button>
@@ -911,11 +932,11 @@
     <button class="modal-close" id="forgot-password-modal-close" aria-label="Close">&times;</button>
     <h2 data-i18n="forgotPasswordTitle">Reset your password</h2>
     <p id="fp-intro" style="color:var(--muted);font-size:0.85rem;"></p>
-    <label id="fp-id-label" data-i18n="fieldMembership">Membership number</label>
+    <label id="fp-id-label" class="required-label" data-i18n="fieldMembership">Membership number</label>
     <input id="fp-id" />
-    <label data-i18n="fieldRecoveryPin">Recovery PIN</label>
+    <label class="required-label" data-i18n="fieldRecoveryPin">Recovery PIN</label>
     <input id="fp-pin" type="password" />
-    <label data-i18n="fieldNewPassword">New password</label>
+    <label class="required-label" data-i18n="fieldNewPassword">New password</label>
     <input id="fp-new-password" type="password" placeholder="At least 6 characters" />
     <button class="primary" id="fp-submit" data-i18n="btnResetPassword">Reset password</button>
     <div class="msg" id="fp-msg"></div>

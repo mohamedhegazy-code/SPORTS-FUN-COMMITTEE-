@@ -178,6 +178,24 @@ input[type="file"] { padding: 6px 8px; }
 input[type="color"] { width: 64px; height: 40px; padding: 4px; cursor: pointer; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
 
+/* Required-field marker on labels: a small red asterisk appended via CSS so
+   it never has to be typed (or translated) into every label's text. Applied
+   by JS at render time (markRequiredLabel) or directly in markup via the
+   "required-label" class. */
+label.required-label::after {
+  content: " *";
+  color: var(--red);
+  font-weight: 700;
+}
+/* Highlight for a required field left empty on submit - paired with the
+   highlightMissingFields() helper in app.js. Clears itself the moment the
+   visitor edits the field (see the delegated input/change listener). */
+input.field-missing, select.field-missing, textarea.field-missing {
+  border-color: var(--red);
+  background: rgba(139, 0, 0, 0.05);
+  box-shadow: 0 0 0 1px var(--red);
+}
+
 button.primary {
   margin-top: 16px;
   background: var(--red);
@@ -269,27 +287,108 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .ladder-edit-item .msg { margin-top: 8px; }
 
 /* ---------------------------------------------------------- hero banner --- */
+/* A big rounded photo card (optional admin-uploaded background, falling
+   back to a plain club-color gradient when none is set) with a tinted
+   overlay in the site's own red/gold theme tokens so the bold headline
+   stays readable over almost any photo - plus a stat pill that floats over
+   its corner on wide screens and stacks below it on narrow ones. */
 .hero-banner {
-  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 55%, #4a0000 100%);
-  color: #fff;
-  border-radius: 14px;
-  padding: 32px 28px;
-  margin-bottom: 26px;
   position: relative;
-  overflow: hidden;
-  box-shadow: 0 4px 18px rgba(139, 0, 0, 0.25);
+  margin-bottom: 46px;
+  padding-bottom: 8px;
 }
-.hero-banner::before {
-  content: "";
+.hero-photo-card {
+  position: relative;
+  border-radius: 22px;
+  overflow: hidden;
+  min-height: 300px;
+  padding: 34px 32px;
+  display: flex;
+  align-items: flex-end;
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 55%, #3a0000 100%) center / cover no-repeat;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+}
+.hero-photo-overlay {
   position: absolute; inset: 0;
-  background: radial-gradient(circle at 85% 20%, rgba(201, 162, 39, 0.35), transparent 55%);
+  /* A flat wash first (so no corner of any photo, however bright or oddly
+     colored, ever shows through untinted), then the directional gradient on
+     top for depth - text sits over the strong left side, a warm gold glow
+     marks the top-right corner under the stat pill. */
+  background:
+    linear-gradient(115deg, rgba(88, 0, 0, 0.92) 6%, rgba(80, 0, 0, 0.82) 45%, rgba(58, 0, 0, 0.72) 100%),
+    radial-gradient(circle at 88% 15%, rgba(201, 162, 39, 0.3), transparent 55%) rgba(58, 0, 0, 0.55);
   pointer-events: none;
 }
+.hero-photo-content { position: relative; max-width: 620px; }
+.hero-eyebrow {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
 .hero-banner h2 {
-  margin: 0 0 6px; font-size: 1.5rem; color: #fff; position: relative;
+  margin: 0 0 10px;
+  color: #fff;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  line-height: 1.06;
+  font-size: clamp(1.9rem, 4.2vw, 3.1rem);
+  text-wrap: balance;
 }
 .hero-banner p {
-  margin: 0; color: rgba(255,255,255,0.9); font-size: 0.95rem; max-width: 560px; position: relative;
+  margin: 0; color: rgba(255,255,255,0.92); font-size: 0.98rem; max-width: 520px;
+}
+.hero-cta-row { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+.hero-cta-btn {
+  border-radius: 8px;
+  padding: 11px 22px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.hero-cta-btn:hover { transform: translateY(-1px); }
+.hero-cta-btn.primary { background: var(--gold); color: #2a2205; box-shadow: 0 4px 14px rgba(201, 162, 39, 0.35); }
+.hero-cta-btn.secondary { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.65); }
+.hero-cta-btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
+.hero-stats-pill {
+  display: flex;
+  gap: 0;
+  background: #fbf7ec;
+  border-radius: 999px;
+  padding: 14px 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  position: absolute;
+  top: -22px;
+  right: 32px;
+  z-index: 2;
+}
+[dir="rtl"] .hero-stats-pill { right: auto; left: 32px; }
+.hero-stats-pill .hs {
+  padding: 0 18px;
+  text-align: center;
+  border-right: 1px solid rgba(139, 0, 0, 0.15);
+}
+.hero-stats-pill .hs:last-child { border-right: none; }
+[dir="rtl"] .hero-stats-pill .hs { border-right: none; border-left: 1px solid rgba(139, 0, 0, 0.15); }
+[dir="rtl"] .hero-stats-pill .hs:last-child { border-left: none; }
+.hero-stats-pill .hs .n { font-size: 1.3rem; font-weight: 800; color: var(--red-dark); line-height: 1.1; }
+.hero-stats-pill .hs .l { font-size: 0.66rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+@media (max-width: 640px) {
+  .hero-photo-card { padding: 26px 20px 60px; min-height: 0; align-items: flex-start; }
+  /* Stays "position: relative" (not static) even though it's no longer
+     absolutely placed - a plain static sibling paints BEHIND a positioned
+     one regardless of source order, which was hiding these numbers under
+     the card above. Relative-but-not-offset keeps it in normal flow while
+     still painting on top. */
+  .hero-stats-pill { position: relative; top: 0; right: 0; margin: -40px 14px 0; justify-content: center; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); z-index: 2; }
+  .hero-cta-btn { flex: 1; text-align: center; }
 }
 .section-title {
   font-size: 1.1rem; color: var(--red-dark); margin: 0 0 4px;
