@@ -360,16 +360,41 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .hero-cta-row { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
 .hero-cta-btn {
   border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  min-width: 210px;
+  text-align: center;
+}
+.hero-cta-btn:hover { transform: translateY(-1px); }
+/* padding/font-size/border are repeated identically on .primary and
+   .secondary (rather than left on the shared .hero-cta-btn rule above)
+   because this app also has global button.primary/button.secondary rules
+   (used on admin forms) with higher CSS specificity (element+class beats
+   a single class) - those were silently overriding padding/font-size/
+   border here, and since the two global rules use different values from
+   each other, the two hero buttons rendered at visibly different sizes.
+   Matching the values on both .hero-cta-btn.primary/.secondary (specificity
+   0,2,0) reliably beats the global rules (0,1,1) and keeps both identical. */
+.hero-cta-btn.primary {
   padding: 11px 22px;
   font-size: 0.92rem;
   font-weight: 700;
-  cursor: pointer;
+  margin-top: 0;
   border: 1.5px solid transparent;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  background: var(--gold);
+  color: #2a2205;
+  box-shadow: 0 4px 14px rgba(201, 162, 39, 0.35);
 }
-.hero-cta-btn:hover { transform: translateY(-1px); }
-.hero-cta-btn.primary { background: var(--gold); color: #2a2205; box-shadow: 0 4px 14px rgba(201, 162, 39, 0.35); }
-.hero-cta-btn.secondary { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.65); }
+.hero-cta-btn.secondary {
+  padding: 11px 22px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-top: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.65);
+  background: transparent;
+  color: #fff;
+}
 .hero-cta-btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
 .hero-stats-pill {
   display: flex;
