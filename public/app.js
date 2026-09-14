@@ -120,8 +120,14 @@ document.addEventListener("change", (e) => {
     e.target.classList.remove("field-missing");
   }
 });
+// "-u-nu-latn" (the same Unicode locale extension used everywhere else in
+// this file that formats a number/date in Arabic mode) keeps Arabic text
+// for everything else (weekday/month names, RTL layout) but forces plain
+// Western digits (0123...) instead of Arabic-Indic numerals (٠١٢٣...) -
+// requested directly, since the Arabic-Indic "0" in particular renders as
+// a tiny, easy-to-miss dot in most fonts.
 function fmt(n) {
-  return Number(n || 0).toLocaleString(currentLang === "ar" ? "ar-EG" : "en-US");
+  return Number(n || 0).toLocaleString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US");
 }
 // Plain-text event name for compact contexts (dropdowns, admin tables,
 // buttons) where HTML markup isn't rendered. Always shows the Arabic name
@@ -178,7 +184,7 @@ function weekdayName(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { weekday: "long" });
+  return d.toLocaleDateString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US", { weekday: "long" });
 }
 // "18:30" -> "6:30 PM" (or the Arabic equivalent) for display.
 function formatTimeOfDay(hhmm) {
@@ -186,7 +192,7 @@ function formatTimeOfDay(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
   const d = new Date(2000, 0, 1, h, m);
-  return d.toLocaleTimeString(currentLang === "ar" ? "ar-EG" : "en-US", { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleTimeString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US", { hour: "numeric", minute: "2-digit" });
 }
 // How long between a start and end "HH:MM" time, as a short label like "3h"
 // or "1h 30m". Assumes the end time is later the same day unless it's
@@ -1174,7 +1180,7 @@ function shortDateBadge(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
   if (isNaN(d.getTime())) return "";
-  const s = d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { month: "short", day: "numeric" });
+  const s = d.toLocaleDateString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US", { month: "short", day: "numeric" });
   return currentLang === "ar" ? s : s.toUpperCase();
 }
 // The hero sidebar's "Upcoming Events" card - a compact list of the same
@@ -1210,7 +1216,7 @@ function renderNewsList(posts) {
     .map((p) => {
       const title = currentLang === "ar" ? p.titleAr || p.titleEn : p.titleEn || p.titleAr;
       const body = currentLang === "ar" ? p.bodyAr || p.bodyEn : p.bodyEn || p.bodyAr;
-      const date = new Date(p.postedAt).toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US");
+      const date = new Date(p.postedAt).toLocaleDateString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US");
       return `<div class="news-item">
         ${p.photo ? `<img class="photo" src="${escapeAttr(p.photo)}" alt="" />` : ""}
         <div class="body">
@@ -1831,7 +1837,7 @@ function renderChatBubbles(containerId, messages, mineSender) {
   wrap.innerHTML = messages
     .map((m) => {
       const mine = m.sender === mineSender;
-      const time = new Date(m.sentAt).toLocaleString(currentLang === "ar" ? "ar-EG" : "en-US");
+      const time = new Date(m.sentAt).toLocaleString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US");
       return `<div class="chat-bubble ${mine ? "mine" : "theirs"}">
         <div class="text">${escapeAttr(m.text)}</div>
         <div class="meta">${escapeAttr(m.senderName)} · ${escapeAttr(time)}</div>
@@ -2231,7 +2237,7 @@ function monthLabel(key) {
   if (key === "before") return t("mgmtBeforeTracking");
   const [y, m] = key.split("-");
   const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-US", { year: "numeric", month: "short" });
+  return d.toLocaleDateString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US", { year: "numeric", month: "short" });
 }
 
 // Event performance trends: which events to include is a client-side

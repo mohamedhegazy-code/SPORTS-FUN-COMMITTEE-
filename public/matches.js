@@ -137,7 +137,7 @@ async function loadAndRenderEvent() {
     const meta = list.find((x) => String(x.eventId) === String(eventId));
     document.getElementById("screen-title").innerHTML = meta ? eventNameHtml(meta) : "MyAhlawy";
     document.getElementById("screen-subtitle").textContent = meta ? `${meta.date || ""}${meta.sport ? " · " + meta.sport : ""}` : "";
-    document.getElementById("screen-updated").textContent = new Date().toLocaleTimeString(currentLang === "ar" ? "ar-EG" : "en-US");
+    document.getElementById("screen-updated").textContent = new Date().toLocaleTimeString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US");
 
     const tn = tnData.tournament;
     if (!tn || !tn.schedule) {

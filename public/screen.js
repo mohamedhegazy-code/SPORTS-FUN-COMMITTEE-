@@ -179,7 +179,7 @@
       document.getElementById("screen-subtitle").textContent = meta
         ? `${meta.date || ""}${meta.sport ? " · " + meta.sport : ""}`
         : "";
-      document.getElementById("screen-updated").textContent = new Date().toLocaleTimeString(currentLang === "ar" ? "ar-EG" : "en-US");
+      document.getElementById("screen-updated").textContent = new Date().toLocaleTimeString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US");
 
       const tn = tnData.tournament;
       if (!tn) {
