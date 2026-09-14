@@ -100,14 +100,21 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
-// no-cache so a redeployed app.js/index.html/etc. is never served stale from
-// the browser's disk cache after an update - Express's default static
-// headers (ETag only, no explicit Cache-Control) leave browsers free to use
-// heuristic caching, which has caused "I updated the app but my browser is
-// still running the old version" confusion after past updates.
+// no-store (not just no-cache) so a redeployed app.js/index.html/etc. is
+// never served stale from the browser's disk cache after an update -
+// Express's default static headers (ETag only, no explicit Cache-Control)
+// leave browsers free to use heuristic caching, which has caused "I
+// updated the app but my browser is still running the old version"
+// confusion after past updates. no-cache alone still permits the browser
+// to reuse a cached copy after revalidating with the server (normally via
+// a conditional If-None-Match/ETag request) - fine in theory, but a stray
+// proxy, an aggressive mobile browser, or a revalidation request that
+// never actually reaches this server can all still serve the old file
+// under "no-cache". no-store forbids caching the response at all, so
+// there's nothing left to revalidate or serve stale.
 app.use(
   express.static(path.join(__dirname, "public"), {
-    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+    setHeaders: (res) => res.setHeader("Cache-Control", "no-store"),
   })
 );
 // Uploaded photos (event covers/recaps/gallery, branding logo) live on the

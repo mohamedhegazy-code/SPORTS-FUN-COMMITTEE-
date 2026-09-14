@@ -139,7 +139,7 @@ main {
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 20px;
   margin-bottom: 18px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
@@ -270,6 +270,20 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .stat { flex: 1; min-width: 120px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; text-align: center; }
 .stat .n { font-size: 1.5rem; font-weight: 700; color: var(--red); }
 .stat .l { font-size: 0.75rem; color: var(--muted); }
+/* Community section's own stat row echoes the hero's cream stat pill
+   (same background, same bold red figure) rather than the plain bordered
+   box every other .stat-row on the site (admin dashboards, member points)
+   still uses - scoped to this one id so those are untouched. */
+#community-stats-row.stat-row { gap: 16px; }
+#community-stats-row .stat {
+  background: #fbf7ec;
+  border: none;
+  border-radius: 14px;
+  padding: 16px 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+#community-stats-row .stat .n { font-size: 1.7rem; color: var(--red-dark); }
+#community-stats-row .stat .l { text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
 
 .hidden { display: none !important; }
 .admin-lock { text-align: center; padding: 40px 20px; }
@@ -390,12 +404,22 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   .hero-stats-pill { position: relative; top: 0; right: 0; margin: -40px 14px 0; justify-content: center; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); z-index: 2; }
   .hero-cta-btn { flex: 1; text-align: center; }
 }
+/* Same bold condensed display face as the hero headline (see hero-banner
+   below), carried into every landing-page section title so the page reads
+   as one system rather than a hero mockup bolted onto an otherwise
+   untouched page. Falls back gracefully for Arabic (Anton has no Arabic
+   glyphs, so RTL section titles render in the normal body font instead -
+   see the note on .hero-banner h2). */
 .section-title {
-  font-size: 1.1rem; color: var(--red-dark); margin: 0 0 4px;
-  display: flex; align-items: center; gap: 8px;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 1.4rem; color: var(--red-dark); margin: 0 0 4px;
+  display: flex; align-items: center; gap: 10px;
 }
 .section-title::before {
-  content: ""; display: inline-block; width: 5px; height: 1.1em;
+  content: ""; display: inline-block; width: 6px; height: 1em;
   background: var(--gold); border-radius: 3px;
 }
 .section-sub { color: var(--muted); font-size: 0.85rem; margin: 0 0 14px; }
@@ -423,7 +447,7 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .event-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -578,7 +602,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 /* ------------------------------------------------------- committee news --- */
 .news-item {
   display: flex; gap: 14px; background: var(--card); border: 1px solid var(--border);
-  border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   transition: box-shadow 0.15s ease;
 }
 .news-item:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
@@ -597,7 +621,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
 }
 .spotlight-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
   padding: 18px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
@@ -616,7 +640,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
 }
 .gallery-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
   overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
@@ -625,7 +649,14 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 .gallery-card .caption { padding: 10px 12px; font-size: 0.82rem; color: var(--muted); }
 
 /* ----------------------------------------------------------- sponsors --- */
-.sponsor-strip { display: flex; flex-wrap: wrap; gap: 26px; align-items: center; }
+/* A rounded panel around the logo strip (the strip itself has no wrapper
+   card in the markup) so it reads as one more section in the same visual
+   system as the rest of the landing page, not a bare row of images. */
+.sponsor-strip {
+  display: flex; flex-wrap: wrap; gap: 26px; align-items: center;
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 22px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
 .sponsor-item { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; }
 .sponsor-item img { max-height: 60px; max-width: 150px; object-fit: contain; object-position: center; }
 .sponsor-item .name { font-size: 0.78rem; color: var(--muted); text-align: center; }
