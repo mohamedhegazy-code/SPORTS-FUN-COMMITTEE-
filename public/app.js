@@ -574,19 +574,28 @@ document.getElementById("terms-save-btn").addEventListener("click", async () => 
   }
 });
 
-// One shared modal, two modes:
-//  - "view": closeable, opened from the sign-up screen's Terms & Conditions
-//    link so a prospective member can read it before checking the box.
-//  - "gate": non-dismissible, shown to an already-logged-in member whose own
-//    termsAcceptedVersion is behind SETTINGS.terms.version (see
-//    applyMaybeShowTermsGate(), called from updateUIForSession()) - e.g.
-//    right after the committee edits the text. Only closes once they click
-//    "I Agree", which records acceptance server-side.
+// One shared modal, two modes - both let the member read AND accept in the
+// same window, they just differ in what "accept" does and whether the
+// window can be dismissed without accepting:
+//  - "signup": closeable (X shown), opened from the sign-up screen's Terms &
+//    Conditions link. There's no account yet to record server-side
+//    acceptance against, so its "I Agree" button simply checks the
+//    #su-agree-terms box and closes - the real acceptance is recorded when
+//    the signup form is submitted (agreeTerms: true, validated server-side
+//    too). A prospective member can still just tick the box on the form
+//    directly without ever opening this window.
+//  - "gate": non-dismissible (no X, no close-on-click-outside), shown to an
+//    already-logged-in member whose own termsAcceptedVersion is behind
+//    SETTINGS.terms.version (see applyMaybeShowTermsGate(), called from
+//    updateUIForSession()) - e.g. right after the committee edits the text.
+//    Its "I Agree" button calls the server to record acceptance for real.
+let TERMS_MODAL_MODE = null;
 function openTermsModal(mode) {
+  TERMS_MODAL_MODE = mode;
   renderTermsModalBody();
   document.getElementById("terms-modal-close").classList.toggle("hidden", mode === "gate");
   document.getElementById("terms-gate-intro").classList.toggle("hidden", mode !== "gate");
-  document.getElementById("terms-agree-btn").classList.toggle("hidden", mode !== "gate");
+  document.getElementById("terms-agree-btn").classList.remove("hidden");
   document.getElementById("terms-modal").classList.remove("hidden");
 }
 function closeTermsModal() {
@@ -595,9 +604,18 @@ function closeTermsModal() {
 document.getElementById("terms-modal-close").addEventListener("click", closeTermsModal);
 document.getElementById("su-terms-link").addEventListener("click", (e) => {
   e.preventDefault();
-  openTermsModal("view");
+  openTermsModal("signup");
 });
 document.getElementById("terms-agree-btn").addEventListener("click", async () => {
+  if (TERMS_MODAL_MODE === "signup") {
+    // No session exists yet at sign-up time - just reflect the agreement on
+    // the form itself, same as if the member had ticked the box directly.
+    const checkbox = document.getElementById("su-agree-terms");
+    checkbox.checked = true;
+    checkbox.classList.remove("field-missing");
+    closeTermsModal();
+    return;
+  }
   try {
     const result = await api("/api/me/accept-terms", { method: "POST" });
     if (CURRENT_SESSION && CURRENT_SESSION.type === "member") CURRENT_SESSION.member = result.member;
