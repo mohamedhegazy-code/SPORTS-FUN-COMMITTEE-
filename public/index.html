@@ -983,6 +983,20 @@
   </div>
 </div>
 
+<!-- Idle/inactivity auto-logout: shown ~1 minute before an inactive
+     member/staff/admin session is force-logged-out for security (see the
+     idle-auto-logout block in app.js). Deliberately no close (X) button -
+     the only ways out are "I'm still here" (resets the idle timer) or
+     letting the countdown finish, which really logs the session out. -->
+<div class="modal-overlay hidden" id="idle-warning-modal" style="z-index:200;">
+  <div class="modal-box" style="max-width:420px;text-align:center;">
+    <h2 data-i18n="idleWarningTitle">Still there?</h2>
+    <p data-i18n="idleWarningBody" style="color:var(--muted);font-size:0.9rem;">For your security, you'll be signed out automatically due to inactivity.</p>
+    <div id="idle-warning-countdown" style="font-size:2rem;font-weight:700;font-variant-numeric:tabular-nums;margin:10px 0;">1:00</div>
+    <button class="primary" id="idle-warning-stay-btn" data-i18n="btnIdleStaySignedIn">I'm still here</button>
+  </div>
+</div>
+
 <script src="i18n.js"></script>
 <script src="jsQR.js"></script>
 <script src="app.js"></script>

@@ -950,6 +950,18 @@ function updateUIForSession() {
   }
 
   applyMaybeShowTermsGate();
+
+  // Idle auto-logout timers track CURRENT_SESSION, not the individual
+  // login/logout call sites - every one of them already calls
+  // updateUIForSession() right after changing CURRENT_SESSION (login,
+  // signup, checkSession, manual logout, a stale-session recovery), so this
+  // single chokepoint keeps the timers in sync with every one of them.
+  if (CURRENT_SESSION) {
+    scheduleIdleTimers();
+  } else {
+    clearIdleTimers();
+    hideIdleWarning();
+  }
 }
 
 document.getElementById("session-logout").addEventListener("click", async () => {
@@ -960,6 +972,130 @@ document.getElementById("session-logout").addEventListener("click", async () => 
   }
   CURRENT_SESSION = null;
   updateUIForSession();
+});
+
+// ------------------------------------------------------- idle auto-logout --
+// Security requirement: ANY signed-in session (member, plain staff/Gate
+// Scanner, Tournament Manager, Management, or full Admin) is automatically
+// signed out after 30 minutes with no real user activity on the page, with a
+// "still there?" warning shown 1 minute before that happens (a non-closeable
+// modal with a countdown and a button that cancels it). Only a genuine
+// mouse/keyboard/touch/scroll interaction counts as activity - a tab left
+// open and truly untouched times out on schedule even while the warning
+// itself is on screen, since showing it isn't itself user activity.
+const IDLE_LOGOUT_MS = 30 * 60 * 1000; // 30 minutes, uniform across every role
+const IDLE_WARNING_LEAD_MS = 60 * 1000; // warn 1 minute before logging out
+let idleWarningTimer = null;
+let idleLogoutTimer = null;
+let idleCountdownInterval = null;
+let idleWarningShownAt = 0;
+
+function clearIdleTimers() {
+  clearTimeout(idleWarningTimer);
+  clearTimeout(idleLogoutTimer);
+  clearInterval(idleCountdownInterval);
+  idleWarningTimer = null;
+  idleLogoutTimer = null;
+  idleCountdownInterval = null;
+}
+
+function hideIdleWarning() {
+  document.getElementById("idle-warning-modal").classList.add("hidden");
+  clearInterval(idleCountdownInterval);
+  idleCountdownInterval = null;
+}
+
+// A language-neutral "1:00" / "0:45" clock, rather than assembling a
+// translated sentence around a changing number - sidesteps word-order and
+// pluralization differences between English and Arabic entirely.
+function formatIdleCountdown(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function showIdleWarning() {
+  if (!CURRENT_SESSION) return;
+  idleWarningShownAt = Date.now();
+  document.getElementById("idle-warning-modal").classList.remove("hidden");
+  const countdownEl = document.getElementById("idle-warning-countdown");
+  countdownEl.textContent = formatIdleCountdown(IDLE_WARNING_LEAD_MS);
+  idleCountdownInterval = setInterval(() => {
+    const remaining = IDLE_WARNING_LEAD_MS - (Date.now() - idleWarningShownAt);
+    countdownEl.textContent = formatIdleCountdown(remaining);
+    if (remaining <= 0) clearInterval(idleCountdownInterval);
+  }, 1000);
+}
+
+// Real, server-side logout (not just clearing local state) - reuses the
+// exact same endpoint and post-logout UI reset as the manual "Log out"
+// button, plus a friendly explanation left on every sign-in surface a
+// member/staff/admin could be looking at (mirrors handleSessionExpired()'s
+// pattern above for a stale/expired session).
+async function performIdleLogout() {
+  hideIdleWarning();
+  clearIdleTimers();
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch (e) {
+    /* ignore - the UI is being signed out regardless */
+  }
+  CURRENT_SESSION = null;
+  updateUIForSession();
+  ["admin-lock-msg", "scan-lock-msg", "li-msg"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) showMsg(el, t("idleLoggedOutMsg"), false);
+  });
+}
+
+function scheduleIdleTimers() {
+  clearIdleTimers();
+  if (!CURRENT_SESSION) return;
+  idleWarningTimer = setTimeout(showIdleWarning, IDLE_LOGOUT_MS - IDLE_WARNING_LEAD_MS);
+  idleLogoutTimer = setTimeout(performIdleLogout, IDLE_LOGOUT_MS);
+}
+
+// Resets the clock and (only when called explicitly, e.g. by the "I'm still
+// here" button) dismisses an already-open warning.
+function registerIdleActivity() {
+  if (!CURRENT_SESSION) return;
+  hideIdleWarning();
+  scheduleIdleTimers();
+}
+// Throttled so a mousemove/scroll burst doesn't reschedule timers dozens of
+// times a second - activity is only "counted" at most once every 2 seconds.
+// Deliberately a no-op once the warning modal is already showing: it covers
+// the whole page and blocks interaction with everything behind it, so the
+// only thing left to click IS the "I'm still here" button - but the mouse
+// still has to travel across the screen to reach it, and ambient
+// mousemove/scroll events along the way must not silently dismiss the
+// warning before that explicit click lands (confirmed with Playwright: a
+// plain hover-then-click sequence fires a mousemove right over the button
+// first, which used to hide the modal out from under the click). Requiring
+// the explicit button click is also the more correct security behavior
+// anyway - incidental mouse jitter (a bumped desk, a monitor vibrating)
+// shouldn't be able to silently cancel a security-driven idle warning.
+let lastIdleActivityAt = 0;
+function onIdleActivityEvent() {
+  if (!document.getElementById("idle-warning-modal").classList.contains("hidden")) return;
+  const now = Date.now();
+  if (now - lastIdleActivityAt < 2000) return;
+  lastIdleActivityAt = now;
+  registerIdleActivity();
+}
+["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"].forEach((evt) => {
+  document.addEventListener(evt, onIdleActivityEvent, { passive: true });
+});
+// A background tab brought back to the front (or a laptop woken from sleep)
+// re-checks activity immediately, rather than the idle clock having kept
+// running invisibly the whole time it was hidden.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) onIdleActivityEvent();
+});
+document.getElementById("idle-warning-stay-btn").addEventListener("click", () => {
+  lastIdleActivityAt = Date.now();
+  registerIdleActivity();
 });
 
 // --------------------------------------------------------------- loading --
