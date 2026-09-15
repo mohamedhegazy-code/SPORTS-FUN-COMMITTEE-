@@ -327,6 +327,58 @@ function ensureDbFile() {
 }
 ensureDbFile();
 
+// Default Terms & Conditions text (bilingual) - see the termsAndConditions
+// block inside readDb() below. Editable afterward by an admin from
+// Settings -> Terms & Conditions (PUT /api/admin/terms); this is only the
+// starting text for a deploy that has never touched it. Drafted to cover
+// the two things the committee asked for: the member is responsible for
+// the accuracy of their own data, and agrees it may be shared with the
+// committee (the platform's admins/staff) for running the club's
+// activities - not a substitute for the committee's own legal review.
+const DEFAULT_TERMS_AR = `الشروط والأحكام - منصة ماي أهلاوي
+
+مرحبًا بك في منصة "ماي أهلاوي"، المنصة الإلكترونية للتسجيل في فعاليات لجنة الرياضة الترفيهية بالنادي الأهلي - التجمع الخامس. باستخدامك لهذه المنصة أو إنشائك لحساب عضوية عليها، فإنك توافق على الشروط والأحكام التالية:
+
+1. دقة البيانات ومسؤولية العضو
+يلتزم العضو بإدخال بيانات صحيحة ودقيقة ومحدّثة عند التسجيل (رقم العضوية، الاسم، رقم الهاتف، البريد الإلكتروني، وأي بيانات أخرى يُطلب إدخالها)، ويتحمل وحده كامل المسؤولية عن أي معلومات غير صحيحة أو غير مكتملة أو قديمة يقوم بإدخالها أو الإبقاء عليها، بما في ذلك أي أثر يترتب على ذلك في التسجيل بالفعاليات أو احتساب النقاط أو التواصل معه.
+
+2. مشاركة البيانات مع اللجنة
+يوافق العضو على أن بيانات حسابه (بياناته الشخصية، سجل تسجيله وحضوره في الفعاليات، رصيد ومسيرة نقاطه، وأي بيانات أخرى ذات صلة) قد تُعرض وتُشارَك مع أعضاء لجنة الرياضة الترفيهية (الإداريين والمشرفين المخوَّلين على المنصة) وذلك حصرًا للأغراض الإدارية والتنظيمية المرتبطة بتشغيل الفعاليات والبطولات وإدارة نظام النقاط والتواصل مع الأعضاء، ولن تُستخدم بياناته لأي غرض تجاري أو تُشارَك مع أي جهة خارج نطاق عمل اللجنة.
+
+3. حماية بيانات الدخول
+يلتزم العضو بالحفاظ على سرية كلمة المرور الخاصة بحسابه وعدم مشاركتها مع أي شخص آخر، ويتحمل مسؤولية أي نشاط يتم من خلال حسابه.
+
+4. استخدام المنصة
+يلتزم العضو باستخدام المنصة للأغراض المخصصة لها فقط، وعدم إدخال بيانات لأشخاص آخرين دون علمهم أو موافقتهم (باستثناء أفراد الأسرة الذين يقوم بتسجيلهم كتابعين على حسابه الخاص).
+
+5. تحديث الشروط والأحكام
+يجوز للجنة تحديث هذه الشروط والأحكام من وقت لآخر بما يتناسب مع تطوّر المنصة وخدماتها. عند إجراء أي تحديث جوهري، سيُطلب من جميع الأعضاء - الحاليين والجدد - مراجعة النص المُحدَّث والموافقة عليه مجددًا قبل متابعة استخدام المنصة.
+
+6. الإقرار بالموافقة
+بإنشاء حساب على المنصة، أو بالضغط على "أوافق" عند ظهور نص مُحدَّث، يُقر العضو بأنه قرأ هذه الشروط والأحكام وفهمها ووافق عليها بالكامل.`;
+
+const DEFAULT_TERMS_EN = `Terms & Conditions - MyAhlawy Platform
+
+Welcome to MyAhlawy, the online registration platform for the Sports Entertainment Committee at Al Ahly Club - Fifth Settlement. By using this platform or creating a membership account on it, you agree to the following terms:
+
+1. Data accuracy and member responsibility
+The member is responsible for entering accurate, correct, and up-to-date information when registering (membership number, name, phone number, email, and any other requested details), and bears sole responsibility for any incorrect, incomplete, or outdated information they enter or leave on file, including any effect this has on event registration, points calculation, or being contacted.
+
+2. Sharing data with the committee
+The member agrees that their account data (personal details, event registration and attendance history, points balance and history, and any other related data) may be viewed and shared with members of the Sports Entertainment Committee (the platform's authorized admins and staff), strictly for administrative purposes related to running events and tournaments, managing the points system, and communicating with members. This data will not be used for any commercial purpose or shared with any party outside the committee's work.
+
+3. Protecting login details
+The member must keep their account password confidential and must not share it with anyone else, and is responsible for any activity carried out through their account.
+
+4. Using the platform
+The member agrees to use the platform only for its intended purposes, and not to enter data for other people without their knowledge or consent (except for family members they register as dependents on their own account).
+
+5. Updating these terms
+The committee may update these Terms & Conditions from time to time as the platform and its services evolve. Following any material update, every member - existing and new - will be asked to review and re-accept the updated text before continuing to use the platform.
+
+6. Acknowledgment of agreement
+By creating an account on the platform, or by clicking "I Agree" when an updated version is shown, the member acknowledges that they have read, understood, and fully agree to these Terms & Conditions.`;
+
 function readDb() {
   const db = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
   db.staffAccounts = db.staffAccounts || {};
@@ -358,6 +410,13 @@ function readDb() {
   // (dependents) existed.
   for (const key of Object.keys(db.members || {})) {
     if (!Array.isArray(db.members[key].dependents)) db.members[key].dependents = [];
+    // Terms & Conditions acceptance: a member who signed up before this
+    // feature existed has never accepted anything, so they default to
+    // version 0 - always behind the real db.termsAndConditions.version
+    // (which starts at 1), so the login gate below correctly asks them to
+    // review and accept once, the same as any existing member would after
+    // the committee updates the text.
+    if (typeof db.members[key].termsAcceptedVersion !== "number") db.members[key].termsAcceptedVersion = 0;
   }
   db.nextIds = db.nextIds || {};
   db.nextIds.dependent = db.nextIds.dependent || 1;
@@ -448,6 +507,25 @@ function readDb() {
     db.landingPage.sections = known.map((s) => ({ key: s.key, enabled: s.key === "events" ? true : !!s.enabled }));
   }
   db.sessions = db.sessions || {};
+  // Terms & Conditions: bilingual text every member must accept - once at
+  // sign-up, and again whenever the committee edits it (see PUT
+  // /api/admin/terms, which bumps `version`). A member's own
+  // termsAcceptedVersion (see above) is compared against this version to
+  // decide whether the app should show them a blocking re-accept gate.
+  // Starts at version 1 with sensible default text covering data accuracy
+  // and sharing with the committee, so a deploy that's never touched this
+  // still has real, effective terms rather than a blank version 0.
+  db.termsAndConditions = db.termsAndConditions || {};
+  if (typeof db.termsAndConditions.version !== "number") db.termsAndConditions.version = 1;
+  if (typeof db.termsAndConditions.textEn !== "string") {
+    db.termsAndConditions.textEn = DEFAULT_TERMS_EN;
+  }
+  if (typeof db.termsAndConditions.textAr !== "string") {
+    db.termsAndConditions.textAr = DEFAULT_TERMS_AR;
+  }
+  if (typeof db.termsAndConditions.updatedAt !== "string") {
+    db.termsAndConditions.updatedAt = new Date().toISOString();
+  }
   return db;
 }
 // Where rolling safety-net snapshots of db.json are kept - see backupDbFile()
@@ -764,12 +842,17 @@ function balanceSnapshot(db, membershipNumber) {
 // Member sign-up: creates the member's account (and profile) in one step.
 app.post("/api/auth/signup", async (req, res) => {
   const db = readDb();
-  const { membershipNumber, name, password, familyGroup, phone, email } = req.body;
+  const { membershipNumber, name, password, familyGroup, phone, email, agreeTerms } = req.body;
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
   }
   if (String(password).length < 6) {
     return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
+  // Mirrors the required checkbox on the sign-up form - re-checked here too
+  // so a direct API call can't skip agreeing to the Terms & Conditions.
+  if (agreeTerms !== true) {
+    return res.status(400).json({ error: "You must agree to the Terms & Conditions to create an account" });
   }
   // Optional - only a light shape check (not full RFC validation) so a
   // genuine typo like "ahmed@gmail" is caught without rejecting anything
@@ -801,6 +884,10 @@ app.post("/api/auth/signup", async (req, res) => {
     // passwordHash would have 409'd above), whether it's a brand-new member
     // or someone claiming a profile the committee pre-loaded for them.
     accountCreatedAt: new Date().toISOString(),
+    // Agreeing to the required checkbox above (validated) counts as
+    // accepting whichever Terms & Conditions version is current right now.
+    termsAcceptedVersion: db.termsAndConditions.version,
+    termsAcceptedAt: new Date().toISOString(),
   };
   writeDb(db);
 
@@ -947,6 +1034,21 @@ app.post("/api/me/recovery-pin", requireMember, async (req, res) => {
   }
   writeDb(db);
   res.json({ ok: true, hasRecoveryPin: !!member.recoveryPinHash });
+});
+
+// Records the logged-in member's acceptance of whatever Terms & Conditions
+// version is current right now - called both right after sign-up (the
+// required checkbox there already implies this, see /api/auth/signup) and
+// from the blocking "Terms have been updated" gate an existing member sees
+// when their own termsAcceptedVersion is behind db.termsAndConditions.version
+// (e.g. after an admin edits the text - see PUT /api/admin/terms below).
+app.post("/api/me/accept-terms", requireMember, (req, res) => {
+  const db = req.db;
+  const member = req.member;
+  member.termsAcceptedVersion = db.termsAndConditions.version;
+  member.termsAcceptedAt = new Date().toISOString();
+  writeDb(db);
+  res.json({ member: publicMember(member) });
 });
 
 // Any staff role (not just admin) can protect their own account this way.
@@ -1510,6 +1612,31 @@ app.get("/api/community-stats", (req, res) => {
     .sort((a, b) => b.balance - a.balance)
     .slice(0, 5);
   res.json({ totalMembers, eventsHeld, topEarners });
+});
+
+// -------------------------------------------------------------------------
+// TERMS & CONDITIONS
+// -------------------------------------------------------------------------
+// Bilingual text a member must accept - at sign-up, and again whenever the
+// committee changes it (this endpoint always bumps `version`, so every
+// existing member's own termsAcceptedVersion falls behind and the frontend's
+// blocking re-accept gate shows the next time they sign in - see
+// applyMaybeShowTermsGate() in app.js). Read side is folded into
+// GET /api/settings, same pattern as landing-page content below.
+app.put("/api/admin/terms", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const { textEn, textAr } = req.body;
+  if (!textEn || !textEn.trim() || !textAr || !textAr.trim()) {
+    return res.status(400).json({ error: "Both the English and Arabic terms text are required" });
+  }
+  db.termsAndConditions = {
+    textEn: textEn.trim(),
+    textAr: textAr.trim(),
+    version: db.termsAndConditions.version + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  writeDb(db);
+  res.json({ termsAndConditions: db.termsAndConditions });
 });
 
 // -------------------------------------------------------------------------
@@ -2631,6 +2758,7 @@ app.get("/api/settings", (req, res) => {
     pointsVisibleToMembers: db.settings.pointsVisibleToMembers,
     theme: themePayload(db),
     landingPage: db.landingPage,
+    terms: db.termsAndConditions,
   });
 });
 

@@ -502,6 +502,107 @@ function applySettingsToUI() {
   if (toggle) toggle.checked = show;
   applyThemeToUI();
   applyLandingPageToUI();
+  populateTermsAdminForm();
+}
+
+// -------------------------------------------------------- terms & conditions --
+// Bilingual text a member accepts at sign-up and again whenever the
+// committee edits it (see PUT /api/admin/terms in server.js, which bumps
+// SETTINGS.terms.version). Rendered in whichever language is currently
+// active, same bilingual(en, ar) fallback used for About/Hero text.
+function termsText() {
+  const terms = SETTINGS && SETTINGS.terms;
+  if (!terms) return "";
+  return bilingual(terms.textEn, terms.textAr);
+}
+// Keeps the admin's Terms & Conditions textareas in sync with server truth -
+// runs every time settings are (re)loaded, same pattern as
+// populateThemeAdminForm()/populateLandingAdminForms().
+function populateTermsAdminForm() {
+  const terms = SETTINGS && SETTINGS.terms;
+  const arField = document.getElementById("terms-text-ar");
+  if (!terms || !arField) return;
+  arField.value = terms.textAr || "";
+  document.getElementById("terms-text-en").value = terms.textEn || "";
+  const meta = document.getElementById("terms-admin-meta");
+  if (meta) {
+    const updated = terms.updatedAt ? new Date(terms.updatedAt).toLocaleString(currentLang === "ar" ? "ar-EG" : "en-GB") : "";
+    meta.textContent = `${t("termsVersionLabel")}: ${terms.version} · ${t("termsLastUpdated")}: ${updated}`;
+  }
+}
+document.getElementById("terms-save-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("terms-admin-msg");
+  const textAr = document.getElementById("terms-text-ar").value.trim();
+  const textEn = document.getElementById("terms-text-en").value.trim();
+  if (!textAr || !textEn) {
+    highlightMissingFields(["terms-text-ar", "terms-text-en"]);
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  try {
+    const result = await api("/api/admin/terms", { method: "PUT", body: JSON.stringify({ textEn, textAr }) });
+    SETTINGS = { ...SETTINGS, terms: result.termsAndConditions };
+    populateTermsAdminForm();
+    showMsg(msg, t("termsSaved"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+});
+
+// One shared modal, two modes:
+//  - "view": closeable, opened from the sign-up screen's Terms & Conditions
+//    link so a prospective member can read it before checking the box.
+//  - "gate": non-dismissible, shown to an already-logged-in member whose own
+//    termsAcceptedVersion is behind SETTINGS.terms.version (see
+//    applyMaybeShowTermsGate(), called from updateUIForSession()) - e.g.
+//    right after the committee edits the text. Only closes once they click
+//    "I Agree", which records acceptance server-side.
+function openTermsModal(mode) {
+  document.getElementById("terms-modal-body").textContent = termsText();
+  document.getElementById("terms-modal-close").classList.toggle("hidden", mode === "gate");
+  document.getElementById("terms-gate-intro").classList.toggle("hidden", mode !== "gate");
+  document.getElementById("terms-agree-btn").classList.toggle("hidden", mode !== "gate");
+  document.getElementById("terms-modal").classList.remove("hidden");
+}
+function closeTermsModal() {
+  document.getElementById("terms-modal").classList.add("hidden");
+}
+document.getElementById("terms-modal-close").addEventListener("click", closeTermsModal);
+document.getElementById("su-terms-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openTermsModal("view");
+});
+document.getElementById("terms-agree-btn").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/me/accept-terms", { method: "POST" });
+    if (CURRENT_SESSION && CURRENT_SESSION.type === "member") CURRENT_SESSION.member = result.member;
+    closeTermsModal();
+  } catch (err) {
+    // Session likely died in the meantime - handleSessionExpired() (wired
+    // into api()'s error path) already surfaces this; nothing extra to do.
+  }
+});
+// True once the gate is open for the current session, so a re-render (e.g.
+// another updateUIForSession() call from an unrelated settings refresh)
+// doesn't repeatedly yank focus back to an already-open modal.
+let TERMS_GATE_OPEN = false;
+function applyMaybeShowTermsGate() {
+  const isMember = CURRENT_SESSION && CURRENT_SESSION.type === "member";
+  const terms = SETTINGS && SETTINGS.terms;
+  if (!isMember || !terms) {
+    TERMS_GATE_OPEN = false;
+    return;
+  }
+  const accepted = CURRENT_SESSION.member.termsAcceptedVersion || 0;
+  if (accepted < terms.version) {
+    if (!TERMS_GATE_OPEN) {
+      TERMS_GATE_OPEN = true;
+      openTermsModal("gate");
+    }
+  } else if (TERMS_GATE_OPEN) {
+    TERMS_GATE_OPEN = false;
+    closeTermsModal();
+  }
 }
 
 // ------------------------------------------------------------ landing page --
@@ -804,6 +905,8 @@ function updateUIForSession() {
   } else {
     document.getElementById("admin-chat-badge").classList.add("hidden");
   }
+
+  applyMaybeShowTermsGate();
 }
 
 document.getElementById("session-logout").addEventListener("click", async () => {
@@ -1381,6 +1484,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const familyGroup = document.getElementById("su-family").value.trim();
   const phone = document.getElementById("su-phone").value.trim();
   const email = document.getElementById("su-email").value.trim();
+  const agreeTerms = document.getElementById("su-agree-terms").checked;
   const msg = document.getElementById("su-msg");
   if (!membershipNumber || !name || !password) {
     highlightMissingFields(["su-membership", "su-name", "su-password"]);
@@ -1391,10 +1495,15 @@ document.getElementById("su-submit").addEventListener("click", async () => {
     showMsg(msg, t("errPasswordShort"), false);
     return;
   }
+  if (!agreeTerms) {
+    highlightMissingFields(["su-agree-terms"]);
+    showMsg(msg, t("errMustAcceptTerms"), false);
+    return;
+  }
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, email }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, email, agreeTerms }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;

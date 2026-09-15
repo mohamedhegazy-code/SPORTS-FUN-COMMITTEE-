@@ -679,6 +679,22 @@ const I18N = {
     mgmtClearEvents: "Clear all",
     mgmtNoEventsSelected: "No events selected — use \"Select all\" above to show them.",
     mgmtFilterAlsoAppliesToTournaments: "This also filters the Tournament activity table below.",
+    // Terms & Conditions: shown at sign-up, re-shown as a blocking gate to an
+    // existing member whose accepted version is behind the current one, and
+    // editable by admins from Settings.
+    termsTitle: "Terms & Conditions",
+    agreeToTermsPrefix: "I agree to the",
+    errMustAcceptTerms: "Please agree to the Terms & Conditions to continue.",
+    termsGateIntro: "We've updated our Terms & Conditions. Please review and accept to keep using MyAhlawy.",
+    btnIAgreeTerms: "I Agree",
+    fieldTermsEn: "Terms text (English)",
+    fieldTermsAr: "Terms text (Arabic)",
+    termsAdminHint: "Saving this updates the version shown to everyone — every member will be asked to review and re-accept it the next time they sign in.",
+    termsVersionLabel: "Current version",
+    termsLastUpdated: "Last updated",
+    btnSaveTerms: "Save Terms & Conditions",
+    termsSaved: "Terms & Conditions updated — members will be asked to re-accept.",
+    btnViewTerms: "View",
   },
   ar: {
     appTitle: "ماي أهلاوي — التسجيل الإلكتروني ونظام النقاط",
@@ -1360,6 +1376,19 @@ const I18N = {
     mgmtClearEvents: "إلغاء التحديد",
     mgmtNoEventsSelected: "لم يتم تحديد أي فعالية — استخدم \"تحديد الكل\" أعلاه لعرضها.",
     mgmtFilterAlsoAppliesToTournaments: "هذا التحديد يُطبَّق أيضاً على جدول نشاط البطولات أدناه.",
+    termsTitle: "الشروط والأحكام",
+    agreeToTermsPrefix: "أوافق على",
+    errMustAcceptTerms: "يرجى الموافقة على الشروط والأحكام للمتابعة.",
+    termsGateIntro: "قمنا بتحديث الشروط والأحكام. يرجى المراجعة والموافقة لمتابعة استخدام ماي أهلاوي.",
+    btnIAgreeTerms: "أوافق",
+    fieldTermsEn: "نص الشروط (بالإنجليزية)",
+    fieldTermsAr: "نص الشروط (بالعربية)",
+    termsAdminHint: "حفظ هذا النص يُحدّث الإصدار المعروض للجميع — سيُطلب من كل عضو مراجعته والموافقة عليه مجددًا عند تسجيل الدخول التالي.",
+    termsVersionLabel: "الإصدار الحالي",
+    termsLastUpdated: "آخر تحديث",
+    btnSaveTerms: "حفظ الشروط والأحكام",
+    termsSaved: "تم تحديث الشروط والأحكام — سيُطلب من الأعضاء الموافقة عليها مجددًا.",
+    btnViewTerms: "عرض",
   },
 };
 
