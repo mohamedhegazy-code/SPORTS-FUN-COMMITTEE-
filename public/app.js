@@ -508,12 +508,37 @@ function applySettingsToUI() {
 // -------------------------------------------------------- terms & conditions --
 // Bilingual text a member accepts at sign-up and again whenever the
 // committee edits it (see PUT /api/admin/terms in server.js, which bumps
-// SETTINGS.terms.version). Rendered in whichever language is currently
-// active, same bilingual(en, ar) fallback used for About/Hero text.
-function termsText() {
+// SETTINGS.terms.version). Unlike other bilingual content (About/Hero, which
+// follow bilingual(en, ar) and show only whichever language is currently
+// active), the terms modal always shows BOTH languages - English first, then
+// Arabic - regardless of the site's current language toggle, so acceptance
+// is never gated on which language a member happens to be browsing in.
+function renderTermsModalBody() {
+  const container = document.getElementById("terms-modal-body");
+  container.innerHTML = "";
   const terms = SETTINGS && SETTINGS.terms;
-  if (!terms) return "";
-  return bilingual(terms.textEn, terms.textAr);
+  if (!terms) return;
+
+  const labelStyle = "font-size:0.7rem;font-weight:700;letter-spacing:0.06em;color:var(--muted);margin-bottom:4px;";
+
+  const enLabel = document.createElement("div");
+  enLabel.textContent = "EN";
+  enLabel.style.cssText = labelStyle;
+  const enText = document.createElement("div");
+  enText.textContent = terms.textEn || "";
+  enText.style.cssText = "direction:ltr;text-align:left;";
+
+  const divider = document.createElement("hr");
+  divider.style.cssText = "margin:14px 0;border:none;border-top:1px solid rgba(0,0,0,0.12);";
+
+  const arLabel = document.createElement("div");
+  arLabel.textContent = "AR";
+  arLabel.style.cssText = labelStyle;
+  const arText = document.createElement("div");
+  arText.textContent = terms.textAr || "";
+  arText.style.cssText = "direction:rtl;text-align:right;";
+
+  container.append(enLabel, enText, divider, arLabel, arText);
 }
 // Keeps the admin's Terms & Conditions textareas in sync with server truth -
 // runs every time settings are (re)loaded, same pattern as
@@ -558,7 +583,7 @@ document.getElementById("terms-save-btn").addEventListener("click", async () => 
 //    right after the committee edits the text. Only closes once they click
 //    "I Agree", which records acceptance server-side.
 function openTermsModal(mode) {
-  document.getElementById("terms-modal-body").textContent = termsText();
+  renderTermsModalBody();
   document.getElementById("terms-modal-close").classList.toggle("hidden", mode === "gate");
   document.getElementById("terms-gate-intro").classList.toggle("hidden", mode !== "gate");
   document.getElementById("terms-agree-btn").classList.toggle("hidden", mode !== "gate");
