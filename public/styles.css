@@ -315,13 +315,23 @@ button.danger {
 }
 button.danger:hover { background: #fdeaea; }
 button.secondary {
+  /* Shape (padding/border-radius/font-size/font-weight/margin-top) is
+     deliberately identical to button.primary/button.danger below, so a
+     primary and a secondary action sitting side by side (e.g. "Save
+     recovery PIN" + "Remove recovery PIN") always render at the same
+     size - only the fill (solid vs outline) tells them apart. Compact
+     inline-row buttons (delete/reorder icons, etc.) opt into the smaller
+     .small modifier further down instead of relying on this base rule
+     being small. */
+  margin-top: 16px;
   background: #fff;
   border: 1px solid var(--red);
   color: var(--red);
-  padding: 8px 14px;
+  padding: 11px 20px;
   border-radius: 7px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .msg { margin-top: 14px; padding: 10px 12px; border-radius: 7px; font-size: 0.88rem; display: none; white-space: pre-line; }
@@ -900,7 +910,7 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 .activity-row .activity-name { flex: 1; font-weight: 600; }
 .activity-row .activity-time { font-weight: 400; color: var(--muted); font-size: 0.78rem; }
 .activity-row .capacity-badge { margin: 0; }
-button.secondary.small { padding: 5px 10px; font-size: 0.75rem; }
+button.secondary.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 
 /* -------------------------------------------------------------- tournament -- */
