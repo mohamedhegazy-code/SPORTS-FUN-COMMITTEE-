@@ -1,4 +1,5 @@
 let CURRENT_SESSION = null; // null | { type: 'member', member } | { type: 'staff', staff }
+let CURRENT_BALANCE = null; // the signed-in member's own points balance, kept in sync by loadMyBalance() - used to grey out redemption-ladder tiers the member can't afford yet
 let LADDER_DATA = null;
 let EVENTS_DATA = [];
 let NEWS_DATA = [];
@@ -856,12 +857,14 @@ function updateUIForSession() {
 
   // My Points tab
   document.getElementById("mp-signed-out").classList.toggle("hidden", isMember);
+  document.getElementById("mp-nickname-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-family-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-registrations-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-chat-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-security-card").classList.toggle("hidden", !isMember);
   if (isMember) {
     renderRecoveryPinStatus("mp-recovery-pin-status", CURRENT_SESSION.member.hasRecoveryPin);
+    renderNicknameStatus();
     if (pointsVisible()) {
       document.getElementById("mp-points-disabled-note").classList.add("hidden");
       loadMyBalance();
@@ -1647,13 +1650,48 @@ function renderLadder() {
     )
     .join("");
 }
+// Redemption requests must start from the ladder's own tier-1 minimum
+// (1500 points by default, admin-editable) and follow the hierarchy from
+// there - a tier is only requestable once the member's balance actually
+// covers it (enforced server-side too, see POST /api/redeem). Options the
+// member can't yet afford are shown but disabled, with how many more
+// points they need, so the dropdown itself makes the rule visible instead
+// of only failing after the fact.
 function renderTierDropdown() {
   if (!LADDER_DATA) return;
   const sel = document.getElementById("mp-tier");
+  const balance = Number.isFinite(CURRENT_BALANCE) ? CURRENT_BALANCE : 0;
   sel.innerHTML = LADDER_DATA.ladder
-    .map((tier) => `<option value="${tier.tier}">${fmt(tier.pointsRequired)} — ${ladderLabel(tier)}</option>`)
+    .map((tier) => {
+      const reachable = balance >= tier.pointsRequired;
+      const label = reachable
+        ? `${fmt(tier.pointsRequired)} — ${ladderLabel(tier)}`
+        : `${fmt(tier.pointsRequired)} — ${ladderLabel(tier)} (${fmt(tier.pointsRequired - balance)} ${t("tierPointsNeededSuffix")})`;
+      return `<option value="${tier.tier}"${reachable ? "" : " disabled"}>${label}</option>`;
+    })
     .join("");
+  // Default the dropdown to the lowest tier the member can actually afford
+  // (rather than always tier 1, which may itself be disabled) so the button
+  // below starts in a sensible, submittable state whenever one exists.
+  const firstReachable = LADDER_DATA.ladder.find((tier) => balance >= tier.pointsRequired);
+  if (firstReachable) sel.value = String(firstReachable.tier);
+  updateRedeemButtonState();
 }
+
+// The "Submit redemption request" button must be inactive whenever the
+// currently selected tier isn't one the member's balance actually covers -
+// this is the belt to the disabled-<option> braces above: a member can't
+// submit a request for a reward they can't afford, whether that's because
+// every tier is out of reach (balance below the 1,500-point tier-1 floor)
+// or a stale selection is left over from before their balance changed.
+function updateRedeemButtonState() {
+  const sel = document.getElementById("mp-tier");
+  const btn = document.getElementById("mp-redeem");
+  if (!sel || !btn) return;
+  const selected = sel.options[sel.selectedIndex];
+  btn.disabled = !selected || selected.disabled;
+}
+document.getElementById("mp-tier").addEventListener("change", updateRedeemButtonState);
 
 // ------------------------------------------------------------- sign up/in --
 document.getElementById("su-submit").addEventListener("click", async () => {
@@ -1907,8 +1945,11 @@ async function loadMyBalance() {
     document.getElementById("mp-pool-note").textContent = snap.familyPooled
       ? `${t("familyPooled")} (${snap.poolMembers.map((m) => m.name).join(", ")})`
       : t("individualTracking");
+    CURRENT_BALANCE = snap.balance;
+    renderTierDropdown();
   } catch (e) {
     document.getElementById("mp-result").classList.add("hidden");
+    CURRENT_BALANCE = null;
   }
 }
 
@@ -1917,13 +1958,15 @@ document.getElementById("mp-redeem").addEventListener("click", async () => {
   const tier = document.getElementById("mp-tier").value;
   if (!tier) return;
   try {
-    const result = await api("/api/redeem", {
+    // The server now rejects a request for a tier the current balance
+    // doesn't cover (see POST /api/redeem) - the disabled options in this
+    // dropdown already prevent picking one, this is just the confirming
+    // success path.
+    await api("/api/redeem", {
       method: "POST",
       body: JSON.stringify({ tier }),
     });
-    let text = t("okRedeemRequested");
-    if (!result.sufficientBalance) text += " " + t("warnInsufficient");
-    showMsg(msg, text, result.sufficientBalance);
+    showMsg(msg, t("okRedeemRequested"), true);
     loadMyBalance();
   } catch (e) {
     showMsg(msg, e.message, false);
@@ -2020,7 +2063,17 @@ function renderFamilyList() {
     ? deps
         .map(
           (d) => `<div class="family-item" data-dep-id="${d.id}">
-        <span class="name">${escapeAttr(d.name)}</span>
+        <span class="name">${escapeAttr(d.name)}${
+            d.relationship ? ` <span class="fam-rel-badge">(${escapeAttr(d.relationship)})</span>` : ""
+          }</span>
+        <span class="fam-rel-edit">
+          <input class="fam-rel-input" data-dep-id="${d.id}" value="${escapeAttr(d.relationship || "")}" placeholder="${t(
+            "fieldRelationship"
+          )}" />
+          <button class="secondary fam-rel-save" data-dep-id="${d.id}" style="margin-top:0;padding:6px 10px;font-size:0.75rem;">${t(
+            "btnSaveRelationship"
+          )}</button>
+        </span>
         <button class="secondary fam-remove" data-dep-id="${d.id}" style="margin-top:0;padding:6px 12px;font-size:0.8rem;">${t("btnRemove")}</button>
       </div>`
         )
@@ -2039,10 +2092,32 @@ function renderFamilyList() {
       }
     });
   });
+  // Lets a member identify who each family member actually is - tag (or
+  // retag) the relationship on a dependent added before this feature
+  // existed, without deleting and re-adding them (which would disconnect
+  // them from any registrations already made in their name).
+  wrap.querySelectorAll(".fam-rel-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const input = wrap.querySelector(`.fam-rel-input[data-dep-id="${btn.dataset.depId}"]`);
+      const msg = document.getElementById("fam-msg");
+      try {
+        const result = await api("/api/me/dependents/" + btn.dataset.depId, {
+          method: "PUT",
+          body: JSON.stringify({ relationship: input.value.trim() }),
+        });
+        CURRENT_SESSION.member.dependents = result.dependents;
+        showMsg(msg, t("famRelationshipSaved"), true);
+        renderFamilyList();
+      } catch (e) {
+        showMsg(document.getElementById("fam-msg"), e.message, false);
+      }
+    });
+  });
 }
 
 document.getElementById("fam-add").addEventListener("click", async () => {
   const nameInput = document.getElementById("fam-name");
+  const relInput = document.getElementById("fam-relationship");
   const name = nameInput.value.trim();
   const msg = document.getElementById("fam-msg");
   if (!name) {
@@ -2053,10 +2128,11 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   try {
     const result = await api("/api/me/dependents", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, relationship: relInput.value.trim() }),
     });
     CURRENT_SESSION.member.dependents = result.dependents;
     nameInput.value = "";
+    relInput.value = "";
     showMsg(msg, t("famAdded"), true);
     renderFamilyList();
     renderAttendeesChecklist();
@@ -6016,6 +6092,56 @@ document.getElementById("staff-pin-clear").addEventListener("click", () =>
     endpoint: "/api/staff/recovery-pin",
   })
 );
+
+// -------------------------------------------------------------- nickname --
+// A member-chosen display name (unique across the whole platform, enforced
+// server-side in POST /api/me/nickname) shown instead of their real name on
+// public-facing surfaces only - the community leaderboard and public
+// tournament pages/big-screen/live-matches. See publicDisplayName() in
+// server.js for exactly where it does and doesn't apply.
+function renderNicknameStatus() {
+  const el = document.getElementById("mp-nickname-status");
+  if (!el) return;
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const nickname = member && member.nickname;
+  el.textContent = nickname ? `${t("nicknameStatusSet")} "${nickname}"` : t("nicknameStatusNotSet");
+  const input = document.getElementById("mp-nickname-input");
+  if (input && document.activeElement !== input) input.value = nickname || "";
+}
+
+document.getElementById("mp-nickname-save").addEventListener("click", async () => {
+  const input = document.getElementById("mp-nickname-input");
+  const msg = document.getElementById("mp-nickname-msg");
+  const nickname = input.value.trim();
+  if (!nickname) {
+    highlightMissingFields(["mp-nickname-input"]);
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  try {
+    const result = await api("/api/me/nickname", { method: "POST", body: JSON.stringify({ nickname }) });
+    CURRENT_SESSION.member.nickname = result.nickname;
+    renderNicknameStatus();
+    showMsg(msg, t("okNicknameSaved"), true);
+  } catch (e) {
+    // The server's 409 "nickname taken" message is shown verbatim - it's
+    // already the exact user-facing wording this feature was asked for.
+    showMsg(msg, e.message, false);
+  }
+});
+
+document.getElementById("mp-nickname-clear").addEventListener("click", async () => {
+  const msg = document.getElementById("mp-nickname-msg");
+  try {
+    await api("/api/me/nickname", { method: "DELETE" });
+    CURRENT_SESSION.member.nickname = "";
+    document.getElementById("mp-nickname-input").value = "";
+    renderNicknameStatus();
+    showMsg(msg, t("okNicknameCleared"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
 
 // --------------------------------------------------- forgot password modal --
 // One shared modal for all three sign-in screens (member Register tab,

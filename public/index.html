@@ -272,6 +272,19 @@
       <div class="msg" id="mp-redeem-msg"></div>
     </div>
 
+    <div class="card hidden" id="mp-nickname-card">
+      <h2 data-i18n="nicknameTitle">Nickname</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="nicknameIntro">Set a nickname to be shown instead of your real name on the community leaderboard and public tournament pages. It must be unique — no two members on the platform can use the same one.</p>
+      <p class="hint-note" id="mp-nickname-status"></p>
+      <label data-i18n="fieldNickname">Nickname</label>
+      <input id="mp-nickname-input" maxlength="24" placeholder="e.g. Ace" />
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button class="primary" id="mp-nickname-save" data-i18n="btnSaveNickname">Save nickname</button>
+        <button class="secondary" id="mp-nickname-clear" data-i18n="btnClearNickname">Remove nickname</button>
+      </div>
+      <div class="msg" id="mp-nickname-msg"></div>
+    </div>
+
     <div class="card hidden" id="mp-family-card">
       <h2 data-i18n="myFamilyTitle">My family</h2>
 
@@ -289,8 +302,9 @@
       <div id="mp-family-list"></div>
       <div class="grid-2" style="align-items:end;">
         <div><label class="required-label" data-i18n="fieldFamilyMemberName">Family member's name</label><input id="fam-name" placeholder="e.g. Sara Ahmed" /></div>
-        <div><button class="secondary" id="fam-add" style="margin-top:10px;" data-i18n="btnAddFamilyMember">Add family member</button></div>
+        <div><label data-i18n="fieldRelationship">Relationship (optional)</label><input id="fam-relationship" placeholder="e.g. Son, Daughter, Spouse" /></div>
       </div>
+      <button class="secondary" id="fam-add" style="margin-top:10px;" data-i18n="btnAddFamilyMember">Add family member</button>
       <div class="msg" id="fam-msg"></div>
     </div>
 

@@ -410,6 +410,11 @@ function readDb() {
   // (dependents) existed.
   for (const key of Object.keys(db.members || {})) {
     if (!Array.isArray(db.members[key].dependents)) db.members[key].dependents = [];
+    // Backward-compatible default for dependents created before the
+    // "identify the family member" relationship label existed.
+    for (const dep of db.members[key].dependents) {
+      if (typeof dep.relationship !== "string") dep.relationship = "";
+    }
     // Terms & Conditions acceptance: a member who signed up before this
     // feature existed has never accepted anything, so they default to
     // version 0 - always behind the real db.termsAndConditions.version
@@ -417,6 +422,13 @@ function readDb() {
     // review and accept once, the same as any existing member would after
     // the committee updates the text.
     if (typeof db.members[key].termsAcceptedVersion !== "number") db.members[key].termsAcceptedVersion = 0;
+    // Nickname: optional, unique-across-the-platform display name a member
+    // can set for themselves (see POST/DELETE /api/me/nickname below) -
+    // shown instead of their real name on public-facing surfaces only
+    // (community leaderboard, public tournament pages/big-screen/live-
+    // matches); admin-facing views always show the real name. Defaults to
+    // unset for every member created before this feature existed.
+    if (typeof db.members[key].nickname !== "string") db.members[key].nickname = "";
   }
   db.nextIds = db.nextIds || {};
   db.nextIds.dependent = db.nextIds.dependent || 1;
@@ -757,6 +769,18 @@ function parseAndVerify(db, code) {
   return { reg };
 }
 
+// A member's own chosen nickname (see POST /api/me/nickname), falling back
+// to their real name when they haven't set one. Only ever used on
+// public-facing surfaces (community leaderboard, public tournament pages,
+// the big-screen display, the live matches board) - admin/staff-facing code
+// always reads member.name directly instead, so staff can always identify
+// who someone actually is.
+function publicDisplayName(db, membershipNumber) {
+  const m = db.members[membershipNumber];
+  if (!m) return "Member";
+  return (m.nickname && m.nickname.trim()) || m.name;
+}
+
 // -------------------------------------------------------- points helpers --
 function ladderTier(db, tier) {
   return db.ladder.find((t) => t.tier === Number(tier));
@@ -879,6 +903,7 @@ app.post("/api/auth/signup", async (req, res) => {
     email: trimmedEmail || (existing ? existing.email : "") || "",
     passwordHash,
     dependents: (existing && existing.dependents) || [],
+    nickname: (existing && existing.nickname) || "",
     createdAt: (existing && existing.createdAt) || new Date().toISOString(),
     // This call is always the actual account-creation moment (a pre-existing
     // passwordHash would have 409'd above), whether it's a brand-new member
@@ -1606,7 +1631,7 @@ app.get("/api/community-stats", (req, res) => {
   const topEarners = Object.keys(db.members)
     .map((membershipNumber) => {
       const snap = balanceSnapshot(db, membershipNumber);
-      return { name: db.members[membershipNumber].name, balance: snap ? snap.balance : 0 };
+      return { name: publicDisplayName(db, membershipNumber), balance: snap ? snap.balance : 0 };
     })
     .filter((m) => m.balance > 0)
     .sort((a, b) => b.balance - a.balance)
@@ -1848,12 +1873,32 @@ app.post("/api/me/dependents", requireMember, (req, res) => {
   const db = req.db;
   const name = (req.body.name || "").trim();
   if (!name) return res.status(400).json({ error: "Name is required" });
+  // Optional relationship label (e.g. "Son", "Daughter", "Spouse", "Parent")
+  // so the primary member can identify who each family member actually is
+  // on the My Family card and on admin/attendance rosters - free text, not
+  // a fixed enum, since real families use varied wording (and Arabic terms).
+  const relationship = (req.body.relationship || "").trim();
   const member = db.members[req.member.membershipNumber];
   member.dependents = member.dependents || [];
-  const dependent = { id: db.nextIds.dependent++, name };
+  const dependent = { id: db.nextIds.dependent++, name, relationship };
   member.dependents.push(dependent);
   writeDb(db);
   res.status(201).json({ dependents: member.dependents });
+});
+
+// Lets a member add/change the relationship label on a dependent added
+// earlier (before this feature existed, or just to fix a typo) without
+// deleting and re-adding them - re-adding would mint a new dependent id and
+// disconnect them from any registrations already made in their name.
+app.put("/api/me/dependents/:id", requireMember, (req, res) => {
+  const db = req.db;
+  const member = db.members[req.member.membershipNumber];
+  const id = Number(req.params.id);
+  const dependent = (member.dependents || []).find((d) => d.id === id);
+  if (!dependent) return res.status(404).json({ error: "No such family member" });
+  if (typeof req.body.relationship === "string") dependent.relationship = req.body.relationship.trim();
+  writeDb(db);
+  res.json({ dependents: member.dependents });
 });
 
 app.delete("/api/me/dependents/:id", requireMember, (req, res) => {
@@ -1863,6 +1908,36 @@ app.delete("/api/me/dependents/:id", requireMember, (req, res) => {
   member.dependents = (member.dependents || []).filter((d) => d.id !== id);
   writeDb(db);
   res.json({ dependents: member.dependents });
+});
+
+// A member-chosen display name, unique across every member on the whole
+// platform (case-insensitive), shown instead of their real name on
+// public-facing surfaces only (community leaderboard, public tournament
+// pages, the big-screen display, the live matches board) - every
+// admin/staff-facing view (Member directory, rosters, check-in, the
+// Management Dashboard) always shows the real name regardless, so staff can
+// always tell who someone actually is.
+app.post("/api/me/nickname", requireMember, (req, res) => {
+  const db = req.db;
+  const nickname = (req.body.nickname || "").trim();
+  if (!nickname) return res.status(400).json({ error: "Nickname is required" });
+  if (nickname.length > 24) return res.status(400).json({ error: "Nickname must be 24 characters or fewer" });
+  const me = req.member.membershipNumber;
+  const nicknameKey = nickname.toLowerCase();
+  const taken = Object.keys(db.members).some(
+    (num) => num !== me && (db.members[num].nickname || "").trim().toLowerCase() === nicknameKey
+  );
+  if (taken) return res.status(409).json({ error: "This nickname has already been taken. Please choose another." });
+  db.members[me].nickname = nickname;
+  writeDb(db);
+  res.json({ nickname });
+});
+
+app.delete("/api/me/nickname", requireMember, (req, res) => {
+  const db = req.db;
+  db.members[req.member.membershipNumber].nickname = "";
+  writeDb(db);
+  res.json({ ok: true });
 });
 
 // Linking family members by club ID is different from dependents above: it
@@ -2276,6 +2351,19 @@ app.post("/api/redeem", requireMember, (req, res) => {
   if (!tierDef) return res.status(400).json({ error: "Invalid tier" });
 
   const snapshot = balanceSnapshot(db, membershipNumber);
+  // A member can only request a reward their current balance actually
+  // covers - the ladder's own tier-1 minimum (1500 by default, admin-
+  // editable) is the floor for any redemption at all, and every tier above
+  // that follows the same rule (a tier-2 request needs the tier-2 points,
+  // not just "more than tier 1"). Previously this was only a client-side
+  // warning shown after the fact - the request still went through and sat
+  // in the admin's Pending queue regardless of balance, which is what this
+  // fix closes.
+  if (snapshot.balance < tierDef.pointsRequired) {
+    return res.status(400).json({
+      error: `You need at least ${tierDef.pointsRequired} points for this reward — your current balance is ${snapshot.balance}.`,
+    });
+  }
   const redemption = {
     id: db.nextIds.redemption++,
     membershipNumber,
@@ -2487,6 +2575,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
     phone,
     passwordHash: null,
     dependents: [],
+    nickname: "",
     // Used by the management dashboard's club-growth chart. Only tracked
     // going forward (added in the same change as that dashboard) - members
     // created before this field existed simply have no createdAt, and the
@@ -2615,6 +2704,7 @@ app.post(
           phone: primaryRow.phone || "",
           passwordHash: null,
           dependents: [],
+          nickname: "",
           createdAt: new Date().toISOString(),
           accountCreatedAt: null,
         };
@@ -2637,7 +2727,7 @@ app.post(
           dependentsSkipped.push({ membershipNumber, name: row.name, reason: "Already a dependent on this account" });
           return;
         }
-        const dependent = { id: db.nextIds.dependent++, name: row.name };
+        const dependent = { id: db.nextIds.dependent++, name: row.name, relationship: "" };
         member.dependents.push(dependent);
         dependentsAdded.push({ membershipNumber, name: row.name, primaryName: member.name });
       });
@@ -2896,7 +2986,20 @@ function findTournament(db, eventId) {
 // (not stored) so someone registering or being removed after tournament
 // creation is automatically reflected. Team-mode entrants ARE stored (teams
 // are a manual grouping the admin defines once).
-function tournamentEntrants(db, t) {
+// `forPublic` (default false) swaps a real member's name for their chosen
+// nickname, if set - used only by the public tournament read (and the
+// pages that build on it: the public tournament page, the big-screen
+// display, the live matches board). A dependent's name is never swapped
+// (dependents don't have their own account/nickname); admin reads always
+// pass forPublic=false (the default) so staff can always see real names.
+function tournamentEntrantName(db, reg, forPublic) {
+  if (!reg) return "Member";
+  if (reg.dependentName) return reg.dependentName;
+  const member = db.members[reg.membershipNumber];
+  if (!member) return "Member";
+  return forPublic ? publicDisplayName(db, reg.membershipNumber) : member.name;
+}
+function tournamentEntrants(db, t, forPublic) {
   if (t.mode === "team") {
     return t.teams.map((team) => ({
       id: team.id,
@@ -2910,30 +3013,26 @@ function tournamentEntrants(db, t) {
       // player - there's no separate roster to show.
       players: team.memberIds.map((regId) => {
         const reg = db.registrations.find((r) => r.id === regId);
-        const member = reg ? db.members[reg.membershipNumber] : null;
-        return reg ? reg.dependentName || (member ? member.name : "Member") : "Member";
+        return tournamentEntrantName(db, reg, forPublic);
       }),
     }));
   }
   return db.registrations
     .filter((r) => r.eventId === t.eventId && !r.waitlisted)
-    .map((r) => {
-      const member = db.members[r.membershipNumber];
-      return {
-        id: "reg" + r.id,
-        label: r.dependentName || (member ? member.name : "Member"),
-        registrationIds: [r.id],
-        players: null,
-      };
-    });
+    .map((r) => ({
+      id: "reg" + r.id,
+      label: tournamentEntrantName(db, r, forPublic),
+      registrationIds: [r.id],
+      players: null,
+    }));
 }
 
 // Keeps seedOrder in sync with whatever tournamentEntrants() currently
 // returns: entrants still present keep their relative order, newly-appeared
 // entrants are appended, entrants no longer present are dropped. Mutates
 // t.seedOrder and returns the (possibly unchanged) entrant list.
-function reconcileSeedOrder(db, t) {
-  const entrants = tournamentEntrants(db, t);
+function reconcileSeedOrder(db, t, forPublic) {
+  const entrants = tournamentEntrants(db, t, forPublic);
   const ids = new Set(entrants.map((e) => e.id));
   const kept = t.seedOrder.filter((id) => ids.has(id));
   const keptSet = new Set(kept);
@@ -3200,8 +3299,8 @@ function computeGroupStandings(group, seedOrder, points) {
 
 // Serializes a tournament for the client, resolving entrant ids to display
 // labels along the way so the frontend never has to cross-reference.
-function serializeTournament(db, t) {
-  const entrants = reconcileSeedOrder(db, t);
+function serializeTournament(db, t, forPublic) {
+  const entrants = reconcileSeedOrder(db, t, forPublic);
   const labelOf = (id) => {
     const e = entrants.find((x) => x.id === id);
     return e ? e.label : t.mode === "team" ? "(removed team)" : "(no longer registered)";
@@ -3230,8 +3329,7 @@ function serializeTournament(db, t) {
   const attendanceList = entrants.flatMap((e) =>
     e.registrationIds.map((regId) => {
       const reg = db.registrations.find((r) => r.id === regId);
-      const member = reg ? db.members[reg.membershipNumber] : null;
-      const name = reg ? reg.dependentName || (member ? member.name : "Member") : "Member";
+      const name = tournamentEntrantName(db, reg, forPublic);
       return {
         registrationId: regId,
         entrantId: e.id,
@@ -3305,7 +3403,12 @@ app.get("/api/tournaments/:eventId", (req, res) => {
   const db = readDb();
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.json({ tournament: null });
-  res.json({ tournament: serializeTournament(db, t) });
+  // forPublic=true: this is the one and only tournament read used by the
+  // public tournament page, the big-screen display, and the live matches
+  // board (see "How to ship future updates" / this feature's summary) -
+  // every other serializeTournament() call site is an admin route and
+  // deliberately leaves this off (defaults to false/real names).
+  res.json({ tournament: serializeTournament(db, t, true) });
 });
 
 app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (req, res) => {

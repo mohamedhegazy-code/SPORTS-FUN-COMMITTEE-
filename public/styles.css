@@ -300,6 +300,8 @@ button.primary {
   font-weight: 600;
 }
 button.primary:hover { background: var(--red-dark); }
+button.primary:disabled, button.primary:disabled:hover { background: var(--red); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.danger {
   margin-top: 16px;
   background: #fff;
@@ -739,9 +741,12 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .family-item, .my-reg-item {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
-  margin-bottom: 8px; background: #fffdf8;
+  margin-bottom: 8px; background: #fffdf8; flex-wrap: wrap;
 }
 .family-item .name { font-weight: 600; }
+.family-item .name .fam-rel-badge { font-weight: 400; color: var(--muted); font-size: 0.85em; }
+.family-item .fam-rel-input { max-width: 140px; margin: 0; padding: 6px 8px; font-size: 0.8rem; }
+.family-item .fam-rel-edit { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 180px; }
 .my-reg-item { flex-wrap: wrap; }
 .my-reg-item .info { flex: 1; min-width: 160px; }
 .my-reg-item .info .name { font-weight: 600; }
