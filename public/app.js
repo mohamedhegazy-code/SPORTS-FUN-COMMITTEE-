@@ -2893,6 +2893,7 @@ async function openAdminEventHub(eventId, label) {
   document.getElementById("hub-checkin-search").value = "";
   document.getElementById("hub-checkin-msg").textContent = "";
   document.getElementById("admin-hub-stats").innerHTML = "";
+  document.getElementById("admin-hub-attendance-breakdown").innerHTML = "";
   document.getElementById("admin-hub-tournament-summary").innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
   document.getElementById("hub-add-member-search").value = "";
   document.getElementById("hub-add-member-results").innerHTML = "";
@@ -2985,6 +2986,36 @@ async function loadHubRoster(preserveMsg) {
       <span class="tourn-summary-badge">${fmt(confirmed)} ${t("colRegistrations")}</span>
       <span class="tourn-summary-badge">${fmt(checkedIn)} / ${fmt(confirmed)} ${t("colCheckedIn")}</span>
     `;
+    // A parent "event day" rolls up every sub-activity's own attendance into
+    // one combined figure here (plus a per-activity breakdown below), so
+    // checking someone in on "Foot volley" is reflected on the "Sports
+    // Entertainment Day" parent's own numbers too, not just its own (usually
+    // empty) direct registrations. See eventHasChildren()'s server-side
+    // comment - the hierarchy is always exactly one level deep.
+    const hasChildren = EVENTS_DATA.some((e) => e.parentEventId === HUB_EVENT_ID);
+    const breakdownEl = document.getElementById("admin-hub-attendance-breakdown");
+    if (hasChildren) {
+      const rollup = await api("/api/admin/events/" + HUB_EVENT_ID + "/attendance-rollup");
+      document.getElementById("admin-hub-stats").innerHTML = `
+        <span class="tourn-summary-badge">${fmt(rollup.combined.confirmedCount)} ${t("colRegistrations")}</span>
+        <span class="tourn-summary-badge">${fmt(rollup.combined.checkedInCount)} / ${fmt(rollup.combined.confirmedCount)} ${t("colCheckedIn")}</span>
+      `;
+      const rows = rollup.children
+        .map(
+          (c) => `<div class="waitlist-row">
+            <span>${escapeAttr(eventLabel(c))}</span>
+            <span class="tourn-summary-badge">${fmt(c.checkedInCount)} / ${fmt(c.confirmedCount)} ${t("colCheckedIn")}</span>
+          </div>`
+        )
+        .join("");
+      breakdownEl.innerHTML = `
+        <p class="hint-note">${escapeAttr(t("hubAttendanceCombinedNote"))}</p>
+        <h4 style="margin:10px 0 6px;font-size:0.82rem;text-transform:uppercase;color:var(--muted);">${escapeAttr(t("hubAttendanceByActivity"))}</h4>
+        ${rows}
+      `;
+    } else {
+      breakdownEl.innerHTML = "";
+    }
   } catch (e) {
     wrap.innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
   }

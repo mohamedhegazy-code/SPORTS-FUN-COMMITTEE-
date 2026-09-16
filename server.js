@@ -2373,6 +2373,42 @@ app.get("/api/admin/dashboard", requireStaffRole(["tournament"]), (req, res) => 
   res.json(rows);
 });
 
+// Attendance rollup for a parent "event day": its own confirmed/checked-in
+// counts (usually zero - eventHasChildren's own comment above notes members
+// register for a specific sub-activity, not the poster event itself, once
+// it has children) combined with every child activity's own counts, plus
+// each child's individual numbers so the admin hub can show both the
+// whole-day combined total and where it came from. The hierarchy is always
+// exactly 2 levels deep (validateParentEventId forbids a child from itself
+// becoming a parent), so this never needs to recurse.
+app.get("/api/admin/events/:eventId/attendance-rollup", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const event = db.events.find((e) => e.id === eventId);
+  if (!event) return res.status(404).json({ error: "Event not found" });
+
+  function countsFor(id) {
+    const regs = db.registrations.filter((r) => r.eventId === id);
+    const confirmed = regs.filter((r) => !r.waitlisted);
+    const checkedIn = confirmed.filter((r) => r.checkedIn);
+    return { confirmedCount: confirmed.length, checkedInCount: checkedIn.length };
+  }
+
+  const own = countsFor(eventId);
+  const children = db.events
+    .filter((e) => e.parentEventId === eventId)
+    .map((e) => ({ eventId: e.id, nameEn: e.nameEn, nameAr: e.nameAr, ...countsFor(e.id) }));
+  const combined = children.reduce(
+    (acc, c) => ({
+      confirmedCount: acc.confirmedCount + c.confirmedCount,
+      checkedInCount: acc.checkedInCount + c.checkedInCount,
+    }),
+    { ...own }
+  );
+
+  res.json({ own, children, combined });
+});
+
 // Lists everyone on an event's waiting list, in join order, so the admin can
 // decide who to promote first if a confirmed spot opens up.
 app.get("/api/admin/events/:eventId/waitlist", requireStaffRole(["tournament"]), (req, res) => {

@@ -137,6 +137,7 @@ main {
 .view.active { display: block; }
 
 .card {
+  position: relative;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -144,11 +145,102 @@ main {
   margin-bottom: 18px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
+/* A slim gold-to-red accent strip along the top of every card, the same
+   two-tone accent the landing page's hero/section system is built on -
+   so every card on every page reads as part of one visual identity, not
+   just the landing page. Drawn on ::before (rather than a real border)
+   so it can carry its own rounded top corners independent of .card's
+   own border-radius, with no layout/overflow side effects. */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0; inset-inline: 0;
+  height: 3px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, var(--gold), var(--red));
+}
 
-.card h2 { margin-top: 0; font-size: 1.05rem; color: var(--red-dark); }
+/* Section headings across every page (not just the landing page) share the
+   landing page's own display-font treatment - the same condensed uppercase
+   face and small gold accent bar used by .section-title on the Events tab -
+   so admin, register, member profile, ladder, tournaments and the gate
+   scanner all read as one system. Arabic has no glyphs in this display
+   font, so RTL titles fall back to the normal body font automatically
+   (same behavior already relied on by .section-title/.hero-banner h2). */
+.card h2 {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 1.1rem;
+  color: var(--red-dark);
+}
+.card h2::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 1em;
+  flex-shrink: 0;
+  background: var(--gold);
+  border-radius: 3px;
+}
 .card h3 { font-size: 0.95rem; color: var(--red-dark); }
-#admin-panel .card h2 { display: flex; align-items: center; gap: 9px; }
 .card-icon { width: 19px; height: 19px; flex-shrink: 0; color: var(--gold); }
+
+/* --------------------------------------------------------- page hero --- */
+/* A compact version of the landing page's own hero banner, reused as the
+   header for every other page (Register, Member Profile, Ladder, Annual
+   Activities, Tournaments, Gate Scanner, Admin) so the whole platform
+   opens with the same branded moment the Events tab already has, not just
+   a plain card title. */
+.page-hero {
+  position: relative;
+  margin-bottom: 22px;
+  padding: 22px 24px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 65%, #3a0000 100%);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.page-hero-icon {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold);
+}
+.page-hero-icon svg { width: 24px; height: 24px; }
+.page-hero-text { min-width: 0; }
+.page-hero-text h2 {
+  margin: 0 0 4px;
+  color: #fff;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  line-height: 1.12;
+  font-size: clamp(1.25rem, 3vw, 1.7rem);
+  text-wrap: balance;
+}
+.page-hero-text p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.85rem;
+  max-width: 560px;
+}
+@media (max-width: 560px) {
+  .page-hero { flex-direction: column; align-items: flex-start; text-align: start; padding: 20px; }
+}
 
 .grid-2 {
   display: grid;
@@ -287,6 +379,7 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 
 .hidden { display: none !important; }
 .admin-lock { text-align: center; padding: 40px 20px; }
+.admin-lock h2 { justify-content: center; }
 
 .warn-note {
   background: #fff4e5; color: #8a5a00; border: 1px solid #f2c98a;
