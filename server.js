@@ -15,7 +15,6 @@ const QRCode = require("qrcode");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
 const {
   Document,
   Packer,
@@ -64,17 +63,54 @@ const PORT = process.env.PORT || 3000;
 // below). 15 attempts per 10 minutes is generous enough that a real person
 // mistyping their password a few times in a row never notices it, while
 // still shutting down a scripted guessing attempt.
-const loginRateLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 15,
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Only WRONG passwords count toward the limit - several staff logging in
-  // successfully back-to-back from the same venue WiFi on event day (all
-  // sharing one public IP) must never get accidentally locked out.
-  skipSuccessfulRequests: true,
-  message: { error: "Too many login attempts. Please wait a few minutes and try again." },
-});
+//
+// This is a custom Map-based counter (same shape as the recovery-PIN
+// lockout further down), not express-rate-limit's `skipSuccessfulRequests`
+// option - that option increments its counter the instant a request
+// ARRIVES and only backs it out once the response is known to have
+// succeeded. Under a genuine burst of concurrent logins (many members
+// signing in at once, e.g. right as gates open, or several sharing one
+// venue WiFi's public IP), a pile of legitimate, still-in-flight requests
+// can exceed `max` before any of them have had a chance to succeed and
+// decrement - confirmed directly under load-test conditions, where 300
+// concurrent logins from one IP tripped 429s almost immediately and
+// blocked real logins, not attackers. Counting explicitly, only on a
+// confirmed wrong-password/PIN response, makes that impossible regardless
+// of how many correct logins are in flight at once.
+const loginFailuresByIp = new Map();
+const LOGIN_LOCKOUT_MAX_ATTEMPTS = 15;
+const LOGIN_LOCKOUT_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_LOCKOUT_MESSAGE = { error: "Too many login attempts. Please wait a few minutes and try again." };
+function checkLoginLockout(ip) {
+  const rec = loginFailuresByIp.get(ip);
+  if (!rec) return false;
+  if (Date.now() - rec.first > LOGIN_LOCKOUT_WINDOW_MS) {
+    loginFailuresByIp.delete(ip);
+    return false;
+  }
+  return rec.count >= LOGIN_LOCKOUT_MAX_ATTEMPTS;
+}
+function recordLoginFailure(ip) {
+  const rec = loginFailuresByIp.get(ip);
+  if (!rec || Date.now() - rec.first > LOGIN_LOCKOUT_WINDOW_MS) {
+    loginFailuresByIp.set(ip, { count: 1, first: Date.now() });
+  } else {
+    rec.count++;
+  }
+}
+// Called as the first line of each guarded endpoint below (login,
+// staff-login, forgot-password, staff-forgot-password) rather than wired
+// in as Express middleware, since it needs no request-body parsing and
+// this keeps the 429 response identical to what express-rate-limit sent
+// before. Returns true (having already sent the 429) if this IP is
+// currently locked out.
+function loginRateLimitCheck(req, res) {
+  if (checkLoginLockout(req.ip)) {
+    res.status(429).json(LOGIN_LOCKOUT_MESSAGE);
+    return true;
+  }
+  return false;
+}
 
 const app = express();
 // Railway (and most hosts) put the app behind a reverse proxy that
@@ -1069,12 +1105,14 @@ app.post("/api/auth/signup", async (req, res) => {
   res.status(201).json({ member: publicMember(db.members[membershipNumber]) });
 });
 
-app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
   const { membershipNumber, password } = req.body;
   const db = readDb();
   const member = db.members[membershipNumber];
   const passwordOk = member && member.passwordHash && (await bcrypt.compare(password || "", member.passwordHash));
   if (!passwordOk) {
+    recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect membership number or password" });
   }
   // Re-read right before the write: nothing above this line has mutated
@@ -1086,6 +1124,7 @@ app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   const freshDb = readDb();
   const freshMember = freshDb.members[membershipNumber];
   if (!freshMember) {
+    recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect membership number or password" });
   }
   logActivity(freshDb, { actorType: "member", actorId: membershipNumber, actorName: freshMember.name, action: "member_login" });
@@ -1095,18 +1134,21 @@ app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   res.json({ member: publicMember(freshMember) });
 });
 
-app.post("/api/auth/staff-login", loginRateLimiter, async (req, res) => {
+app.post("/api/auth/staff-login", async (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
   const { username, password } = req.body;
   const db = readDb();
   const staff = db.staffAccounts[username];
   const passwordOk = staff && staff.passwordHash && (await bcrypt.compare(password || "", staff.passwordHash));
   if (!passwordOk) {
+    recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect username or password" });
   }
   // Re-read right before the write - see the comment in POST /api/auth/login.
   const freshDb = readDb();
   const freshStaff = freshDb.staffAccounts[username];
   if (!freshStaff) {
+    recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect username or password" });
   }
   logActivity(freshDb, { actorType: "staff", actorId: username, actorName: freshStaff.name, action: "staff_login", details: freshStaff.role });
@@ -1272,14 +1314,13 @@ app.post("/api/staff/members/:membershipNumber/reset-password", requireStaffRole
 // set a PIN still falls back to the existing admin-mediated reset above.
 const MIN_PIN_LENGTH = 6;
 // Per-account lockout for recovery-PIN guessing, on top of the existing
-// per-IP loginRateLimiter below - an attacker rotating IPs (or attacking
-// from a shared venue WiFi where skipSuccessfulRequests keeps that IP
-// limiter from ever tripping) could otherwise still grind through a short
-// PIN's keyspace against one specific known membership number/username.
+// per-IP loginRateLimitCheck() above - an attacker rotating IPs could
+// otherwise still grind through a short PIN's keyspace against one
+// specific known membership number/username.
 // Keyed by "member:<id>"/"staff:<username>" so both share one Map safely.
-// In-memory only, matching how the login rate limiter itself is in-memory
-// (express-rate-limit's default store) - a restart clears lockouts, an
-// acceptable tradeoff for a club-scale app with no other datastore.
+// In-memory only, matching the login-failure Map above - a restart clears
+// lockouts, an acceptable tradeoff for a club-scale app with no other
+// datastore.
 const pinAttempts = new Map();
 const PIN_LOCKOUT_MAX_ATTEMPTS = 5;
 const PIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
@@ -1371,7 +1412,8 @@ app.post("/api/staff/recovery-pin", requireStaffRole("staff"), async (req, res) 
 // login - a wrong PIN counts against the same per-IP throttle as a wrong
 // password, so brute-forcing a short PIN this way is no easier than
 // brute-forcing a password.
-app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
+app.post("/api/auth/forgot-password", async (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
   const db = readDb();
   const { membershipNumber, pin, newPassword } = req.body;
   const lockKey = `member:${membershipNumber}`;
@@ -1389,6 +1431,7 @@ app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
   }
   if (!(await bcrypt.compare(pin || "", member.recoveryPinHash))) {
     recordPinFailure(lockKey);
+    recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect club member ID or recovery PIN" });
   }
   clearPinFailures(lockKey);
@@ -1411,7 +1454,8 @@ app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
   res.json({ ok: true, member: publicMember(freshMember) });
 });
 
-app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) => {
+app.post("/api/auth/staff-forgot-password", async (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
   const db = readDb();
   const { username, pin, newPassword } = req.body;
   const lockKey = `staff:${username}`;
@@ -1429,6 +1473,7 @@ app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) =
   }
   if (!(await bcrypt.compare(pin || "", staff.recoveryPinHash))) {
     recordPinFailure(lockKey);
+    recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect username or recovery PIN" });
   }
   clearPinFailures(lockKey);
