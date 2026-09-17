@@ -342,7 +342,7 @@ const I18N = {
     // Landing page customization
     adminTabLanding: "Landing Page",
     landingSectionsTitle: "Landing page sections",
-    landingSectionsIntro: "Control what shows on the Events landing page, and in what order. The events listing always stays visible — that's the whole point of the site.",
+    landingSectionsIntro: "Control what shows on the Events landing page, and in what order. Members can still register from the Register tab even if you hide the events listing here.",
     landingSecHero: "Hero banner",
     landingSecEvents: "Events listing",
     landingSecAnnual: "Annual activities",
@@ -1123,7 +1123,7 @@ const I18N = {
     // تخصيص الصفحة الرئيسية
     adminTabLanding: "الصفحة الرئيسية",
     landingSectionsTitle: "أقسام الصفحة الرئيسية",
-    landingSectionsIntro: "تحكّم في الأقسام الظاهرة على صفحة الفعاليات الرئيسية، وترتيبها. تبقى قائمة الفعاليات ظاهرة دائماً — فهي جوهر الموقع.",
+    landingSectionsIntro: "تحكّم في الأقسام الظاهرة على صفحة الفعاليات الرئيسية، وترتيبها. يمكن للأعضاء التسجيل من تبويب التسجيل حتى لو أخفيت قائمة الفعاليات هنا.",
     landingSecHero: "لافتة الترحيب",
     landingSecEvents: "قائمة الفعاليات",
     landingSecAnnual: "الأنشطة السنوية",
