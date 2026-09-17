@@ -35,6 +35,20 @@ const DB_PATH = path.join(__dirname, "data", "db.json");
 // Used to sign each registration's QR code so it can't be forged or edited.
 // Change this (set QR_SECRET env var) before any real event.
 const QR_SECRET = process.env.QR_SECRET || "ahlawy-qr-secret-change-me";
+if (!process.env.QR_SECRET) {
+  // Loud, impossible-to-miss warning rather than a silent insecure default -
+  // this fallback value is public (it's right here in the source), so any
+  // QR code issued while it's in effect could be forged. This deliberately
+  // does NOT crash the process: QR_SECRET is read on every check-in, and a
+  // hard failure here would take the whole app down if this ever ran
+  // somewhere the env var genuinely isn't set yet (e.g. mid-setup), which is
+  // worse than a visible warning for a value that's easy to fix in place.
+  console.error("!".repeat(70));
+  console.error("WARNING: QR_SECRET environment variable is not set.");
+  console.error("Using a public, insecure fallback value - QR codes issued while");
+  console.error("this is in effect can be forged. Set QR_SECRET before real use.");
+  console.error("!".repeat(70));
+}
 // Only used once, the very first time the app runs, to create the first
 // admin account (see bootstrapAdmin below). Change these before first run
 // in any real deployment, or just change the password immediately after
@@ -100,6 +114,47 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+
+// -------------------------------------------------------------- CSRF -----
+// Double-submit-cookie CSRF protection, layered on top of (not instead of)
+// the session cookie's existing sameSite:"lax" mitigation. Every response
+// makes sure a random, non-httpOnly "csrfToken" cookie is set - readable by
+// this site's own JS (unlike the httpOnly session cookie), but NOT readable
+// by a different-origin page's JS. Every state-changing request must echo
+// that same value back in an X-CSRF-Token header (see api() in app.js). A
+// malicious cross-site page can make the browser send the session cookie
+// automatically, but it cannot read the csrfToken cookie to also set the
+// matching header, so a forged cross-site POST/PUT/DELETE fails this check
+// even though the session cookie rode along. No native <form> submissions
+// exist anywhere in this app (confirmed by grep) - every mutation already
+// goes through fetch, so there is nothing else that needs to carry this
+// header.
+const CSRF_COOKIE = "csrfToken";
+const CSRF_HEADER = "x-csrf-token";
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+app.use((req, res, next) => {
+  let token = req.cookies[CSRF_COOKIE];
+  if (!token) {
+    token = crypto.randomBytes(24).toString("hex");
+    res.cookie(CSRF_COOKIE, token, {
+      httpOnly: false,
+      sameSite: "lax",
+      secure: req.secure,
+      maxAge: SESSION_TTL_MS,
+    });
+  }
+  req.csrfToken = token;
+  next();
+});
+app.use((req, res, next) => {
+  if (CSRF_SAFE_METHODS.has(req.method)) return next();
+  const headerToken = req.get(CSRF_HEADER);
+  if (!headerToken || headerToken !== req.csrfToken) {
+    return res.status(403).json({ error: "Your session could not be verified. Please refresh the page and try again." });
+  }
+  next();
+});
+
 // no-store (not just no-cache) so a redeployed app.js/index.html/etc. is
 // never served stale from the browser's disk cache after an update -
 // Express's default static headers (ETag only, no explicit Cache-Control)
@@ -183,7 +238,15 @@ const brandingLogoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, BRANDING_UPLOADS_DIR),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname || "").toLowerCase();
-    const safeExt = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"].includes(ext) ? ext : ".png";
+    // Deliberately no .svg here: an SVG can carry an embedded <script>/event
+    // handler, and this file is served back same-origin at /uploads/... - a
+    // raster-only allowlist means there's nothing in the file format itself
+    // that could execute, on top of (not instead of) the CSP already in
+    // place. Anything not on this list is coerced to .png rather than
+    // rejected outright, matching the pre-existing image/* mimetype check
+    // below (a non-image with a spoofed image/* Content-Type still can't
+    // end up with a script-capable extension).
+    const safeExt = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext) ? ext : ".png";
     cb(null, `logo-${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
   },
 });
@@ -191,7 +254,9 @@ const uploadLogo = multer({
   storage: brandingLogoStorage,
   limits: { fileSize: 3 * 1024 * 1024 }, // 3MB is plenty for a logo
   fileFilter: (req, file, cb) => {
-    if (!/^image\//.test(file.mimetype)) return cb(new Error("Only image files are allowed"));
+    if (!/^image\//.test(file.mimetype) || file.mimetype === "image/svg+xml") {
+      return cb(new Error("Only JPG, PNG, WEBP, or GIF image files are allowed"));
+    }
     cb(null, true);
   },
 });
@@ -729,16 +794,30 @@ function requireStaffRole(role) {
 function bootstrapAdmin() {
   const db = readDb();
   if (Object.keys(db.staffAccounts).length > 0) return;
+  // If no real password was configured via ADMIN_BOOTSTRAP_PASSWORD, don't
+  // fall back to the well-known "change-me-now" default (a public string
+  // sitting right in this source file, guessable by anyone) - generate a
+  // random one-time password instead and print it once. An operator-
+  // provided password (env var set) is never printed at all, so a real
+  // secret never ends up sitting in log history.
+  const usingGeneratedPassword = !process.env.ADMIN_BOOTSTRAP_PASSWORD;
+  const password = usingGeneratedPassword ? crypto.randomBytes(12).toString("base64url") : BOOTSTRAP_ADMIN_PASSWORD;
   db.staffAccounts[BOOTSTRAP_ADMIN_USERNAME] = {
     username: BOOTSTRAP_ADMIN_USERNAME,
     name: "Committee Admin",
     role: "admin",
-    passwordHash: bcrypt.hashSync(BOOTSTRAP_ADMIN_PASSWORD, 10),
+    passwordHash: bcrypt.hashSync(password, 10),
   };
   writeDb(db);
   console.log("No staff accounts existed yet - created a first admin account:");
   console.log(`  username: ${BOOTSTRAP_ADMIN_USERNAME}`);
-  console.log(`  password: ${BOOTSTRAP_ADMIN_PASSWORD}`);
+  if (usingGeneratedPassword) {
+    console.log("  ADMIN_BOOTSTRAP_PASSWORD was not set, so a random one-time password was generated:");
+    console.log(`  password: ${password}`);
+    console.log("  Copy this now - it will not be shown again.");
+  } else {
+    console.log("  password: (set via ADMIN_BOOTSTRAP_PASSWORD env var - not shown in logs)");
+  }
   console.log("  Log in on the Admin tab, then change this password right away.");
 }
 
@@ -1039,7 +1118,42 @@ app.post("/api/staff/members/:membershipNumber/reset-password", requireStaffRole
 // /api/auth/staff-forgot-password (staff/admin) by proving they know both
 // the account id AND that PIN - no admin involved. An account that never
 // set a PIN still falls back to the existing admin-mediated reset above.
-const MIN_PIN_LENGTH = 4;
+const MIN_PIN_LENGTH = 6;
+// Per-account lockout for recovery-PIN guessing, on top of the existing
+// per-IP loginRateLimiter below - an attacker rotating IPs (or attacking
+// from a shared venue WiFi where skipSuccessfulRequests keeps that IP
+// limiter from ever tripping) could otherwise still grind through a short
+// PIN's keyspace against one specific known membership number/username.
+// Keyed by "member:<id>"/"staff:<username>" so both share one Map safely.
+// In-memory only, matching how the login rate limiter itself is in-memory
+// (express-rate-limit's default store) - a restart clears lockouts, an
+// acceptable tradeoff for a club-scale app with no other datastore.
+const pinAttempts = new Map();
+const PIN_LOCKOUT_MAX_ATTEMPTS = 5;
+const PIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+function checkPinLockout(key) {
+  const rec = pinAttempts.get(key);
+  if (!rec) return null;
+  if (Date.now() - rec.first > PIN_LOCKOUT_WINDOW_MS) {
+    pinAttempts.delete(key);
+    return null;
+  }
+  if (rec.count >= PIN_LOCKOUT_MAX_ATTEMPTS) {
+    return Math.ceil((PIN_LOCKOUT_WINDOW_MS - (Date.now() - rec.first)) / 60000);
+  }
+  return null;
+}
+function recordPinFailure(key) {
+  const rec = pinAttempts.get(key);
+  if (!rec || Date.now() - rec.first > PIN_LOCKOUT_WINDOW_MS) {
+    pinAttempts.set(key, { count: 1, first: Date.now() });
+  } else {
+    rec.count++;
+  }
+}
+function clearPinFailures(key) {
+  pinAttempts.delete(key);
+}
 
 app.post("/api/me/recovery-pin", requireMember, async (req, res) => {
   const db = req.db;
@@ -1104,6 +1218,13 @@ app.post("/api/staff/recovery-pin", requireStaffRole("staff"), async (req, res) 
 app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
   const db = readDb();
   const { membershipNumber, pin, newPassword } = req.body;
+  const lockKey = `member:${membershipNumber}`;
+  const lockedForMinutes = checkPinLockout(lockKey);
+  if (lockedForMinutes) {
+    return res.status(429).json({
+      error: `Too many incorrect PIN attempts for this account. Please try again in about ${lockedForMinutes} minute(s), or contact the committee.`,
+    });
+  }
   const member = db.members[membershipNumber];
   if (!member || !member.recoveryPinHash) {
     return res.status(400).json({
@@ -1111,8 +1232,10 @@ app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
     });
   }
   if (!(await bcrypt.compare(pin || "", member.recoveryPinHash))) {
+    recordPinFailure(lockKey);
     return res.status(401).json({ error: "Incorrect club member ID or recovery PIN" });
   }
+  clearPinFailures(lockKey);
   if (!newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: "New password must be at least 6 characters" });
   }
@@ -1126,6 +1249,13 @@ app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
 app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) => {
   const db = readDb();
   const { username, pin, newPassword } = req.body;
+  const lockKey = `staff:${username}`;
+  const lockedForMinutes = checkPinLockout(lockKey);
+  if (lockedForMinutes) {
+    return res.status(429).json({
+      error: `Too many incorrect PIN attempts for this account. Please try again in about ${lockedForMinutes} minute(s), or ask an admin to reset your password.`,
+    });
+  }
   const staff = db.staffAccounts[username];
   if (!staff || !staff.recoveryPinHash) {
     return res.status(400).json({
@@ -1133,8 +1263,10 @@ app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) =
     });
   }
   if (!(await bcrypt.compare(pin || "", staff.recoveryPinHash))) {
+    recordPinFailure(lockKey);
     return res.status(401).json({ error: "Incorrect username or recovery PIN" });
   }
+  clearPinFailures(lockKey);
   if (!newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: "New password must be at least 6 characters" });
   }

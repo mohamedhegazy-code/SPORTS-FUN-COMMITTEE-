@@ -62,14 +62,23 @@ function handleSessionExpired() {
     if (el) showMsg(el, t("errSessionExpired"), false);
   });
 }
+// Reads the "csrfToken" cookie the server sets on every response (see the
+// CSRF middleware in server.js) - a plain, non-httpOnly cookie meant to be
+// read by this site's own JS and echoed back as a header on every mutating
+// request, proving the request actually came from a page that can read
+// this origin's cookies (a cross-site forger can't).
+function getCsrfToken() {
+  const match = document.cookie.match(/(?:^|;\s*)csrfToken=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
 async function api(path, opts = {}) {
   // FormData bodies (photo uploads) must NOT get a manual Content-Type - the
   // browser needs to set its own multipart boundary, or the server can't
   // parse the upload at all.
   const isFormData = typeof FormData !== "undefined" && opts.body instanceof FormData;
   const headers = isFormData
-    ? opts.headers || {}
-    : Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    ? Object.assign({ "X-CSRF-Token": getCsrfToken() }, opts.headers || {})
+    : Object.assign({ "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() }, opts.headers || {});
   const res = await fetch(path, Object.assign({ credentials: "include" }, opts, { headers }));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -5850,7 +5859,7 @@ async function loadRedemptionsTable() {
       ${list
         .map(
           (r) => `<tr>
-        <td>${r.member ? r.member.name : r.membershipNumber}<br/><small style="color:var(--muted);">${t("mpCurrentBalance")}: ${fmt(r.currentBalance)}</small></td>
+        <td>${escapeAttr(r.member ? r.member.name : r.membershipNumber)}<br/><small style="color:var(--muted);">${t("mpCurrentBalance")}: ${fmt(r.currentBalance)}</small></td>
         <td>${r.reward ? ladderLabel(r.reward) : r.tier}</td>
         <td>${fmt(r.pointsCost)}</td>
         <td>${r.approvalLevel}</td>
@@ -5895,8 +5904,8 @@ async function loadStaffAccountsTable() {
       ${list
         .map(
           (s) => `<tr>
-        <td>${s.username}</td>
-        <td>${s.name}</td>
+        <td>${escapeAttr(s.username)}</td>
+        <td>${escapeAttr(s.name)}</td>
         <td>${
           s.role === "admin"
             ? t("roleAdmin")
@@ -6335,7 +6344,7 @@ async function handleScannedCode(data) {
     const res = await fetch("/api/checkin", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
       body: JSON.stringify({ code: data }),
     });
     const result = await res.json();
