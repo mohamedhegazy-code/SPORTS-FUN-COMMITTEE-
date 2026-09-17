@@ -1058,11 +1058,22 @@ app.post("/api/auth/change-password", async (req, res) => {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
   account.passwordHash = await bcrypt.hash(newPassword, 10);
+  // A staff account created with a committee-chosen starting password (see
+  // POST /api/staff/accounts) is required to set its own before it can do
+  // anything else - this is the moment that requirement is satisfied.
+  if (session.type === "staff") account.mustChangePassword = false;
   writeDb(db);
-  res.json({ ok: true });
+  res.json({ ok: true, staff: session.type === "staff" ? publicStaff(account) : undefined });
 });
 
 // Admin-only: onboard more staff/admin accounts (replaces the old shared-key model).
+// The admin picks this account's initial password themselves (there's no
+// email/SMS to send a generated one through), so it's shared with the new
+// staff member directly - mustChangePassword flags it as a stand-in they
+// need to replace with one only they know. The frontend enforces this as a
+// non-dismissible gate right after that account's first login (see
+// applyMaybeShowMustChangePasswordGate() in app.js); it's cleared below the
+// moment /api/auth/change-password succeeds for that account.
 app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   const db = readDb();
   const { username, password, name, role } = req.body;
@@ -1071,7 +1082,13 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   }
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
   if (db.staffAccounts[username]) return res.status(409).json({ error: "That username is already taken" });
-  db.staffAccounts[username] = { username, name, role, passwordHash: await bcrypt.hash(password, 10) };
+  db.staffAccounts[username] = {
+    username,
+    name,
+    role,
+    passwordHash: await bcrypt.hash(password, 10),
+    mustChangePassword: true,
+  };
   writeDb(db);
   res.status(201).json({ staff: publicStaff(db.staffAccounts[username]) });
 });

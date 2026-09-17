@@ -1052,6 +1052,26 @@
   </div>
 </div>
 
+<!-- Mandatory first-login password change: shown to a staff/tournament/
+     management account whose password was set by the committee admin (see
+     mustChangePassword in server.js, POST /api/staff/accounts) and never
+     replaced with one only that person knows. Deliberately no close (X)
+     button and no way to reach any other tab while it's open - see
+     applyMaybeShowMustChangePasswordGate() in app.js, called from the same
+     updateUIForSession() chokepoint as every other session-gated view. -->
+<div class="modal-overlay hidden" id="must-change-password-modal" style="z-index:210;">
+  <div class="modal-box" style="max-width:420px;">
+    <h2 data-i18n="mustChangePasswordTitle">You need to set a new password</h2>
+    <p style="color:var(--muted);font-size:0.9rem;" data-i18n="mustChangePasswordIntro">This account's password was set by the committee. Choose a new one that only you know before continuing.</p>
+    <label class="required-label" data-i18n="fieldOldPassword">Current password</label>
+    <input id="mcp-old" type="password" />
+    <label class="required-label" data-i18n="fieldNewPassword">New password</label>
+    <input id="mcp-new" type="password" placeholder="At least 6 characters" />
+    <button class="primary" id="mcp-submit" style="margin-top:10px;" data-i18n="btnChangePassword">Change password</button>
+    <div class="msg" id="mcp-msg"></div>
+  </div>
+</div>
+
 <!-- Idle/inactivity auto-logout: shown ~1 minute before an inactive
      member/staff/admin session is force-logged-out for security (see the
      idle-auto-logout block in app.js). Deliberately no close (X) button -

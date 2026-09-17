@@ -664,6 +664,65 @@ function applyMaybeShowTermsGate() {
   }
 }
 
+// A staff/tournament/management account whose password was set by the
+// committee admin (see mustChangePassword in server.js, POST
+// /api/staff/accounts) must replace it with one only they know before doing
+// anything else - this covers the whole "Tournament Manager gets handed a
+// shared starting password" case, not just Admin (the only role that
+// previously had any self-service way to change its own password at all,
+// via the Settings tab's "Change my password" card - see updateUIForSession()
+// for how that tab is hidden from every other staff role). Mirrors
+// applyMaybeShowTermsGate() just above: a non-dismissible modal that stays
+// open until the server confirms the password actually changed.
+let MUST_CHANGE_PASSWORD_GATE_OPEN = false;
+function applyMaybeShowMustChangePasswordGate() {
+  const isStaff = CURRENT_SESSION && CURRENT_SESSION.type === "staff";
+  const mustChange = isStaff && CURRENT_SESSION.staff.mustChangePassword;
+  const modal = document.getElementById("must-change-password-modal");
+  if (mustChange) {
+    if (!MUST_CHANGE_PASSWORD_GATE_OPEN) {
+      MUST_CHANGE_PASSWORD_GATE_OPEN = true;
+      document.getElementById("mcp-old").value = "";
+      document.getElementById("mcp-new").value = "";
+      document.getElementById("mcp-msg").classList.remove("show");
+      modal.classList.remove("hidden");
+    }
+  } else if (MUST_CHANGE_PASSWORD_GATE_OPEN) {
+    MUST_CHANGE_PASSWORD_GATE_OPEN = false;
+    modal.classList.add("hidden");
+  }
+}
+document.getElementById("mcp-submit").addEventListener("click", async () => {
+  const oldPassword = document.getElementById("mcp-old").value;
+  const newPassword = document.getElementById("mcp-new").value;
+  const msg = document.getElementById("mcp-msg");
+  if (!oldPassword || !newPassword) {
+    highlightMissingFields(["mcp-old", "mcp-new"]);
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  if (newPassword.length < 6) {
+    showMsg(msg, t("errPasswordShort"), false);
+    return;
+  }
+  try {
+    const result = await api("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+    if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && result.staff) {
+      CURRENT_SESSION.staff = result.staff;
+    }
+    document.getElementById("mcp-old").value = "";
+    document.getElementById("mcp-new").value = "";
+    // Closes the gate and, since CURRENT_SESSION.staff.mustChangePassword is
+    // now false, reveals whatever this role's normal view actually is.
+    updateUIForSession();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
 // ------------------------------------------------------------ landing page --
 // Renders the admin-customized hero text, About block, gallery, sponsors,
 // and section order/visibility onto the public Events landing page. Called
@@ -968,6 +1027,7 @@ function updateUIForSession() {
   }
 
   applyMaybeShowTermsGate();
+  applyMaybeShowMustChangePasswordGate();
 
   // Idle auto-logout timers track CURRENT_SESSION, not the individual
   // login/logout call sites - every one of them already calls
@@ -6074,7 +6134,7 @@ async function saveRecoveryPin({ passwordId, pinId, msgId, statusId, sessionKey,
     showMsg(msg, t("errFillFields"), false);
     return;
   }
-  if (pin.length < 4) {
+  if (pin.length < 6) {
     showMsg(msg, t("errRecoveryPinShort"), false);
     return;
   }
