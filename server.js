@@ -329,7 +329,8 @@ const eventMediaFileFilter = (req, file, cb) => {
 // on disk whenever a new one replaces it, so re-uploads don't pile up.
 const uploadEventCoverMedia = multer({
   storage: eventMediaStorage,
-  limits: { fileSize: 60 * 1024 * 1024, files: 2 },
+  // Cover photo + cover video + the event's own WhatsApp group QR image.
+  limits: { fileSize: 60 * 1024 * 1024, files: 3 },
   fileFilter: eventMediaFileFilter,
 });
 const uploadEventRecapMedia = multer({
@@ -352,7 +353,7 @@ const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 // tab's own card grid (see startRegisterFlow()/renderRegisterEventsGrid()
 // in app.js) as an always-available way to sign up even with this section
 // hidden from the landing page, so there's no dead end if an admin does.
-const LANDING_SECTION_KEYS = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors"];
+const LANDING_SECTION_KEYS = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors", "whatsapp"];
 
 const brandingLogoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, BRANDING_UPLOADS_DIR),
@@ -574,6 +575,11 @@ function readDb() {
     descriptionAr: "",
     coverPhoto: "",
     coverVideo: "",
+    // The WhatsApp group QR code for this specific event/activity - an
+    // uploaded image (the club exports these from WhatsApp itself), shown to
+    // anyone viewing the event so they can scan it to join that event's
+    // group. Independent of coverPhoto/coverVideo.
+    whatsappQr: "",
     minCapacity: null,
     maxCapacity: null,
     startTime: null,
@@ -742,6 +748,20 @@ function readDb() {
   if (typeof db.landingPage.about.bodyEn !== "string") db.landingPage.about.bodyEn = "";
   if (typeof db.landingPage.about.bodyAr !== "string") db.landingPage.about.bodyAr = "";
   if (typeof db.landingPage.about.photo !== "string") db.landingPage.about.photo = "";
+  // WhatsApp Community block: the club's existing WhatsApp Community already
+  // has its own native invite QR code / join link - this just displays it
+  // (an uploaded image, since that's what the admin actually has) alongside
+  // a short bilingual title/instructions. Same shape and upload pattern as
+  // "about" above. `link` is kept for future-proofing (an admin who later
+  // gets the real invite URL can fill it in as a tappable "Join" button
+  // alongside the QR image) even though only the QR image is used today.
+  db.landingPage.whatsapp = db.landingPage.whatsapp || {};
+  if (typeof db.landingPage.whatsapp.titleEn !== "string") db.landingPage.whatsapp.titleEn = "Join our WhatsApp Community";
+  if (typeof db.landingPage.whatsapp.titleAr !== "string") db.landingPage.whatsapp.titleAr = "انضم إلى مجتمعنا على واتساب";
+  if (typeof db.landingPage.whatsapp.bodyEn !== "string") db.landingPage.whatsapp.bodyEn = "";
+  if (typeof db.landingPage.whatsapp.bodyAr !== "string") db.landingPage.whatsapp.bodyAr = "";
+  if (typeof db.landingPage.whatsapp.qrImage !== "string") db.landingPage.whatsapp.qrImage = "";
+  if (typeof db.landingPage.whatsapp.link !== "string") db.landingPage.whatsapp.link = "";
   db.landingPage.gallery = db.landingPage.gallery || [];
   db.landingPage.sponsors = db.landingPage.sponsors || [];
   db.nextIds.galleryPhoto = db.nextIds.galleryPhoto || 1;
@@ -764,6 +784,7 @@ function readDb() {
     { key: "spotlight", enabled: true },
     { key: "gallery", enabled: false },
     { key: "sponsors", enabled: false },
+    { key: "whatsapp", enabled: false },
   ];
   if (!Array.isArray(db.landingPage.sections)) {
     db.landingPage.sections = defaultLandingSections;
@@ -1961,6 +1982,7 @@ app.post(
   uploadEventCoverMedia.fields([
     { name: "coverPhoto", maxCount: 1 },
     { name: "coverVideo", maxCount: 1 },
+    { name: "whatsappQr", maxCount: 1 },
   ]),
   (req, res) => {
     const db = req.db;
@@ -2002,6 +2024,7 @@ app.post(
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     const coverPhotoFile = req.files && req.files.coverPhoto && req.files.coverPhoto[0];
     const coverVideoFile = req.files && req.files.coverVideo && req.files.coverVideo[0];
+    const whatsappQrFile = req.files && req.files.whatsappQr && req.files.whatsappQr[0];
     const event = {
       id: db.nextIds.event++,
       nameEn,
@@ -2020,6 +2043,7 @@ app.post(
       allowMultipleActivities: String(allowMultipleActivities) === "true",
       coverPhoto: coverPhotoFile ? `/uploads/events/${coverPhotoFile.filename}` : "",
       coverVideo: coverVideoFile ? `/uploads/events/${coverVideoFile.filename}` : "",
+      whatsappQr: whatsappQrFile ? `/uploads/events/${whatsappQrFile.filename}` : "",
       recap: { descriptionEn: "", descriptionAr: "", photos: [], video: "" },
     };
     db.events.push(event);
@@ -2045,6 +2069,7 @@ app.put(
   uploadEventCoverMedia.fields([
     { name: "coverPhoto", maxCount: 1 },
     { name: "coverVideo", maxCount: 1 },
+    { name: "whatsappQr", maxCount: 1 },
   ]),
   (req, res) => {
     const db = req.db;
@@ -2106,6 +2131,7 @@ app.put(
     event.allowMultipleActivities = String(allowMultipleActivities) === "true";
     const coverPhotoFile = req.files && req.files.coverPhoto && req.files.coverPhoto[0];
     const coverVideoFile = req.files && req.files.coverVideo && req.files.coverVideo[0];
+    const whatsappQrFile = req.files && req.files.whatsappQr && req.files.whatsappQr[0];
     if (coverPhotoFile) event.coverPhoto = `/uploads/events/${coverPhotoFile.filename}`;
     if (coverVideoFile) {
       // A video is much bigger than any photo this app handles - delete the
@@ -2115,6 +2141,11 @@ app.put(
       const oldVideo = event.coverVideo;
       event.coverVideo = `/uploads/events/${coverVideoFile.filename}`;
       if (oldVideo) fs.unlink(path.join(EVENT_UPLOADS_DIR, path.basename(oldVideo)), () => {});
+    }
+    if (whatsappQrFile) {
+      const oldQr = event.whatsappQr;
+      event.whatsappQr = `/uploads/events/${whatsappQrFile.filename}`;
+      if (oldQr) fs.unlink(path.join(EVENT_UPLOADS_DIR, path.basename(oldQr)), () => {});
     }
     logActivity(db, {
       actorType: "staff",
@@ -2472,6 +2503,32 @@ app.put("/api/admin/landing/about", requireStaffRole("admin"), uploadEventPhoto.
   };
   writeDb(db);
   res.json({ about: db.landingPage.about });
+});
+
+app.put("/api/admin/landing/whatsapp", requireStaffRole("admin"), uploadEventPhoto.single("qrImage"), (req, res) => {
+  const db = req.db;
+  const { titleEn, titleAr, bodyEn, bodyAr, link, removeQrImage } = req.body;
+  const oldQrImage = db.landingPage.whatsapp.qrImage;
+  db.landingPage.whatsapp = {
+    titleEn: (titleEn || "").trim() || db.landingPage.whatsapp.titleEn,
+    titleAr: (titleAr || "").trim(),
+    bodyEn: (bodyEn || "").trim(),
+    bodyAr: (bodyAr || "").trim(),
+    link: (link || "").trim(),
+    qrImage: req.file
+      ? `/uploads/events/${req.file.filename}`
+      : removeQrImage === "true"
+      ? ""
+      : db.landingPage.whatsapp.qrImage,
+  };
+  // QR images get replaced (a new export from WhatsApp) more than most other
+  // landing-page photos - clean up the old file on disk when that happens so
+  // re-uploads don't quietly pile up on the persistent volume.
+  if (oldQrImage && oldQrImage !== db.landingPage.whatsapp.qrImage) {
+    fs.unlink(path.join(EVENT_UPLOADS_DIR, path.basename(oldQrImage)), () => {});
+  }
+  writeDb(db);
+  res.json({ whatsapp: db.landingPage.whatsapp });
 });
 
 app.post("/api/admin/landing/gallery", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {

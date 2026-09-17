@@ -817,9 +817,63 @@ function applyLandingPageToUI() {
     }
   }
 
+  const waTitleEl = document.getElementById("landing-whatsapp-title");
+  const waBodyEl = document.getElementById("landing-whatsapp-body");
+  const waQrEl = document.getElementById("landing-whatsapp-qr");
+  const waLinkEl = document.getElementById("landing-whatsapp-link");
+  if (waTitleEl) waTitleEl.textContent = bilingual(lp.whatsapp.titleEn, lp.whatsapp.titleAr) || t("whatsappCommunityTitle");
+  if (waBodyEl) waBodyEl.textContent = bilingual(lp.whatsapp.bodyEn, lp.whatsapp.bodyAr);
+  if (waQrEl) {
+    if (lp.whatsapp.qrImage) {
+      waQrEl.src = lp.whatsapp.qrImage;
+      waQrEl.classList.remove("hidden");
+    } else {
+      waQrEl.removeAttribute("src");
+      waQrEl.classList.add("hidden");
+    }
+  }
+  if (waLinkEl) {
+    if (lp.whatsapp.link) {
+      waLinkEl.href = lp.whatsapp.link;
+      waLinkEl.classList.remove("hidden");
+    } else {
+      waLinkEl.classList.add("hidden");
+    }
+  }
+  renderMpWhatsappCard();
+
   renderGalleryGrid(lp.gallery || []);
   renderSponsorsStrip(lp.sponsors || []);
   applyLandingSectionOrder(lp.sections || []);
+}
+
+// The community WhatsApp QR is also shown on Member Profile, independent of
+// whether the landing-page section is toggled on - members who never visit
+// the landing page (they land straight on Register/Member Profile) should
+// still be able to find it. Only requires a QR image to be set; the
+// landing-page enabled flag doesn't gate this copy at all.
+function renderMpWhatsappCard() {
+  const card = document.getElementById("mp-whatsapp-card");
+  if (!card) return;
+  const lp = SETTINGS && SETTINGS.landingPage;
+  const wa = lp && lp.whatsapp;
+  const isMember = !!(CURRENT_SESSION && CURRENT_SESSION.member);
+  if (!isMember || !wa || !wa.qrImage) {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+  document.getElementById("mp-whatsapp-title").textContent = bilingual(wa.titleEn, wa.titleAr) || t("whatsappCommunityTitle");
+  document.getElementById("mp-whatsapp-body").textContent = bilingual(wa.bodyEn, wa.bodyAr);
+  const img = document.getElementById("mp-whatsapp-qr");
+  img.src = wa.qrImage;
+  const link = document.getElementById("mp-whatsapp-link");
+  if (wa.link) {
+    link.href = wa.link;
+    link.classList.remove("hidden");
+  } else {
+    link.classList.add("hidden");
+  }
 }
 
 function renderGalleryGrid(items) {
@@ -993,6 +1047,7 @@ function updateUIForSession() {
   document.getElementById("mp-registrations-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-chat-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-security-card").classList.toggle("hidden", !isMember);
+  renderMpWhatsappCard();
   if (isMember) {
     renderRecoveryPinStatus("mp-recovery-pin-status", CURRENT_SESSION.member.hasRecoveryPin);
     renderNicknameStatus();
@@ -1735,6 +1790,13 @@ function openEventModal(ev, isPast) {
     <div class="meta" style="margin-bottom:12px;">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""}</div>
     ${TOURNAMENT_EVENT_IDS.has(ev.id) ? `<button class="secondary" id="modal-view-tournament-btn" style="margin-bottom:10px;">${t("btnViewTournament")}</button>` : ""}
     ${hasDesc ? `<h3>${t("aboutTitle")}</h3><p class="desc">${eventDescHtml(ev)}</p>` : ""}
+    ${
+      ev.whatsappQr
+        ? `<h3>${t("eventWhatsappGroupTitle")}</h3><div style="text-align:center;"><img src="${escapeAttr(
+            ev.whatsappQr
+          )}" alt="" style="max-width:200px;border-radius:10px;display:block;margin:8px auto;" /></div>`
+        : ""
+    }
     ${isPast && hasRecapDesc ? `<h3>${t("recapTitle")}</h3><p class="desc">${eventRecapDescHtml(ev)}</p>` : ""}
     ${
       galleryPhotos.length
@@ -4111,6 +4173,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   const allowMultipleActivities = document.getElementById("ev-allow-multi").checked;
   const photoInput = document.getElementById("ev-photo");
   const videoInput = document.getElementById("ev-video");
+  const whatsappQrInput = document.getElementById("ev-whatsapp-qr");
   const msg = document.getElementById("ev-msg");
   if (!nameEn || !date) {
     highlightMissingFields(["ev-name-en", "ev-date"]);
@@ -4134,6 +4197,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
+  if (whatsappQrInput.files[0]) fd.append("whatsappQr", whatsappQrInput.files[0]);
   try {
     await api("/api/events", { method: "POST", body: fd });
     showMsg(msg, "OK", true);
@@ -4151,6 +4215,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-allow-multi").checked = false;
     photoInput.value = "";
     videoInput.value = "";
+    whatsappQrInput.value = "";
     await loadEvents();
     await loadAdminOverview();
     await loadAdminDashboard();
@@ -4179,6 +4244,7 @@ function populateEditForm(ev) {
   document.getElementById("ev-edit-max-capacity").value = ev.maxCapacity != null ? ev.maxCapacity : "";
   document.getElementById("ev-edit-photo").value = "";
   document.getElementById("ev-edit-video").value = "";
+  document.getElementById("ev-edit-whatsapp-qr").value = "";
   const statusEl = document.getElementById("ev-edit-capacity-status");
   if (ev.confirmedCount !== undefined) {
     statusEl.textContent = `${t("currentlyRegistered")}: ${fmt(ev.confirmedCount)}${
@@ -4227,6 +4293,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   const allowMultipleActivities = document.getElementById("ev-edit-allow-multi").checked;
   const photoInput = document.getElementById("ev-edit-photo");
   const videoInput = document.getElementById("ev-edit-video");
+  const whatsappQrInput = document.getElementById("ev-edit-whatsapp-qr");
   if (!eventId) return;
   if (!nameEn || !date) {
     highlightMissingFields(["ev-edit-name-en", "ev-edit-date"]);
@@ -4250,6 +4317,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
+  if (whatsappQrInput.files[0]) fd.append("whatsappQr", whatsappQrInput.files[0]);
   try {
     const saved = await api("/api/events/" + eventId, { method: "PUT", body: fd });
     showMsg(msg, t("eventSaved"), true);
@@ -4725,6 +4793,25 @@ function populateLandingAdminForms() {
       removeBtn.classList.add("hidden");
     }
   }
+  const whatsappTitleEn = document.getElementById("whatsapp-title-en");
+  if (whatsappTitleEn) {
+    whatsappTitleEn.value = lp.whatsapp.titleEn || "";
+    document.getElementById("whatsapp-title-ar").value = lp.whatsapp.titleAr || "";
+    document.getElementById("whatsapp-body-en").value = lp.whatsapp.bodyEn || "";
+    document.getElementById("whatsapp-body-ar").value = lp.whatsapp.bodyAr || "";
+    document.getElementById("whatsapp-link").value = lp.whatsapp.link || "";
+    const preview = document.getElementById("whatsapp-qr-preview");
+    const previewWrap = document.getElementById("whatsapp-qr-preview-wrap");
+    const removeBtn = document.getElementById("whatsapp-remove-qr-btn");
+    if (lp.whatsapp.qrImage) {
+      preview.src = lp.whatsapp.qrImage;
+      previewWrap.classList.remove("hidden");
+      removeBtn.classList.remove("hidden");
+    } else {
+      previewWrap.classList.add("hidden");
+      removeBtn.classList.add("hidden");
+    }
+  }
   renderLandingSectionsAdminList();
   renderGalleryAdminList(lp.gallery || []);
   renderSponsorsAdminList(lp.sponsors || []);
@@ -4740,6 +4827,7 @@ const LANDING_SECTION_LABEL_KEYS = {
   spotlight: "landingSecSpotlight",
   gallery: "landingSecGallery",
   sponsors: "landingSecSponsors",
+  whatsapp: "landingSecWhatsapp",
 };
 // Index of the row currently being mouse-dragged, while a drag is in
 // progress - shared across the drag*/drop handlers wired up below, and
@@ -4923,6 +5011,49 @@ document.getElementById("about-save-btn").addEventListener("click", async () => 
     SETTINGS.landingPage.about = result.about;
     LANDING_PAGE.about = result.about;
     fileInput.value = "";
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+document.getElementById("whatsapp-save-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("whatsapp-msg");
+  const fd = new FormData();
+  fd.append("titleEn", document.getElementById("whatsapp-title-en").value.trim());
+  fd.append("titleAr", document.getElementById("whatsapp-title-ar").value.trim());
+  fd.append("bodyEn", document.getElementById("whatsapp-body-en").value.trim());
+  fd.append("bodyAr", document.getElementById("whatsapp-body-ar").value.trim());
+  fd.append("link", document.getElementById("whatsapp-link").value.trim());
+  const fileInput = document.getElementById("whatsapp-qr-file");
+  if (fileInput.files[0]) fd.append("qrImage", fileInput.files[0]);
+  try {
+    const result = await api("/api/admin/landing/whatsapp", { method: "PUT", body: fd });
+    SETTINGS.landingPage.whatsapp = result.whatsapp;
+    LANDING_PAGE.whatsapp = result.whatsapp;
+    fileInput.value = "";
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("whatsapp-remove-qr-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("whatsapp-msg");
+  const fd = new FormData();
+  fd.append("titleEn", document.getElementById("whatsapp-title-en").value.trim());
+  fd.append("titleAr", document.getElementById("whatsapp-title-ar").value.trim());
+  fd.append("bodyEn", document.getElementById("whatsapp-body-en").value.trim());
+  fd.append("bodyAr", document.getElementById("whatsapp-body-ar").value.trim());
+  fd.append("link", document.getElementById("whatsapp-link").value.trim());
+  fd.append("removeQrImage", "true");
+  try {
+    const result = await api("/api/admin/landing/whatsapp", { method: "PUT", body: fd });
+    SETTINGS.landingPage.whatsapp = result.whatsapp;
+    LANDING_PAGE.whatsapp = result.whatsapp;
     populateLandingAdminForms();
     applyLandingPageToUI();
     showMsg(msg, t("settingsSaved"), true);
