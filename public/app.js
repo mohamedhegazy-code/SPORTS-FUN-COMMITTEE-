@@ -805,9 +805,10 @@ function renderSponsorsStrip(items) {
 
 // Moves each landing-page section's wrapper element (see the
 // data-landing-section attributes in index.html) into the config's order,
-// and shows/hides it per the config's enabled flag - except "events", which
-// always shows regardless of what's stored (see the matching guard on the
-// server, /api/admin/landing/sections).
+// and shows/hides it per the config's enabled flag. Hiding "events" here
+// only affects the landing page - members can still register from the
+// Register tab's own card grid (see renderRegisterEventsGrid()), so there's
+// no dead end even with this section turned off.
 function applyLandingSectionOrder(sections) {
   const parent = document.getElementById("view-events");
   if (!parent) return;
@@ -816,8 +817,7 @@ function applyLandingSectionOrder(sections) {
     const el = parent.querySelector(`[data-landing-section="${s.key}"]`);
     if (!el) return;
     parent.appendChild(el);
-    const alwaysOn = s.key === "events";
-    el.classList.toggle("hidden", !alwaysOn && !s.enabled);
+    el.classList.toggle("hidden", !s.enabled);
   });
 }
 
@@ -4270,15 +4270,10 @@ function renderLandingSectionsAdminList() {
   wrap.innerHTML = sections
     .map((s, i) => {
       const label = t(LANDING_SECTION_LABEL_KEYS[s.key] || s.key);
-      const locked = s.key === "events";
       return `<div class="landing-section-row" draggable="true" data-index="${i}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
         <span class="landing-drag-handle" title="${escapeAttr(t("landingSecDragHint"))}">&#10021;</span>
         <span style="flex:1;font-size:0.9rem;">${escapeAttr(label)}</span>
-        ${
-          locked
-            ? `<span class="hint-note" style="margin:0;">${escapeAttr(t("landingSecAlwaysShown"))}</span>`
-            : `<label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);"><input type="checkbox" class="landing-sec-enabled" data-index="${i}" ${s.enabled ? "checked" : ""} /> ${escapeAttr(t("landingSecShown"))}</label>`
-        }
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);"><input type="checkbox" class="landing-sec-enabled" data-index="${i}" ${s.enabled ? "checked" : ""} /> ${escapeAttr(t("landingSecShown"))}</label>
         <button type="button" class="secondary landing-sec-up" data-index="${i}" ${i === 0 ? "disabled" : ""} style="padding:4px 10px;margin-top:0;">&uarr;</button>
         <button type="button" class="secondary landing-sec-down" data-index="${i}" ${i === sections.length - 1 ? "disabled" : ""} style="padding:4px 10px;margin-top:0;">&darr;</button>
       </div>`;

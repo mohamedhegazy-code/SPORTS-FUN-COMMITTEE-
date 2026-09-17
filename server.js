@@ -228,10 +228,12 @@ fs.mkdirSync(BRANDING_UPLOADS_DIR, { recursive: true });
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 // ---------------------------------------------------------- landing page ---
-// Every section the Events landing page can show. "events" (the actual
-// listing members register from) can be reordered like any other section
-// but can never be turned off - see the /api/admin/landing/sections handler
-// below, which forces it back to enabled no matter what's posted.
+// Every section the Events landing page can show, all reorderable and
+// toggleable the same way (see PUT /api/admin/landing/sections below). This
+// used to force "events" permanently on - members still have the Register
+// tab's own card grid (see startRegisterFlow()/renderRegisterEventsGrid()
+// in app.js) as an always-available way to sign up even with this section
+// hidden from the landing page, so there's no dead end if an admin does.
 const LANDING_SECTION_KEYS = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors"];
 
 const brandingLogoStorage = multer.diskStorage({
@@ -581,7 +583,7 @@ function readDb() {
     for (const def of defaultLandingSections) {
       if (!seenKeys.has(def.key)) known.push(def);
     }
-    db.landingPage.sections = known.map((s) => ({ key: s.key, enabled: s.key === "events" ? true : !!s.enabled }));
+    db.landingPage.sections = known.map((s) => ({ key: s.key, enabled: !!s.enabled }));
   }
   db.sessions = db.sessions || {};
   // Terms & Conditions: bilingual text every member must accept - once at
@@ -2018,7 +2020,7 @@ app.put("/api/admin/landing/sections", requireStaffRole("admin"), (req, res) => 
     keySet.size === LANDING_SECTION_KEYS.length &&
     LANDING_SECTION_KEYS.every((k) => keySet.has(k));
   if (!valid) return res.status(400).json({ error: "sections must include every landing page section exactly once" });
-  db.landingPage.sections = sections.map((s) => ({ key: s.key, enabled: s.key === "events" ? true : !!s.enabled }));
+  db.landingPage.sections = sections.map((s) => ({ key: s.key, enabled: !!s.enabled }));
   writeDb(db);
   res.json({ sections: db.landingPage.sections });
 });
