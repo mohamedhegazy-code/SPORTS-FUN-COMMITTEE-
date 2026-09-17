@@ -4596,8 +4596,15 @@ async function loadCommittee() {
 function committeeMemberCardHtml(m) {
   const name = currentLang === "ar" ? m.nameAr || m.nameEn : m.nameEn || m.nameAr;
   const title = currentLang === "ar" ? m.titleAr || m.titleEn : m.titleEn || m.titleAr;
+  // Mirrors the club's own printed committee ID card - red header with the
+  // Al Ahly crest, a gold wave, the photo straddling the divide, name and
+  // title on the cream body below. See the .committee-card rules in
+  // styles.css for the wave/color details.
   return `<div class="committee-card">
-    ${m.photo ? `<img class="committee-photo" src="${escapeAttr(m.photo)}" alt="" />` : `<div class="committee-photo committee-photo-placeholder"></div>`}
+    <div class="committee-card-header"><img class="committee-crest" src="/ahly-crest.png" alt="" /></div>
+    <div class="committee-photo-wrap">
+      ${m.photo ? `<img class="committee-photo" src="${escapeAttr(m.photo)}" alt="" />` : `<div class="committee-photo committee-photo-placeholder"></div>`}
+    </div>
     <div class="committee-name">${escapeAttr(name)}</div>
     ${title ? `<div class="committee-title">${escapeAttr(title)}</div>` : ""}
   </div>`;
