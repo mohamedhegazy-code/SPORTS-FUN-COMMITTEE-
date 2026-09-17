@@ -1684,12 +1684,23 @@ function openEventModal(ev, isPast) {
   const hasRecapDesc = !!((recap.descriptionAr || "").trim() || (recap.descriptionEn || "").trim());
   const recapPhotos = recap.photos || [];
   const heroPhoto = isPast && recapPhotos.length ? recapPhotos[0] : ev.coverPhoto;
+  // A video (recap video once the event is past, cover video otherwise)
+  // takes priority over the photo here, same rule as the landing page hero
+  // banner - the photo still renders as the <video>'s poster frame, so
+  // there's no blank flash while the video loads or if it fails to play.
+  const heroVideo = isPast ? recap.video || "" : ev.coverVideo || "";
   const galleryPhotos = isPast && recapPhotos.length > 1 ? recapPhotos.slice(1) : [];
   const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
   const isParent = children.length > 0;
   content.innerHTML = `
     <span class="event-badge ${isPast ? "past" : ""}">${isPast ? t("eventPast") : t("eventUpcoming")}</span>
-    ${heroPhoto ? `<img class="photo-hero" src="${escapeAttr(heroPhoto)}" alt="" />` : ""}
+    ${
+      heroVideo
+        ? `<video class="photo-hero" controls playsinline ${heroPhoto ? `poster="${escapeAttr(heroPhoto)}"` : ""}><source src="${escapeAttr(heroVideo)}" /></video>`
+        : heroPhoto
+        ? `<img class="photo-hero" src="${escapeAttr(heroPhoto)}" alt="" />`
+        : ""
+    }
     <h2>${eventNameHtml(ev)}</h2>
     <div class="meta" style="margin-bottom:12px;">${escapeAttr(eventDateTimeLabel(ev))}${ev.sport ? " · " + escapeAttr(ev.sport) : ""}</div>
     ${TOURNAMENT_EVENT_IDS.has(ev.id) ? `<button class="secondary" id="modal-view-tournament-btn" style="margin-bottom:10px;">${t("btnViewTournament")}</button>` : ""}
@@ -3906,6 +3917,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   const parentEventId = document.getElementById("ev-parent-event").value;
   const allowMultipleActivities = document.getElementById("ev-allow-multi").checked;
   const photoInput = document.getElementById("ev-photo");
+  const videoInput = document.getElementById("ev-video");
   const msg = document.getElementById("ev-msg");
   if (!nameEn || !date) {
     highlightMissingFields(["ev-name-en", "ev-date"]);
@@ -3928,6 +3940,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
+  if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
   try {
     await api("/api/events", { method: "POST", body: fd });
     showMsg(msg, "OK", true);
@@ -3944,6 +3957,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-parent-event").value = "";
     document.getElementById("ev-allow-multi").checked = false;
     photoInput.value = "";
+    videoInput.value = "";
     await loadEvents();
     await loadAdminOverview();
     await loadAdminDashboard();
@@ -3971,6 +3985,7 @@ function populateEditForm(ev) {
   document.getElementById("ev-edit-min-capacity").value = ev.minCapacity != null ? ev.minCapacity : "";
   document.getElementById("ev-edit-max-capacity").value = ev.maxCapacity != null ? ev.maxCapacity : "";
   document.getElementById("ev-edit-photo").value = "";
+  document.getElementById("ev-edit-video").value = "";
   const statusEl = document.getElementById("ev-edit-capacity-status");
   if (ev.confirmedCount !== undefined) {
     statusEl.textContent = `${t("currentlyRegistered")}: ${fmt(ev.confirmedCount)}${
@@ -4018,6 +4033,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   const parentEventId = document.getElementById("ev-edit-parent-event").value;
   const allowMultipleActivities = document.getElementById("ev-edit-allow-multi").checked;
   const photoInput = document.getElementById("ev-edit-photo");
+  const videoInput = document.getElementById("ev-edit-video");
   if (!eventId) return;
   if (!nameEn || !date) {
     highlightMissingFields(["ev-edit-name-en", "ev-edit-date"]);
@@ -4040,6 +4056,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
+  if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
   try {
     const saved = await api("/api/events/" + eventId, { method: "PUT", body: fd });
     showMsg(msg, t("eventSaved"), true);
@@ -4665,6 +4682,7 @@ document.getElementById("res-load").addEventListener("click", async () => {
   document.getElementById("res-recap-desc-en").value = (ev && ev.recap && ev.recap.descriptionEn) || "";
   document.getElementById("res-recap-desc-ar").value = (ev && ev.recap && ev.recap.descriptionAr) || "";
   document.getElementById("res-recap-photos").value = "";
+  document.getElementById("res-recap-video").value = "";
   recapFields.classList.remove("hidden");
 });
 
@@ -4680,10 +4698,13 @@ document.getElementById("res-save").addEventListener("click", async () => {
   fd.append("recapDescriptionEn", document.getElementById("res-recap-desc-en").value.trim());
   fd.append("recapDescriptionAr", document.getElementById("res-recap-desc-ar").value.trim());
   Array.from(document.getElementById("res-recap-photos").files).forEach((file) => fd.append("recapPhotos", file));
+  const recapVideoInput = document.getElementById("res-recap-video");
+  if (recapVideoInput.files[0]) fd.append("recapVideo", recapVideoInput.files[0]);
   try {
     await api("/api/events/" + eventId + "/results", { method: "POST", body: fd });
     showMsg(msg, t("recapSaved"), true);
     document.getElementById("res-recap-photos").value = "";
+    recapVideoInput.value = "";
     await loadEvents();
   } catch (e) {
     showMsg(msg, e.message, false);

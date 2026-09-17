@@ -621,10 +621,12 @@
             <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-end-time" type="time" /></div>
             <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-deadline" type="datetime-local" /></div>
             <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
+            <div><label data-i18n="fieldCoverVideo">Cover video (optional)</label><input id="ev-video" type="file" accept="video/*" /></div>
             <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-min-capacity" type="number" min="0" /></div>
             <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-max-capacity" type="number" min="0" /></div>
             <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-parent-event"></select></div>
           </div>
+          <p class="hint-note" data-i18n="coverVideoHint">Plays instead of the cover photo on the event's details page - the photo still shows as the card thumbnail and as a fallback while the video loads. Up to 60MB; a short, compressed clip works best.</p>
           <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
           <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
           <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
@@ -653,6 +655,7 @@
               <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-edit-end-time" type="time" /></div>
               <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-edit-deadline" type="datetime-local" /></div>
               <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
+              <div><label data-i18n="fieldReplaceCoverVideo">Replace cover video (optional)</label><input id="ev-edit-video" type="file" accept="video/*" /></div>
               <div><label data-i18n="fieldMinCapacity">Minimum registrations (optional)</label><input id="ev-edit-min-capacity" type="number" min="0" /></div>
               <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-edit-max-capacity" type="number" min="0" /></div>
               <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-edit-parent-event"></select></div>
@@ -684,6 +687,8 @@
             <textarea id="res-recap-desc-ar" dir="rtl" rows="3"></textarea>
             <label data-i18n="fieldRecapPhotos">Recap photos (up to 10)</label>
             <input id="res-recap-photos" type="file" accept="image/*" multiple />
+            <label style="margin-top:14px;" data-i18n="fieldRecapVideo">Recap video (optional)</label>
+            <input id="res-recap-video" type="file" accept="video/*" />
           </div>
           <button class="primary hidden" id="res-save" data-i18n="btnSaveResults">Save results</button>
           <div class="msg" id="res-msg"></div>

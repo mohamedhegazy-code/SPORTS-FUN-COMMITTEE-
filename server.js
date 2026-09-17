@@ -296,6 +296,48 @@ const uploadHeroMedia = multer({
   },
 });
 
+// -------------------------------------------------- event cover/recap video --
+// Same idea as the hero banner's video above: an event's cover (shown while
+// it's upcoming) and its after-event recap can each optionally carry a short
+// video alongside their existing photo(s). These reuse EVENT_UPLOADS_DIR
+// rather than a separate folder - cover/recap photos already share that one
+// persistent-volume directory, and the video files here are just
+// differently-prefixed random filenames living alongside them.
+const eventMediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, EVENT_UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (file.fieldname === "coverVideo" || file.fieldname === "recapVideo") {
+      const safeExt = [".mp4", ".webm", ".mov"].includes(ext) ? ext : ".mp4";
+      return cb(null, `event-video-${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+    }
+    const safeExt = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext) ? ext : ".jpg";
+    cb(null, `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+  },
+});
+const eventMediaFileFilter = (req, file, cb) => {
+  if (file.fieldname === "coverVideo" || file.fieldname === "recapVideo") {
+    if (!/^video\//.test(file.mimetype)) return cb(new Error("Only video files (MP4, WebM, or MOV) are allowed"));
+    return cb(null, true);
+  }
+  if (!/^image\//.test(file.mimetype)) return cb(new Error("Only image files are allowed"));
+  cb(null, true);
+};
+// Cover: one photo + one video per request. Recap: up to 10 photos + one
+// video. Same 60MB/file ceiling as the hero video, for the same reason (see
+// uploadHeroMedia above) - the handlers below also delete the previous video
+// on disk whenever a new one replaces it, so re-uploads don't pile up.
+const uploadEventCoverMedia = multer({
+  storage: eventMediaStorage,
+  limits: { fileSize: 60 * 1024 * 1024, files: 2 },
+  fileFilter: eventMediaFileFilter,
+});
+const uploadEventRecapMedia = multer({
+  storage: eventMediaStorage,
+  limits: { fileSize: 60 * 1024 * 1024, files: 11 },
+  fileFilter: eventMediaFileFilter,
+});
+
 // ------------------------------------------------------------- branding ---
 // Admin-set logo, stored on disk the same way event photos are - see the
 // data/ vs public/ note above the event-uploads block.
@@ -531,6 +573,7 @@ function readDb() {
     descriptionEn: "",
     descriptionAr: "",
     coverPhoto: "",
+    coverVideo: "",
     minCapacity: null,
     maxCapacity: null,
     startTime: null,
@@ -544,7 +587,7 @@ function readDb() {
     parentEventId: null,
     allowMultipleActivities: false,
     ...ev,
-    recap: { descriptionEn: "", descriptionAr: "", photos: [], ...(ev.recap || {}) },
+    recap: { descriptionEn: "", descriptionAr: "", photos: [], video: "", ...(ev.recap || {}) },
   }));
   // Backward-compatible default for registrations created before the
   // waiting-list feature existed - they were all "confirmed" spots.
@@ -1779,7 +1822,10 @@ app.get("/api/events", (req, res) => {
 app.post(
   "/api/events",
   requireStaffRole(["tournament"]),
-  uploadEventPhoto.single("coverPhoto"),
+  uploadEventCoverMedia.fields([
+    { name: "coverPhoto", maxCount: 1 },
+    { name: "coverVideo", maxCount: 1 },
+  ]),
   (req, res) => {
     const db = req.db;
     const {
@@ -1818,6 +1864,8 @@ app.post(
     }
     const parentCheck = validateParentEventId(db, null, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
+    const coverPhotoFile = req.files && req.files.coverPhoto && req.files.coverPhoto[0];
+    const coverVideoFile = req.files && req.files.coverVideo && req.files.coverVideo[0];
     const event = {
       id: db.nextIds.event++,
       nameEn,
@@ -1834,8 +1882,9 @@ app.post(
       maxCapacity: max,
       parentEventId: parentCheck.parentEventId,
       allowMultipleActivities: String(allowMultipleActivities) === "true",
-      coverPhoto: req.file ? `/uploads/events/${req.file.filename}` : "",
-      recap: { descriptionEn: "", descriptionAr: "", photos: [] },
+      coverPhoto: coverPhotoFile ? `/uploads/events/${coverPhotoFile.filename}` : "",
+      coverVideo: coverVideoFile ? `/uploads/events/${coverVideoFile.filename}` : "",
+      recap: { descriptionEn: "", descriptionAr: "", photos: [], video: "" },
     };
     db.events.push(event);
     logActivity(db, {
@@ -1857,7 +1906,10 @@ app.post(
 app.put(
   "/api/events/:eventId",
   requireStaffRole(["tournament"]),
-  uploadEventPhoto.single("coverPhoto"),
+  uploadEventCoverMedia.fields([
+    { name: "coverPhoto", maxCount: 1 },
+    { name: "coverVideo", maxCount: 1 },
+  ]),
   (req, res) => {
     const db = req.db;
     const eventId = Number(req.params.eventId);
@@ -1916,7 +1968,18 @@ app.put(
     event.maxCapacity = max;
     event.parentEventId = parentCheck.parentEventId;
     event.allowMultipleActivities = String(allowMultipleActivities) === "true";
-    if (req.file) event.coverPhoto = `/uploads/events/${req.file.filename}`;
+    const coverPhotoFile = req.files && req.files.coverPhoto && req.files.coverPhoto[0];
+    const coverVideoFile = req.files && req.files.coverVideo && req.files.coverVideo[0];
+    if (coverPhotoFile) event.coverPhoto = `/uploads/events/${coverPhotoFile.filename}`;
+    if (coverVideoFile) {
+      // A video is much bigger than any photo this app handles - delete the
+      // previous one on disk when it's replaced, so re-uploads (an admin
+      // trying a different clip) don't silently pile up on the persistent
+      // volume (same reasoning as the hero banner's video, see above).
+      const oldVideo = event.coverVideo;
+      event.coverVideo = `/uploads/events/${coverVideoFile.filename}`;
+      if (oldVideo) fs.unlink(path.join(EVENT_UPLOADS_DIR, path.basename(oldVideo)), () => {});
+    }
     logActivity(db, {
       actorType: "staff",
       actorId: req.staff.username,
@@ -2760,7 +2823,10 @@ app.post("/api/checkin/manual", requireStaffRole("staff"), (req, res) => {
 app.post(
   "/api/events/:eventId/results",
   requireStaffRole("admin"),
-  uploadEventPhoto.array("recapPhotos", 10),
+  uploadEventRecapMedia.fields([
+    { name: "recapPhotos", maxCount: 10 },
+    { name: "recapVideo", maxCount: 1 },
+  ]),
   (req, res) => {
     const db = req.db;
     const eventId = Number(req.params.eventId);
@@ -2786,11 +2852,20 @@ app.post(
 
     const event = db.events.find((e) => e.id === eventId);
     if (!event) return res.status(404).json({ error: "No such event" });
-    event.recap = event.recap || { descriptionEn: "", descriptionAr: "", photos: [] };
+    event.recap = event.recap || { descriptionEn: "", descriptionAr: "", photos: [], video: "" };
     if (typeof req.body.recapDescriptionEn === "string") event.recap.descriptionEn = req.body.recapDescriptionEn;
     if (typeof req.body.recapDescriptionAr === "string") event.recap.descriptionAr = req.body.recapDescriptionAr;
-    if (req.files && req.files.length) {
-      event.recap.photos.push(...req.files.map((f) => `/uploads/events/${f.filename}`));
+    const recapPhotoFiles = (req.files && req.files.recapPhotos) || [];
+    const recapVideoFile = req.files && req.files.recapVideo && req.files.recapVideo[0];
+    if (recapPhotoFiles.length) {
+      event.recap.photos.push(...recapPhotoFiles.map((f) => `/uploads/events/${f.filename}`));
+    }
+    if (recapVideoFile) {
+      // Same disk-cleanup reasoning as the cover video above - delete the
+      // previous recap video whenever a new one replaces it.
+      const oldVideo = event.recap.video;
+      event.recap.video = `/uploads/events/${recapVideoFile.filename}`;
+      if (oldVideo) fs.unlink(path.join(EVENT_UPLOADS_DIR, path.basename(oldVideo)), () => {});
     }
 
     writeDb(db);
