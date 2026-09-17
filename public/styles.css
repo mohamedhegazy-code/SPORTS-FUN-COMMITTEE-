@@ -729,6 +729,13 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .hint-note a { color: var(--red); text-decoration: underline; }
 .hint-note a:hover { color: var(--red-dark); }
 
+/* Which event the Register form is currently submitting for - picked from
+   the card grid above (#reg-events-grid), not the hidden <select> that used
+   to be a visible dropdown here. See startRegisterFlow()/
+   updateRegSelectedEventLabel() in app.js. */
+.reg-selected-event { font-size: 0.95rem; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
+.reg-selected-event.empty { font-weight: 400; color: var(--muted); font-style: italic; }
+
 /* Landing page section list: mouse drag-to-reorder (see renderLandingSectionsAdminList in app.js). */
 .landing-section-row { cursor: grab; transition: opacity 0.15s ease, border-color 0.15s ease; }
 .landing-section-row:active { cursor: grabbing; }

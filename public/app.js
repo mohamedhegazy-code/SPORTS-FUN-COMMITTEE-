@@ -437,6 +437,7 @@ function setLang(lang) {
   applyI18n();
   renderEventDropdowns();
   renderEventsGrid();
+  renderRegisterEventsGrid();
   renderAnnualGrid();
   renderLandingAnnualPreview();
   renderFeaturedEvents();
@@ -492,6 +493,7 @@ function setLang(lang) {
     document.getElementById("view-admin").classList.contains("active")
   ) {
     loadAdminDashboard();
+    loadActivityLog(false);
     renderMembersInviteEventDropdown();
     renderMemberAddEventDropdown();
     renderMembersTable();
@@ -923,9 +925,11 @@ function updateUIForSession() {
   // Register tab
   document.getElementById("reg-auth").classList.toggle("hidden", isMember);
   document.getElementById("reg-form").classList.toggle("hidden", !isMember);
+  document.getElementById("reg-events-section").classList.toggle("hidden", !isMember);
   if (!isMember) document.getElementById("reg-qr-card").classList.add("hidden");
   if (isMember) {
     renderAttendeesChecklist();
+    renderRegisterEventsGrid();
     applyPendingEventSelection();
   }
 
@@ -1008,6 +1012,7 @@ function updateUIForSession() {
     if (isAdmin) {
       loadManagementDashboard();
       loadAdminOverview();
+      loadActivityLog(true);
       loadAdminMembers();
       loadAdminDirectory();
       loadRedemptionsTable();
@@ -1182,6 +1187,7 @@ async function loadEvents() {
   await refreshTournamentEventIds();
   renderEventDropdowns();
   renderEventsGrid();
+  renderRegisterEventsGrid();
   renderAnnualGrid();
   renderLandingAnnualPreview();
   renderFeaturedEvents();
@@ -1213,6 +1219,7 @@ function renderEventDropdowns() {
   regSel.innerHTML = regOpts || `<option value="">--</option>`;
   if (prevRegValue && Array.from(regSel.options).some((o) => o.value === prevRegValue)) regSel.value = prevRegValue;
   updateRegCapacityNote();
+  updateRegSelectedEventLabel();
 
   const upcomingOpts = upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
 
@@ -1321,7 +1328,28 @@ function updateRegCapacityNote() {
     ? t("regEventFullNote")
     : `${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)} ${t("regSpotsNote")}`;
 }
-document.getElementById("reg-event").addEventListener("change", updateRegCapacityNote);
+// The Register tab shows a card grid, not the underlying <select> (see
+// #reg-event in index.html - kept in the DOM as the form's source of truth,
+// but hidden) - this is what tells the member which event that hidden
+// selection actually points at, in place of the dropdown they'd otherwise
+// read that off of.
+function updateRegSelectedEventLabel() {
+  const label = document.getElementById("reg-selected-event-label");
+  if (!label) return;
+  const sel = document.getElementById("reg-event");
+  const ev = EVENTS_DATA.find((e) => e.id === Number(sel.value));
+  if (!ev) {
+    label.textContent = t("regNoEventSelected");
+    label.classList.add("empty");
+    return;
+  }
+  label.classList.remove("empty");
+  label.textContent = `${t("regSelectedEventPrefix")} ${eventLabel(ev)} — ${ev.date}`;
+}
+document.getElementById("reg-event").addEventListener("change", () => {
+  updateRegCapacityNote();
+  updateRegSelectedEventLabel();
+});
 
 // ------------------------------------------------------ events landing page --
 // Small helper shared by the event cards and the Register dropdown: is this
@@ -1417,6 +1445,24 @@ function renderEventsGrid() {
   if (!grid) return;
   // Sub-activities never get their own top-level card - they render nested
   // inside their parent event day's card instead.
+  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
+  empty.classList.toggle("hidden", upcoming.length > 0);
+  grid.innerHTML = upcoming.map((ev) => eventCardHtml(ev, false)).join("");
+  wireEventCardButtons(grid, upcoming, false);
+}
+// Same upcoming-events data and card markup as the Events tab's grid above -
+// shown on the Register tab itself (member-signed-in state only) so someone
+// who navigates straight to Register, without going through Events first,
+// still sees photo cards with details/register actions instead of only the
+// bare <select> below. Clicking a card's Register button reuses
+// startRegisterFlow(), which just preselects that event in the dropdown
+// (already on this tab, so no tab switch actually happens).
+function renderRegisterEventsGrid() {
+  const grid = document.getElementById("reg-events-grid");
+  const empty = document.getElementById("reg-events-empty");
+  if (!grid) return;
   const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
     a.date.localeCompare(b.date)
   );
@@ -1699,6 +1745,12 @@ function applyPendingEventSelection() {
   const sel = document.getElementById("reg-event");
   if (sel && Array.from(sel.options).some((o) => o.value === String(PENDING_EVENT_ID))) {
     sel.value = String(PENDING_EVENT_ID);
+    // Setting .value programmatically doesn't fire "change", so the capacity
+    // note and the card-grid-driven "Registering for: ..." label (see
+    // updateRegSelectedEventLabel()) need an explicit refresh here - this is
+    // the only path a click on an event card's Register button takes.
+    updateRegCapacityNote();
+    updateRegSelectedEventLabel();
   }
   PENDING_EVENT_ID = null;
 }
@@ -2698,6 +2750,139 @@ function renderAdminDashboardTable(rows) {
     btn.addEventListener("click", () => openAdminEventHub(Number(btn.dataset.hubEvent), btn.dataset.hubLabel));
   });
 }
+
+// ------------------------------------------------------- activity log -----
+// Admin-only platform-wide audit report (see logActivity()/filterActivityLog()
+// in server.js). Filters are applied server-side via query params; offset/
+// limit page through the already-filtered, newest-first result set.
+const ACTIVITY_LOG_STATE = { offset: 0, limit: 50, total: 0 };
+function activityActionLabel(action) {
+  const map = {
+    member_signup: "alActionMemberSignup",
+    member_login: "alActionMemberLogin",
+    member_logout: "alActionMemberLogout",
+    staff_login: "alActionStaffLogin",
+    staff_logout: "alActionStaffLogout",
+    staff_account_created: "alActionStaffAccountCreated",
+    staff_account_removed: "alActionStaffAccountRemoved",
+    event_created: "alActionEventCreated",
+    event_edited: "alActionEventEdited",
+    event_deleted: "alActionEventDeleted",
+    event_registered: "alActionEventRegistered",
+    event_waitlisted: "alActionEventWaitlisted",
+    checkin: "alActionCheckin",
+    redemption_requested: "alActionRedemptionRequested",
+    redemption_status_changed: "alActionRedemptionStatusChanged",
+    member_added: "alActionMemberAdded",
+    members_imported: "alActionMembersImported",
+    members_invited_to_event: "alActionMembersInvitedToEvent",
+  };
+  // Falls back to the raw action tag for anything not in the map yet, so a
+  // newly added logActivity() call site still shows *something* readable
+  // instead of silently disappearing from the report.
+  const key = map[action];
+  return key ? t(key) : action;
+}
+function activityLogQueryParams() {
+  const params = new URLSearchParams();
+  const q = document.getElementById("al-filter-q").value.trim();
+  const actorType = document.getElementById("al-filter-type").value;
+  const action = document.getElementById("al-filter-action").value;
+  const from = document.getElementById("al-filter-from").value;
+  const to = document.getElementById("al-filter-to").value;
+  if (q) params.set("q", q);
+  if (actorType) params.set("actorType", actorType);
+  if (action) params.set("action", action);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  return params;
+}
+async function loadActivityLog(resetOffset) {
+  if (resetOffset) ACTIVITY_LOG_STATE.offset = 0;
+  const wrap = document.getElementById("activity-log-table");
+  try {
+    const params = activityLogQueryParams();
+    params.set("limit", ACTIVITY_LOG_STATE.limit);
+    params.set("offset", ACTIVITY_LOG_STATE.offset);
+    const result = await api(`/api/admin/activity-log?${params.toString()}`);
+    ACTIVITY_LOG_STATE.total = result.total;
+    populateActivityLogActionOptions(result.actions);
+    renderActivityLogTable(result.entries);
+    updateActivityLogPager(result.entries.length);
+  } catch (e) {
+    wrap.innerHTML = `<p class="dashboard-empty-note">${escapeAttr(e.message)}</p>`;
+  }
+}
+function populateActivityLogActionOptions(actions) {
+  const select = document.getElementById("al-filter-action");
+  const current = select.value;
+  select.innerHTML = [`<option value="">${escapeAttr(t("activityLogFilterActionAll"))}</option>`]
+    .concat(actions.map((a) => `<option value="${escapeAttr(a)}">${escapeAttr(activityActionLabel(a))}</option>`))
+    .join("");
+  if (actions.includes(current)) select.value = current;
+}
+function renderActivityLogTable(entries) {
+  const wrap = document.getElementById("activity-log-table");
+  if (!entries.length) {
+    wrap.innerHTML = `<p class="dashboard-empty-note">${t("activityLogEmpty")}</p>`;
+    return;
+  }
+  const locale = currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US";
+  const body = entries
+    .map((r) => {
+      const time = new Date(r.at).toLocaleString(locale);
+      const userType = r.actorType === "member" ? t("activityLogFilterTypeMember") : t("activityLogFilterTypeStaff");
+      const userLabel = r.actorName ? `${r.actorName} (${r.actorId})` : r.actorId || "—";
+      return `<tr>
+        <td>${escapeAttr(time)}</td>
+        <td>${escapeAttr(userType)}</td>
+        <td>${escapeAttr(userLabel)}</td>
+        <td>${escapeAttr(activityActionLabel(r.action))}</td>
+        <td>${escapeAttr(r.details || "—")}</td>
+      </tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
+    <thead><tr>
+      <th>${t("colTime")}</th><th>${t("colUserType")}</th><th>${t("colUser")}</th><th>${t("colAction")}</th><th>${t("colDetails")}</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}
+function updateActivityLogPager(currentCount) {
+  const info = document.getElementById("al-page-info");
+  const total = ACTIVITY_LOG_STATE.total;
+  const from = total === 0 ? 0 : ACTIVITY_LOG_STATE.offset + 1;
+  const to = ACTIVITY_LOG_STATE.offset + currentCount;
+  info.textContent = t("activityLogPageInfo")
+    .replace("{from}", fmt(from))
+    .replace("{to}", fmt(to))
+    .replace("{total}", fmt(total));
+  document.getElementById("al-prev-page").disabled = ACTIVITY_LOG_STATE.offset <= 0;
+  document.getElementById("al-next-page").disabled = ACTIVITY_LOG_STATE.offset + ACTIVITY_LOG_STATE.limit >= total;
+}
+document.getElementById("al-apply-filters").addEventListener("click", () => loadActivityLog(true));
+document.getElementById("al-clear-filters").addEventListener("click", () => {
+  document.getElementById("al-filter-q").value = "";
+  document.getElementById("al-filter-type").value = "";
+  document.getElementById("al-filter-action").value = "";
+  document.getElementById("al-filter-from").value = "";
+  document.getElementById("al-filter-to").value = "";
+  loadActivityLog(true);
+});
+document.getElementById("al-prev-page").addEventListener("click", () => {
+  ACTIVITY_LOG_STATE.offset = Math.max(0, ACTIVITY_LOG_STATE.offset - ACTIVITY_LOG_STATE.limit);
+  loadActivityLog(false);
+});
+document.getElementById("al-next-page").addEventListener("click", () => {
+  ACTIVITY_LOG_STATE.offset += ACTIVITY_LOG_STATE.limit;
+  loadActivityLog(false);
+});
+document.getElementById("al-export-btn").addEventListener("click", () => {
+  const params = activityLogQueryParams();
+  window.location.href = `/api/admin/activity-log/export.xlsx?${params.toString()}`;
+});
+
 // ------------------------------------------------ management dashboard ----
 // Cross-event analytics for the restricted "management" staff role (Admin
 // sees it too, in its own tab - see requireStaffRole(["management"]) on the

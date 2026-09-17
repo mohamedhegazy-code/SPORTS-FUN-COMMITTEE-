@@ -198,12 +198,25 @@
       </div>
     </div>
 
+    <!-- Signed-in: browse upcoming events as photo cards, then pick one -->
+    <div id="reg-events-section" class="hidden">
+      <h2 class="section-title" data-i18n="regEventsGridTitle">Choose an event</h2>
+      <div class="card" id="reg-events-empty">
+        <p style="color:var(--muted);" data-i18n="eventsEmpty">No upcoming events right now — check back soon.</p>
+      </div>
+      <div class="event-grid" id="reg-events-grid"></div>
+    </div>
+
     <!-- Signed-in: pick an event -->
     <div id="reg-form" class="card hidden">
       <h2 data-i18n="regTitle">Register for an event</h2>
       <p data-i18n="regIntro" style="color:var(--muted);font-size:0.88rem;">Every participation earns at least 100 points, plus 10 for early registration. Points are awarded when your QR code is scanned at the event, not at sign-up — so register, then show up!</p>
-      <label class="required-label" data-i18n="fieldEvent">Event</label>
-      <select id="reg-event"></select>
+      <!-- Which event this form submits for is picked from the card grid
+           above (see #reg-events-grid), not a dropdown - this <select> stays
+           in the DOM only as the existing selection/submit logic's source of
+           truth, never shown to the member. -->
+      <select id="reg-event" class="hidden" aria-hidden="true" tabindex="-1"></select>
+      <p id="reg-selected-event-label" class="reg-selected-event"></p>
       <p class="hint-note hidden" id="reg-capacity-note"></p>
 
       <label data-i18n="whoAttending">Who's attending?</label>
@@ -559,6 +572,37 @@
 
             <h4 style="margin-top:18px;" data-i18n="hubTournamentTitle">Tournament &amp; winners</h4>
             <div id="admin-hub-tournament-summary"></div>
+          </div>
+        </div>
+
+        <div class="card admin-full-only">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3.5h9.5L16 6v10.5H4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7 9.5h6M7 12.5h6M7 6.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><span data-i18n="activityLogTitle">Activity log</span></h2>
+          <p class="section-sub" data-i18n="activityLogIntro">Every sign-up, sign-in, registration, check-in, and admin action on the platform — members and staff alike, newest first.</p>
+          <div class="grid-2">
+            <div><label data-i18n="activityLogFilterSearch">Search user</label><input id="al-filter-q" type="text" placeholder="Name or ID" /></div>
+            <div><label data-i18n="activityLogFilterType">User type</label>
+              <select id="al-filter-type">
+                <option value="" data-i18n="activityLogFilterTypeAll">All</option>
+                <option value="member" data-i18n="activityLogFilterTypeMember">Member</option>
+                <option value="staff" data-i18n="activityLogFilterTypeStaff">Staff/Admin</option>
+              </select>
+            </div>
+            <div><label data-i18n="activityLogFilterAction">Action</label><select id="al-filter-action"><option value="" data-i18n="activityLogFilterActionAll">All actions</option></select></div>
+            <div><label data-i18n="activityLogFilterFrom">From</label><input id="al-filter-from" type="date" /></div>
+            <div><label data-i18n="activityLogFilterTo">To</label><input id="al-filter-to" type="date" /></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <button class="secondary small" id="al-apply-filters" data-i18n="btnApplyFilters">Apply filters</button>
+            <button class="secondary small" id="al-clear-filters" data-i18n="btnClearFilters">Clear filters</button>
+            <button class="secondary small" id="al-export-btn" data-i18n="btnDownloadXlsx">Download .xlsx</button>
+          </div>
+          <div id="activity-log-table" style="margin-top:14px;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;">
+            <span id="al-page-info" class="hint-note"></span>
+            <div style="display:flex;gap:8px;">
+              <button class="secondary small" id="al-prev-page" data-i18n="btnPrevPage">Previous</button>
+              <button class="secondary small" id="al-next-page" data-i18n="btnNextPage">Next</button>
+            </div>
           </div>
         </div>
       </div>

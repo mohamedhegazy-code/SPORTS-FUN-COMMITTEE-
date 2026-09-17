@@ -603,7 +603,45 @@ function readDb() {
   if (typeof db.termsAndConditions.updatedAt !== "string") {
     db.termsAndConditions.updatedAt = new Date().toISOString();
   }
+  db.activityLog = db.activityLog || [];
   return db;
+}
+// Platform-wide activity log, admin-only report (see GET /api/admin/activity-log
+// below) - every entry is {id, at, actorType, actorId, actorName, action, details}.
+// actorType is "member" | "staff"; actorId is the membership number or staff
+// username; actorName is a display name captured at log time (so the report
+// still reads sensibly even if that member/staff account is later renamed or
+// removed). action is a short machine-readable tag (e.g. "member_login",
+// "event_created"); details is a short human-readable string with the
+// specifics (event name, redemption tier, etc.) - kept intentionally light
+// (no full before/after diffs) since this is an activity feed, not a formal
+// audit trail. Capped to the most recent ACTIVITY_LOG_MAX entries so
+// db.json can't grow unbounded on a long-lived deploy - oldest entries drop
+// off silently, same tradeoff already accepted for the rolling db.json
+// backups above. Call sites pass the already-open `db` object and do NOT
+// call writeDb() themselves - logActivity() only mutates db.activityLog in
+// memory, so every call site's own writeDb() (already happening right after
+// the action it's logging) persists the new entry as part of that same
+// write, with no extra disk I/O per log line.
+const ACTIVITY_LOG_MAX = 5000;
+function logActivity(db, { actorType, actorId, actorName, action, details }) {
+  try {
+    db.activityLog.push({
+      id: db.activityLog.length ? db.activityLog[db.activityLog.length - 1].id + 1 : 1,
+      at: new Date().toISOString(),
+      actorType,
+      actorId: actorId || "",
+      actorName: actorName || "",
+      action,
+      details: details || "",
+    });
+    if (db.activityLog.length > ACTIVITY_LOG_MAX) {
+      db.activityLog.splice(0, db.activityLog.length - ACTIVITY_LOG_MAX);
+    }
+  } catch (e) {
+    // Never let logging itself break the real action it's attached to.
+    console.error("logActivity failed:", e.message);
+  }
 }
 // Where rolling safety-net snapshots of db.json are kept - see backupDbFile()
 // below. Same volume as db.json itself (data/), so it survives redeploys.
@@ -993,6 +1031,13 @@ app.post("/api/auth/signup", async (req, res) => {
     termsAcceptedVersion: db.termsAndConditions.version,
     termsAcceptedAt: new Date().toISOString(),
   };
+  logActivity(db, {
+    actorType: "member",
+    actorId: membershipNumber,
+    actorName: name,
+    action: "member_signup",
+    details: existing ? "Claimed an admin-created profile" : "Created a new account",
+  });
   writeDb(db);
 
   const token = createSession("member", membershipNumber);
@@ -1007,6 +1052,8 @@ app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   if (!member || !member.passwordHash || !(await bcrypt.compare(password || "", member.passwordHash))) {
     return res.status(401).json({ error: "Incorrect membership number or password" });
   }
+  logActivity(db, { actorType: "member", actorId: membershipNumber, actorName: member.name, action: "member_login" });
+  writeDb(db);
   const token = createSession("member", membershipNumber);
   setSessionCookie(req, res, token);
   res.json({ member: publicMember(member) });
@@ -1019,6 +1066,8 @@ app.post("/api/auth/staff-login", loginRateLimiter, async (req, res) => {
   if (!staff || !(await bcrypt.compare(password || "", staff.passwordHash))) {
     return res.status(401).json({ error: "Incorrect username or password" });
   }
+  logActivity(db, { actorType: "staff", actorId: username, actorName: staff.name, action: "staff_login", details: staff.role });
+  writeDb(db);
   const token = createSession("staff", username, staff.role);
   setSessionCookie(req, res, token);
   res.json({ staff: publicStaff(staff) });
@@ -1026,7 +1075,22 @@ app.post("/api/auth/staff-login", loginRateLimiter, async (req, res) => {
 
 app.post("/api/auth/logout", (req, res) => {
   const token = req.cookies && req.cookies[SESSION_COOKIE];
+  const session = token ? sessions.get(token) : null;
   if (token && sessions.delete(token)) persistSessions();
+  if (session) {
+    const db = readDb();
+    const actorName =
+      session.type === "member"
+        ? (db.members[session.id] || {}).name
+        : (db.staffAccounts[session.id] || {}).name;
+    logActivity(db, {
+      actorType: session.type,
+      actorId: session.id,
+      actorName,
+      action: session.type === "member" ? "member_logout" : "staff_logout",
+    });
+    writeDb(db);
+  }
   res.clearCookie(SESSION_COOKIE);
   res.json({ ok: true });
 });
@@ -1089,6 +1153,13 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
     passwordHash: await bcrypt.hash(password, 10),
     mustChangePassword: true,
   };
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "staff_account_created",
+    details: `${username} (${role})`,
+  });
   writeDb(db);
   res.status(201).json({ staff: publicStaff(db.staffAccounts[username]) });
 });
@@ -1102,7 +1173,15 @@ app.delete("/api/staff/accounts/:username", requireStaffRole("admin"), (req, res
   const { username } = req.params;
   if (username === req.staff.username) return res.status(400).json({ error: "You can't remove your own account" });
   if (!db.staffAccounts[username]) return res.status(404).json({ error: "Account not found" });
+  const removedRole = db.staffAccounts[username].role;
   delete db.staffAccounts[username];
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "staff_account_removed",
+    details: `${username} (${removedRole})`,
+  });
   writeDb(db);
   res.json({ ok: true });
 });
@@ -1590,6 +1669,13 @@ app.post(
       recap: { descriptionEn: "", descriptionAr: "", photos: [] },
     };
     db.events.push(event);
+    logActivity(db, {
+      actorType: "staff",
+      actorId: req.staff.username,
+      actorName: req.staff.name,
+      action: "event_created",
+      details: `${nameEn} (${date})`,
+    });
     writeDb(db);
     res.status(201).json(event);
   }
@@ -1662,6 +1748,13 @@ app.put(
     event.parentEventId = parentCheck.parentEventId;
     event.allowMultipleActivities = String(allowMultipleActivities) === "true";
     if (req.file) event.coverPhoto = `/uploads/events/${req.file.filename}`;
+    logActivity(db, {
+      actorType: "staff",
+      actorId: req.staff.username,
+      actorName: req.staff.name,
+      action: "event_edited",
+      details: `${nameEn} (${date})`,
+    });
     writeDb(db);
     res.json({
       ...event,
@@ -1695,6 +1788,13 @@ app.delete("/api/events/:eventId", requireStaffRole("admin"), (req, res) => {
   const removedRegistrations = db.registrations.filter((r) => r.eventId === eventId).length;
   db.registrations = db.registrations.filter((r) => r.eventId !== eventId);
   db.events = db.events.filter((e) => e.id !== eventId);
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "event_deleted",
+    details: `${event.nameEn} (${removedRegistrations} registration(s) removed)`,
+  });
   writeDb(db);
   res.json({ ok: true, eventId, removedRegistrations });
 });
@@ -2295,6 +2395,13 @@ app.post("/api/register", requireMember, async (req, res) => {
     waitlisted: isWaitlisted,
   };
   db.registrations.push(registration);
+  logActivity(db, {
+    actorType: "member",
+    actorId: membershipNumber,
+    actorName: req.member.name,
+    action: isWaitlisted ? "event_waitlisted" : "event_registered",
+    details: `${event.nameEn}${dependentName ? ` (for ${dependentName})` : ""}`,
+  });
   writeDb(db);
 
   const possessive = dependentName ? `${dependentName}'s` : "Your";
@@ -2341,7 +2448,7 @@ app.get("/api/registrations", requireStaffRole("admin"), (req, res) => {
 // "already checked in" / waitlisted / points-awarded logic can't drift
 // between them. Mutates reg and persists on success; the caller just maps
 // the returned {status, body} onto the HTTP response.
-function performCheckIn(db, reg) {
+function performCheckIn(db, reg, staffActor) {
   const event = db.events.find((e) => e.id === reg.eventId);
   const member = publicMember(db.members[reg.membershipNumber]);
   // The person actually walking through the gate might be a family member
@@ -2369,6 +2476,15 @@ function performCheckIn(db, reg) {
 
   reg.checkedIn = true;
   reg.checkInAt = new Date().toISOString();
+  if (staffActor) {
+    logActivity(db, {
+      actorType: "staff",
+      actorId: staffActor.username,
+      actorName: staffActor.name,
+      action: "checkin",
+      details: `${attendeeName} — ${event ? event.nameEn : "unknown event"}`,
+    });
+  }
   writeDb(db);
 
   return {
@@ -2393,7 +2509,7 @@ app.post("/api/checkin", requireStaffRole("staff"), async (req, res) => {
   const { code } = req.body;
   const { reg, error } = parseAndVerify(db, code);
   if (error) return res.status(400).json({ error });
-  const result = performCheckIn(db, reg);
+  const result = performCheckIn(db, reg, req.staff);
   res.status(result.status).json(result.body);
 });
 
@@ -2443,7 +2559,7 @@ app.post("/api/checkin/manual", requireStaffRole("staff"), (req, res) => {
   const registrationId = Number(req.body.registrationId);
   const reg = db.registrations.find((r) => r.id === registrationId);
   if (!reg) return res.status(404).json({ error: "Registration not found" });
-  const result = performCheckIn(db, reg);
+  const result = performCheckIn(db, reg, req.staff);
   res.status(result.status).json(result.body);
 });
 
@@ -2529,6 +2645,13 @@ app.post("/api/redeem", requireMember, (req, res) => {
     balanceAtRequestTime: snapshot.balance,
   };
   db.redemptions.push(redemption);
+  logActivity(db, {
+    actorType: "member",
+    actorId: membershipNumber,
+    actorName: req.member.name,
+    action: "redemption_requested",
+    details: `${tierDef.rewardEn || "Tier " + tierDef.tier} (${tierDef.pointsRequired} pts)`,
+  });
   writeDb(db);
   res.status(201).json({
     redemption,
@@ -2563,6 +2686,13 @@ app.post("/api/redemptions/:id/status", requireStaffRole("admin"), (req, res) =>
   // instead of free-typed text - a real audit trail.
   redemption.approvedBy = `${req.staff.name} (${req.staff.username})`;
   if (status === "Fulfilled") redemption.fulfilledAt = new Date().toISOString();
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "redemption_status_changed",
+    details: `Redemption #${id} → ${status} (${redemption.membershipNumber})`,
+  });
   writeDb(db);
   res.json(redemption);
 });
@@ -2580,6 +2710,67 @@ app.get("/api/admin/overview", requireStaffRole("admin"), (req, res) => {
     pendingRedemptions: db.redemptions.filter((r) => r.status === "Pending").length,
     totalStaffAccounts: Object.keys(db.staffAccounts).length,
   });
+});
+
+// -------------------------------------------------------------------------
+// ACTIVITY LOG (admin-only report - see logActivity() near readDb() above)
+// -------------------------------------------------------------------------
+// Shared by both the in-app report and the .xlsx export below, so the two
+// can never show different rows for the same filters. Returns newest-first.
+function filterActivityLog(db, query) {
+  let rows = db.activityLog.slice().reverse();
+  const { actorType, q, action, from, to } = query;
+  if (actorType) rows = rows.filter((r) => r.actorType === actorType);
+  if (action) rows = rows.filter((r) => r.action === action);
+  if (q) {
+    const needle = String(q).trim().toLowerCase();
+    if (needle) {
+      rows = rows.filter(
+        (r) =>
+          (r.actorId || "").toLowerCase().includes(needle) ||
+          (r.actorName || "").toLowerCase().includes(needle)
+      );
+    }
+  }
+  // `at` is a full ISO timestamp; from/to are plain "YYYY-MM-DD" dates from a
+  // date-picker, so string comparison against just the date portion is
+  // enough - no timezone-aware parsing needed for a same-day boundary check.
+  if (from) rows = rows.filter((r) => r.at.slice(0, 10) >= from);
+  if (to) rows = rows.filter((r) => r.at.slice(0, 10) <= to);
+  return rows;
+}
+app.get("/api/admin/activity-log", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rows = filterActivityLog(db, req.query);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  // The distinct action tags seen across the WHOLE log (not just the current
+  // filtered page) - the frontend uses this to populate the "Action" filter
+  // dropdown with only tags that have ever actually occurred.
+  const actions = Array.from(new Set(db.activityLog.map((r) => r.action))).sort();
+  res.json({ entries: rows.slice(offset, offset + limit), total: rows.length, actions });
+});
+
+// Same filters as the report above, exported as a real .xlsx download (the
+// SheetJS package this app already depends on for member import/export) -
+// capped at ACTIVITY_LOG_MAX rows since that's the most the log ever holds.
+app.get("/api/admin/activity-log/export.xlsx", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rows = filterActivityLog(db, req.query).map((r) => ({
+    Time: r.at,
+    "User type": r.actorType === "member" ? "Member" : "Staff/Admin",
+    "User ID": r.actorId,
+    "User name": r.actorName,
+    Action: r.action,
+    Details: r.details,
+  }));
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Activity Log");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="ahlawy-activity-log.xlsx"');
+  res.send(buffer);
 });
 
 // Per-event registration/attendance breakdown for the admin dashboard - one
@@ -2736,6 +2927,13 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
     createdAt: new Date().toISOString(),
     accountCreatedAt: null,
   };
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "member_added",
+    details: `${name} (#${membershipNumber})`,
+  });
   writeDb(db);
   res.status(201).json({
     member: { membershipNumber, name, phone, familyGroup, hasLoggedInAccount: false, dependentsCount: 0 },
@@ -2885,6 +3083,13 @@ app.post(
       });
     });
 
+    logActivity(db, {
+      actorType: "staff",
+      actorId: req.staff.username,
+      actorName: req.staff.name,
+      action: "members_imported",
+      details: `${created.length} created, ${updated.length} updated, ${dependentsAdded.length} dependent(s) added, ${errors.length} error(s)`,
+    });
     writeDb(db);
     res.json({ created, updated, errors, dependentsAdded, dependentsSkipped, totalRows: rows.length });
   }
@@ -2947,6 +3152,15 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
     db.registrations.push(registration);
     invited.push({ membershipNumber, name: member.name, registrationId: registration.id });
   });
+  if (invited.length) {
+    logActivity(db, {
+      actorType: "staff",
+      actorId: req.staff.username,
+      actorName: req.staff.name,
+      action: "members_invited_to_event",
+      details: `${invited.length} member(s) → ${event.nameEn}`,
+    });
+  }
   writeDb(db);
 
   const overCapacity =
