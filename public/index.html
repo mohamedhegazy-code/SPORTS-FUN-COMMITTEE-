@@ -39,6 +39,7 @@
   <button class="tab-btn" id="tab-ladder-btn" data-view="ladder" data-i18n="tabLadder">Redemption Ladder</button>
   <button class="tab-btn" data-view="annual" data-i18n="tabAnnual">Annual Activities</button>
   <button class="tab-btn" data-view="tournaments" data-i18n="tabTournaments">Tournaments</button>
+  <button class="tab-btn" data-view="committee" data-i18n="tabCommittee">Committee</button>
   <button class="tab-btn" data-view="scan" data-i18n="tabScan">Gate Scanner</button>
   <span class="tab-wrap"><button class="tab-btn" data-view="admin" data-i18n="tabAdmin">Admin</button><span id="admin-chat-badge" class="tab-badge hidden">0</span></span>
 </nav>
@@ -454,6 +455,21 @@
       <button class="secondary small" id="tourn-public-back" data-i18n="btnBackToTournaments">&larr; Back to tournaments</button>
       <div id="tourn-public-detail-body" style="margin-top:14px;"></div>
     </div>
+  </section>
+
+  <!-- ============================= COMMITTEE (public roster) ============================= -->
+  <section id="view-committee" class="view">
+    <div class="page-hero">
+      <div class="page-hero-icon"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6.5" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 17.5c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+      <div class="page-hero-text">
+        <h2 data-i18n="committeePublicTitle">Committee</h2>
+        <p data-i18n="committeePublicIntro">The people running the Sports Entertainment Committee.</p>
+      </div>
+    </div>
+    <div class="card hidden" id="committee-public-empty">
+      <p style="color:var(--muted);" data-i18n="committeePublicEmpty">No committee members listed yet.</p>
+    </div>
+    <div id="committee-public-body"></div>
   </section>
 
   <!-- ============================= SCAN (staff gate scanner) ============================= -->
@@ -910,6 +926,39 @@
           <button class="primary" id="spotlight-submit" data-i18n="btnAddSpotlight">Add spotlight</button>
           <div class="msg" id="spotlight-msg"></div>
           <div id="spotlight-admin-list" style="margin-top:16px;"></div>
+        </div>
+
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6.5" r="3" stroke="currentColor" stroke-width="1.3"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><span data-i18n="adminCommittee">Committee</span></h2>
+          <p class="hint-note" data-i18n="committeeAdminHint">Manage the public Committee page — a photo, name, and personal title for each member, grouped into Top Committee, Higher Committee, and Committee.</p>
+
+          <h3 style="margin:6px 0;" data-i18n="committeeTierLabelsTitle">Section titles</h3>
+          <p class="hint-note" data-i18n="committeeTierLabelsHint">What the three section headings say on the public Committee page — set these to your own club's naming.</p>
+          <div id="committee-tier-labels-form"></div>
+          <button class="secondary" id="committee-tier-labels-save" data-i18n="btnSaveSectionTitles" style="margin-top:6px;">Save section titles</button>
+          <div class="msg" id="committee-tier-labels-msg"></div>
+
+          <h3 style="margin:18px 0 6px;" data-i18n="committeeMembersTitle">Members</h3>
+          <input type="hidden" id="committee-edit-id" value="" />
+          <div class="grid-2">
+            <div><label class="required-label" data-i18n="fieldNameEn">Name (EN)</label><input id="committee-name-en" /></div>
+            <div><label data-i18n="fieldNameAr">Name (AR)</label><input id="committee-name-ar" dir="rtl" /></div>
+          </div>
+          <div class="grid-2">
+            <div><label data-i18n="fieldCommitteeTitleEn">Title (EN)</label><input id="committee-title-en" placeholder="e.g. Chairman" /></div>
+            <div><label data-i18n="fieldCommitteeTitleAr">Title (AR)</label><input id="committee-title-ar" dir="rtl" /></div>
+          </div>
+          <label class="required-label" data-i18n="fieldCommitteeTier">Tier</label>
+          <select id="committee-tier"></select>
+          <label data-i18n="fieldCommitteePhoto">Photo (optional)</label>
+          <div id="committee-photo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="committee-photo-preview" alt="" style="max-height:100px;border-radius:8px;display:block;" /></div>
+          <input id="committee-photo" type="file" accept="image/*" />
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="primary" id="committee-submit" data-i18n="btnAddCommitteeMember">Add member</button>
+            <button class="secondary hidden" id="committee-cancel-edit" data-i18n="btnCancelEdit">Cancel edit</button>
+          </div>
+          <div class="msg" id="committee-msg"></div>
+          <div id="committee-admin-list" style="margin-top:16px;"></div>
         </div>
       </div>
 

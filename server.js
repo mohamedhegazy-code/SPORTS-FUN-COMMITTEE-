@@ -661,6 +661,34 @@ function readDb() {
   db.newsPosts = db.newsPosts || [];
   db.nextIds.spotlight = db.nextIds.spotlight || 1;
   db.spotlights = db.spotlights || [];
+  // Committee page: public, no-login roster of committee members (photo,
+  // bilingual name + personal title) grouped into three fixed tiers - "top",
+  // "higher", "committee" - see COMMITTEE_TIERS below for their display
+  // labels. `order` controls position within a tier (lower first); assigned
+  // sequentially on creation, adjustable via the move-up/down admin
+  // endpoints - see POST/PUT/DELETE /api/admin/committee below.
+  db.nextIds.committeeMember = db.nextIds.committeeMember || 1;
+  db.committee = db.committee || [];
+  // Admin-editable section titles for the three tiers above - not baked
+  // into i18n like most static UI text, since these are the club's own
+  // organizational naming (e.g. is the base one "Committee" or "Sports
+  // Entertainment Committee"?) and the admin should be able to fix them
+  // directly rather than asking for a code change every time. Starter
+  // defaults below are placeholders the admin can edit any time from the
+  // Committee admin card - see PUT /api/admin/committee/tier-labels.
+  db.committeeTierLabels = db.committeeTierLabels || {};
+  const COMMITTEE_TIER_LABEL_DEFAULTS = {
+    top: { nameEn: "Top Committee", nameAr: "اللجنة العليا" },
+    higher: { nameEn: "Higher Committee", nameAr: "اللجنة الأعلى" },
+    committee: { nameEn: "Committee", nameAr: "اللجنة" },
+  };
+  for (const tier of Object.keys(COMMITTEE_TIER_LABEL_DEFAULTS)) {
+    const existingLabel = db.committeeTierLabels[tier] || {};
+    db.committeeTierLabels[tier] = {
+      nameEn: typeof existingLabel.nameEn === "string" && existingLabel.nameEn ? existingLabel.nameEn : COMMITTEE_TIER_LABEL_DEFAULTS[tier].nameEn,
+      nameAr: typeof existingLabel.nameAr === "string" && existingLabel.nameAr ? existingLabel.nameAr : COMMITTEE_TIER_LABEL_DEFAULTS[tier].nameAr,
+    };
+  }
   // Tournaments: at most one per event, generates a group stage and/or
   // knockout bracket from that event's confirmed registrations (or from
   // teams the admin groups them into). See the "TOURNAMENTS" section below
@@ -2210,6 +2238,140 @@ app.delete("/api/spotlights/:id", requireStaffRole("admin"), (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------------------
+// COMMITTEE PAGE: a public, no-login roster of the club's committee
+// members, grouped into three fixed tiers (see COMMITTEE_TIERS) - each
+// member has a photo, a bilingual name, and a bilingual personal title
+// (e.g. "Chairman"/"رئيس اللجنة") distinct from which tier they belong to.
+// Tier display labels live in the frontend's i18n dictionary (same pattern
+// as tournament status/format labels) - this backend only ever stores and
+// validates the fixed tier slug, never any tier text.
+// ---------------------------------------------------------------------
+const COMMITTEE_TIERS = ["top", "higher", "committee"];
+
+app.get("/api/committee", (req, res) => {
+  const db = readDb();
+  res.json(
+    db.committee.slice().sort((a, b) => COMMITTEE_TIERS.indexOf(a.tier) - COMMITTEE_TIERS.indexOf(b.tier) || a.order - b.order)
+  );
+});
+
+// Lets the admin set the three section titles themselves (bilingual) rather
+// than asking for a code change - e.g. whether the base tier is called
+// "Committee" or "Sports Entertainment Committee". Also returned publicly
+// via GET /api/settings (committeeTierLabels) so the public Committee page
+// can render the right titles with no login required.
+app.put("/api/admin/committee/tier-labels", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const labels = req.body.labels;
+  if (!labels || typeof labels !== "object") return res.status(400).json({ error: "labels is required" });
+  for (const tier of COMMITTEE_TIERS) {
+    const entry = labels[tier];
+    const nameEn = (entry && entry.nameEn ? String(entry.nameEn) : "").trim();
+    const nameAr = (entry && entry.nameAr ? String(entry.nameAr) : "").trim();
+    if (!nameEn && !nameAr) return res.status(400).json({ error: `A title (English or Arabic) is required for every tier` });
+    db.committeeTierLabels[tier] = { nameEn: nameEn || db.committeeTierLabels[tier].nameEn, nameAr: nameAr || db.committeeTierLabels[tier].nameAr };
+  }
+  writeDb(db);
+  res.json({ committeeTierLabels: db.committeeTierLabels });
+});
+
+app.post("/api/admin/committee", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
+  const db = req.db;
+  const nameEn = (req.body.nameEn || "").trim();
+  const nameAr = (req.body.nameAr || "").trim();
+  const titleEn = (req.body.titleEn || "").trim();
+  const titleAr = (req.body.titleAr || "").trim();
+  const tier = req.body.tier;
+  if (!nameEn && !nameAr) return res.status(400).json({ error: "A name (English or Arabic) is required" });
+  if (!COMMITTEE_TIERS.includes(tier)) return res.status(400).json({ error: "A valid committee tier is required" });
+  // New member goes to the end of their tier's list, same as the landing
+  // page gallery/sponsors pattern - reorder afterward via the move endpoint.
+  const maxOrder = db.committee.filter((m) => m.tier === tier).reduce((max, m) => Math.max(max, m.order), -1);
+  const member = {
+    id: db.nextIds.committeeMember++,
+    nameEn,
+    nameAr,
+    titleEn,
+    titleAr,
+    tier,
+    order: maxOrder + 1,
+    photo: req.file ? `/uploads/events/${req.file.filename}` : "",
+    createdAt: new Date().toISOString(),
+  };
+  db.committee.push(member);
+  writeDb(db);
+  res.status(201).json(member);
+});
+
+app.put("/api/admin/committee/:id", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const member = db.committee.find((m) => m.id === id);
+  if (!member) return res.status(404).json({ error: "No such committee member" });
+  const nameEn = (req.body.nameEn || "").trim();
+  const nameAr = (req.body.nameAr || "").trim();
+  if (!nameEn && !nameAr) return res.status(400).json({ error: "A name (English or Arabic) is required" });
+  const tier = req.body.tier;
+  if (!COMMITTEE_TIERS.includes(tier)) return res.status(400).json({ error: "A valid committee tier is required" });
+  // Moving to a different tier goes to the end of the new tier's list,
+  // same placement rule as a brand-new member - its old position in the
+  // previous tier is meaningless once it's no longer in that list.
+  const order =
+    tier === member.tier
+      ? member.order
+      : db.committee.filter((m) => m.tier === tier && m.id !== id).reduce((max, m) => Math.max(max, m.order), -1) + 1;
+  const oldPhotoPath = member.photo ? path.join(EVENT_UPLOADS_DIR, path.basename(member.photo)) : null;
+  member.nameEn = nameEn;
+  member.nameAr = nameAr;
+  member.titleEn = (req.body.titleEn || "").trim();
+  member.titleAr = (req.body.titleAr || "").trim();
+  member.tier = tier;
+  member.order = order;
+  if (req.file) {
+    member.photo = `/uploads/events/${req.file.filename}`;
+    if (oldPhotoPath) fs.unlink(oldPhotoPath, () => {});
+  } else if (req.body.removePhoto === "true") {
+    member.photo = "";
+    if (oldPhotoPath) fs.unlink(oldPhotoPath, () => {});
+  }
+  writeDb(db);
+  res.json(member);
+});
+
+app.delete("/api/admin/committee/:id", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const member = db.committee.find((m) => m.id === id);
+  if (!member) return res.status(404).json({ error: "No such committee member" });
+  if (member.photo) fs.unlink(path.join(EVENT_UPLOADS_DIR, path.basename(member.photo)), () => {});
+  db.committee = db.committee.filter((m) => m.id !== id);
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+// Swaps this member's order with their immediate neighbor within the same
+// tier - same "move up/down" contract as the landing sections reorder,
+// just per-tier instead of one global list.
+app.put("/api/admin/committee/:id/move", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const member = db.committee.find((m) => m.id === id);
+  if (!member) return res.status(404).json({ error: "No such committee member" });
+  const direction = req.body.direction;
+  if (direction !== "up" && direction !== "down") return res.status(400).json({ error: "direction must be 'up' or 'down'" });
+  const tierMembers = db.committee.filter((m) => m.tier === member.tier).sort((a, b) => a.order - b.order);
+  const idx = tierMembers.findIndex((m) => m.id === id);
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= tierMembers.length) return res.json(member); // already at the edge - no-op
+  const other = tierMembers[swapIdx];
+  const tmp = member.order;
+  member.order = other.order;
+  other.order = tmp;
+  writeDb(db);
+  res.json({ ok: true });
+});
+
 // A no-privacy-risk "the community is alive" strip for the landing page:
 // member/event counts plus a top-earners leaderboard (name + balance only -
 // nothing else about a member is exposed here).
@@ -3734,6 +3896,7 @@ app.get("/api/settings", (req, res) => {
     theme: themePayload(db),
     landingPage: db.landingPage,
     terms: db.termsAndConditions,
+    committeeTierLabels: db.committeeTierLabels,
   });
 });
 

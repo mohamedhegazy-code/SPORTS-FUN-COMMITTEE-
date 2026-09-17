@@ -4,6 +4,7 @@ let LADDER_DATA = null;
 let EVENTS_DATA = [];
 let NEWS_DATA = [];
 let SPOTLIGHTS_DATA = [];
+let COMMITTEE_PUBLIC_DATA = []; // public Committee tab's last-loaded roster, kept for a language-switch re-render (see setLang())
 let COMMUNITY_STATS = null;
 let MEMBERS_DATA = []; // admin: full member roster, for the Members card (import/export/invite)
 // Admin-controlled feature toggle: whether the points system (balance,
@@ -356,6 +357,7 @@ function switchTab(view) {
   // Attendance section, which loads explicitly and always worked). Loading
   // it here too means opening (or returning to) the tab always reflects
   // whatever event is currently selected, default or not.
+  if (view === "committee") loadCommittee();
   if (view === "scan") loadCheckinRoster();
   if (view === "mypoints" && CURRENT_SESSION && CURRENT_SESSION.type === "member") loadMyChat();
   if (view === "admin" && CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin") {
@@ -444,6 +446,15 @@ function setLang(lang) {
   renderHeroUpcoming();
   renderNewsList(NEWS_DATA);
   renderSpotlightGrid(SPOTLIGHTS_DATA);
+  // Committee page/admin list are both built with t() at render time (tier
+  // labels), same reasoning as renderFamilyList()/renderTournamentBody()
+  // below - re-render from the already-fetched data rather than re-fetching.
+  renderPublicCommittee(COMMITTEE_PUBLIC_DATA);
+  renderCommitteeAdminList();
+  {
+    const committeeTierSel = document.getElementById("committee-tier");
+    if (committeeTierSel) committeeTierSel.innerHTML = committeeTierSelectHtml(committeeTierSel.value || COMMITTEE_TIERS[0]);
+  }
   renderCommunityStats(COMMUNITY_STATS);
   renderHeroStats(COMMUNITY_STATS);
   applyLandingPageToUI();
@@ -529,6 +540,16 @@ function applySettingsToUI() {
   applyThemeToUI();
   applyLandingPageToUI();
   populateTermsAdminForm();
+  // Committee tier titles are admin-editable data on SETTINGS (see
+  // committeeTierLabel() above) - refresh the form and every place that
+  // reads them whenever settings (re)load.
+  populateCommitteeTierLabelsForm();
+  renderPublicCommittee(COMMITTEE_PUBLIC_DATA);
+  renderCommitteeAdminList();
+  {
+    const committeeTierSel = document.getElementById("committee-tier");
+    if (committeeTierSel) committeeTierSel.innerHTML = committeeTierSelectHtml(committeeTierSel.value || COMMITTEE_TIERS[0]);
+  }
 }
 
 // -------------------------------------------------------- terms & conditions --
@@ -1055,6 +1076,7 @@ function updateUIForSession() {
       updateAdminChatBadge();
       loadNewsAdminList();
       loadSpotlightAdminList();
+      loadCommitteeAdminList();
       applySettingsToUI();
       populateLandingAdminForms();
       renderRecoveryPinStatus("staff-recovery-pin-status", CURRENT_SESSION.staff.hasRecoveryPin);
@@ -4403,6 +4425,244 @@ document.getElementById("spotlight-submit").addEventListener("click", async () =
     photoInput.value = "";
     await loadSpotlightAdminList();
     await loadCommunityContent();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+// --------------------------------------------------------------- committee --
+// Fixed tier slugs the backend validates against (see COMMITTEE_TIERS in
+// server.js). Unlike most static UI text, the three tiers' DISPLAY titles
+// are admin-editable data (SETTINGS.committeeTierLabels, set via the
+// "Section titles" form below and PUT /api/admin/committee/tier-labels) -
+// not i18n keys - since this is the club's own organizational naming, which
+// the admin should be able to fix directly rather than asking for a code
+// change. The i18n committeeTier* keys are only a last-resort fallback for
+// the brief window before SETTINGS has loaded.
+const COMMITTEE_TIERS = ["top", "higher", "committee"];
+function committeeTierLabel(tier) {
+  const labels = SETTINGS && SETTINGS.committeeTierLabels && SETTINGS.committeeTierLabels[tier];
+  if (labels) {
+    const preferred = currentLang === "ar" ? labels.nameAr : labels.nameEn;
+    const fallback = currentLang === "ar" ? labels.nameEn : labels.nameAr;
+    if (preferred || fallback) return preferred || fallback;
+  }
+  return t("committeeTier" + tier.charAt(0).toUpperCase() + tier.slice(1));
+}
+function committeeTierSelectHtml(selected) {
+  return COMMITTEE_TIERS.map((tr) => `<option value="${tr}" ${tr === selected ? "selected" : ""}>${committeeTierLabel(tr)}</option>`).join("");
+}
+document.getElementById("committee-tier").innerHTML = committeeTierSelectHtml(COMMITTEE_TIERS[0]);
+
+// Admin-editable section titles (see committeeTierLabel() above for why
+// these are data, not i18n) - one EN + one AR text input per tier, all
+// saved together in one PUT so the three always stay in sync.
+function populateCommitteeTierLabelsForm() {
+  const wrap = document.getElementById("committee-tier-labels-form");
+  if (!wrap) return;
+  const labels = (SETTINGS && SETTINGS.committeeTierLabels) || {};
+  wrap.innerHTML = COMMITTEE_TIERS.map((tier) => {
+    const entry = labels[tier] || {};
+    return `<div class="grid-2" style="margin-bottom:6px;">
+      <div><input class="committee-tier-label-en" data-tier="${tier}" value="${escapeAttr(entry.nameEn || "")}" placeholder="${committeeTierLabel(tier)} (EN)" /></div>
+      <div><input class="committee-tier-label-ar" data-tier="${tier}" dir="rtl" value="${escapeAttr(entry.nameAr || "")}" placeholder="${committeeTierLabel(tier)} (AR)" /></div>
+    </div>`;
+  }).join("");
+}
+document.getElementById("committee-tier-labels-save").addEventListener("click", async () => {
+  const msg = document.getElementById("committee-tier-labels-msg");
+  const wrap = document.getElementById("committee-tier-labels-form");
+  const labels = {};
+  COMMITTEE_TIERS.forEach((tier) => {
+    labels[tier] = {
+      nameEn: wrap.querySelector(`.committee-tier-label-en[data-tier="${tier}"]`).value.trim(),
+      nameAr: wrap.querySelector(`.committee-tier-label-ar[data-tier="${tier}"]`).value.trim(),
+    };
+  });
+  try {
+    const result = await api("/api/admin/committee/tier-labels", { method: "PUT", body: JSON.stringify({ labels }) });
+    SETTINGS.committeeTierLabels = result.committeeTierLabels;
+    populateCommitteeTierLabelsForm();
+    renderPublicCommittee(COMMITTEE_PUBLIC_DATA);
+    renderCommitteeAdminList();
+    document.getElementById("committee-tier").innerHTML = committeeTierSelectHtml(document.getElementById("committee-tier").value);
+    showMsg(msg, t("committeeTierLabelsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+async function loadCommittee() {
+  try {
+    const members = await api("/api/committee");
+    COMMITTEE_PUBLIC_DATA = members;
+    renderPublicCommittee(members);
+  } catch (e) {
+    /* leave whatever was last rendered - a transient fetch failure here
+       shouldn't blank out an already-visible public page */
+  }
+}
+function committeeMemberCardHtml(m) {
+  const name = currentLang === "ar" ? m.nameAr || m.nameEn : m.nameEn || m.nameAr;
+  const title = currentLang === "ar" ? m.titleAr || m.titleEn : m.titleEn || m.titleAr;
+  return `<div class="committee-card">
+    ${m.photo ? `<img class="committee-photo" src="${escapeAttr(m.photo)}" alt="" />` : `<div class="committee-photo committee-photo-placeholder"></div>`}
+    <div class="committee-name">${escapeAttr(name)}</div>
+    ${title ? `<div class="committee-title">${escapeAttr(title)}</div>` : ""}
+  </div>`;
+}
+function renderPublicCommittee(members) {
+  const body = document.getElementById("committee-public-body");
+  const empty = document.getElementById("committee-public-empty");
+  if (!body) return;
+  if (!members.length) {
+    body.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  body.innerHTML = COMMITTEE_TIERS.map((tier) => {
+    const tierMembers = members.filter((m) => m.tier === tier);
+    if (!tierMembers.length) return "";
+    return `<h2 class="section-title">${committeeTierLabel(tier)}</h2>
+      <div class="committee-grid">${tierMembers.map(committeeMemberCardHtml).join("")}</div>`;
+  }).join("");
+}
+
+// --------------------------------------------------- admin: committee --
+let COMMITTEE_ADMIN_DATA = [];
+async function loadCommitteeAdminList() {
+  const wrap = document.getElementById("committee-admin-list");
+  if (!wrap) return;
+  try {
+    COMMITTEE_ADMIN_DATA = await api("/api/committee");
+    renderCommitteeAdminList();
+  } catch (e) {
+    wrap.innerHTML = "";
+  }
+}
+function renderCommitteeAdminList() {
+  const wrap = document.getElementById("committee-admin-list");
+  if (!wrap) return;
+  if (!COMMITTEE_ADMIN_DATA.length) {
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.innerHTML = COMMITTEE_TIERS.map((tier) => {
+    const tierMembers = COMMITTEE_ADMIN_DATA.filter((m) => m.tier === tier).sort((a, b) => a.order - b.order);
+    if (!tierMembers.length) return "";
+    return `<h4 style="margin:10px 0 6px;">${committeeTierLabel(tier)}</h4>${tierMembers
+      .map(
+        (m, i) => `<div class="content-admin-item" data-id="${m.id}">
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${m.photo ? `<img src="${escapeAttr(m.photo)}" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" />` : ""}
+        <div>
+          <div class="title">${escapeAttr(m.nameEn || m.nameAr)}</div>
+          <div class="sub">${escapeAttr(m.titleEn || m.titleAr || "")}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <button class="secondary committee-move" data-id="${m.id}" data-dir="up" ${i === 0 ? "disabled" : ""} style="margin-top:0;padding:4px 8px;font-size:0.75rem;">&uarr;</button>
+        <button class="secondary committee-move" data-id="${m.id}" data-dir="down" ${i === tierMembers.length - 1 ? "disabled" : ""} style="margin-top:0;padding:4px 8px;font-size:0.75rem;">&darr;</button>
+        <button class="secondary committee-edit" data-id="${m.id}" style="margin-top:0;">${escapeAttr(t("btnEdit"))}</button>
+        <button class="secondary committee-delete" data-id="${m.id}" style="margin-top:0;">${escapeAttr(t("btnRemove"))}</button>
+      </div>
+    </div>`
+      )
+      .join("")}`;
+  }).join("");
+  wrap.querySelectorAll(".committee-move").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api("/api/admin/committee/" + btn.dataset.id + "/move", { method: "PUT", body: JSON.stringify({ direction: btn.dataset.dir }) });
+        await loadCommitteeAdminList();
+        await loadCommittee();
+      } catch (e) {
+        /* ignore - list stays as-is if the move fails */
+      }
+    });
+  });
+  wrap.querySelectorAll(".committee-delete").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(t("confirmDeleteCommitteeMember"))) return;
+      try {
+        await api("/api/admin/committee/" + btn.dataset.id, { method: "DELETE" });
+        await loadCommitteeAdminList();
+        await loadCommittee();
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  });
+  wrap.querySelectorAll(".committee-edit").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const m = COMMITTEE_ADMIN_DATA.find((x) => x.id === Number(btn.dataset.id));
+      if (!m) return;
+      document.getElementById("committee-edit-id").value = m.id;
+      document.getElementById("committee-name-en").value = m.nameEn || "";
+      document.getElementById("committee-name-ar").value = m.nameAr || "";
+      document.getElementById("committee-title-en").value = m.titleEn || "";
+      document.getElementById("committee-title-ar").value = m.titleAr || "";
+      document.getElementById("committee-tier").innerHTML = committeeTierSelectHtml(m.tier);
+      const previewWrap = document.getElementById("committee-photo-preview-wrap");
+      const preview = document.getElementById("committee-photo-preview");
+      if (m.photo) {
+        preview.src = m.photo;
+        previewWrap.classList.remove("hidden");
+      } else {
+        previewWrap.classList.add("hidden");
+      }
+      document.getElementById("committee-submit").textContent = t("btnSaveCommitteeMember");
+      document.getElementById("committee-cancel-edit").classList.remove("hidden");
+      document.getElementById("committee-name-en").scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+}
+function resetCommitteeForm() {
+  document.getElementById("committee-edit-id").value = "";
+  document.getElementById("committee-name-en").value = "";
+  document.getElementById("committee-name-ar").value = "";
+  document.getElementById("committee-title-en").value = "";
+  document.getElementById("committee-title-ar").value = "";
+  document.getElementById("committee-tier").innerHTML = committeeTierSelectHtml(COMMITTEE_TIERS[0]);
+  document.getElementById("committee-photo").value = "";
+  document.getElementById("committee-photo-preview-wrap").classList.add("hidden");
+  document.getElementById("committee-submit").textContent = t("btnAddCommitteeMember");
+  document.getElementById("committee-cancel-edit").classList.add("hidden");
+}
+document.getElementById("committee-cancel-edit").addEventListener("click", resetCommitteeForm);
+document.getElementById("committee-submit").addEventListener("click", async () => {
+  const editId = document.getElementById("committee-edit-id").value;
+  const nameEn = document.getElementById("committee-name-en").value.trim();
+  const nameAr = document.getElementById("committee-name-ar").value.trim();
+  const titleEn = document.getElementById("committee-title-en").value.trim();
+  const titleAr = document.getElementById("committee-title-ar").value.trim();
+  const tier = document.getElementById("committee-tier").value;
+  const photoInput = document.getElementById("committee-photo");
+  const msg = document.getElementById("committee-msg");
+  if (!nameEn && !nameAr) {
+    highlightMissingFields(["committee-name-en"]);
+    showMsg(msg, t("errFillFields"), false);
+    return;
+  }
+  const fd = new FormData();
+  fd.append("nameEn", nameEn);
+  fd.append("nameAr", nameAr);
+  fd.append("titleEn", titleEn);
+  fd.append("titleAr", titleAr);
+  fd.append("tier", tier);
+  if (photoInput.files[0]) fd.append("photo", photoInput.files[0]);
+  try {
+    if (editId) {
+      await api("/api/admin/committee/" + editId, { method: "PUT", body: fd });
+      showMsg(msg, t("committeeMemberSaved"), true);
+    } else {
+      await api("/api/admin/committee", { method: "POST", body: fd });
+      showMsg(msg, t("committeeMemberAdded"), true);
+    }
+    resetCommitteeForm();
+    await loadCommitteeAdminList();
+    await loadCommittee();
   } catch (e) {
     showMsg(msg, e.message, false);
   }

@@ -860,6 +860,26 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 .spotlight-card .name { font-weight: 700; color: var(--red-dark); margin-bottom: 4px; }
 .spotlight-card .blurb { font-size: 0.85rem; color: var(--muted); }
 
+/* ------------------------------------------------------------ committee --- */
+.committee-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px;
+}
+.committee-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 20px 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.committee-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(139, 0, 0, 0.15); }
+.committee-photo {
+  width: 96px; height: 96px; border-radius: 50%; margin: 0 auto 14px; object-fit: cover; object-position: center;
+  border: 3px solid #fff; box-shadow: 0 0 0 2px var(--gold);
+}
+.committee-photo-placeholder {
+  background: linear-gradient(135deg, var(--red), var(--red-dark));
+}
+.committee-name { font-weight: 700; color: var(--red-dark); margin-bottom: 3px; }
+.committee-title { font-size: 0.85rem; color: var(--muted); }
+
 /* ------------------------------------------------------------ gallery --- */
 .gallery-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
