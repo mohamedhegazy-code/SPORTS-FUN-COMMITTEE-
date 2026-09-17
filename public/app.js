@@ -2548,12 +2548,34 @@ async function loadMyRegistrations() {
             <div class="meta">${escapeAttr(evDate)}</div>
             ${statusBadge}
           </div>
+          <button type="button" class="danger small myreg-cancel-btn" data-reg-id="${r.id}">${escapeAttr(t("btnCancelRegistration"))}</button>
         </div>
         ${canViewQr ? `<div class="qr-entry" id="myreg-qr-${r.id}"><h4>${escapeAttr(t("qrTitle"))}</h4><img src="${r.qrDataUrl}" alt="QR code" /><p class="note">${escapeAttr(t("qrReminderNote"))}</p></div>` : ""}`;
       })
       .join("");
+    wrap.querySelectorAll(".myreg-cancel-btn").forEach((btn) => {
+      btn.addEventListener("click", () => cancelMyRegistration(Number(btn.dataset.regId)));
+    });
   } catch (e) {
     wrap.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;">${t("errGeneric")}</p>`;
+  }
+}
+
+// Self-service cancellation - see DELETE /api/me/registrations/:id in
+// server.js for the rules (allowed any time, even after check-in; blocked
+// only if this event's tournament bracket has already been generated). No
+// separate confirm-then-choose-waitlist flow is needed here since the
+// server itself decides whether a freed confirmed spot gets auto-handed to
+// the next person waiting - the member just gets told if that happened.
+async function cancelMyRegistration(regId) {
+  if (!confirm(t("confirmCancelRegistration"))) return;
+  try {
+    const result = await api("/api/me/registrations/" + regId, { method: "DELETE" });
+    await loadMyRegistrations();
+    await loadMyBalance();
+    if (result.promoted) alert(t("cancelRegistrationPromotedNote"));
+  } catch (e) {
+    alert(e.message);
   }
 }
 
@@ -2974,6 +2996,7 @@ function activityActionLabel(action) {
     event_deleted: "alActionEventDeleted",
     event_registered: "alActionEventRegistered",
     event_waitlisted: "alActionEventWaitlisted",
+    event_registration_cancelled: "alActionEventRegistrationCancelled",
     checkin: "alActionCheckin",
     redemption_requested: "alActionRedemptionRequested",
     redemption_status_changed: "alActionRedemptionStatusChanged",

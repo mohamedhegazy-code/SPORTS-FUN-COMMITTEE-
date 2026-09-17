@@ -2893,6 +2893,55 @@ app.get("/api/me/registrations", requireMember, async (req, res) => {
   res.json(enriched);
 });
 
+// Self-service cancellation: a member removing their own (or a dependent's)
+// registration, any time up until they choose to - no cutoff, and allowed
+// even after check-in (the balance is computed fresh from db.registrations
+// every time - see registrationPoints()/totalEarned() above - so removing a
+// checked-in registration automatically drops whatever points it had earned,
+// with nothing extra to reverse). The one thing this can't safely undo is a
+// spot already baked into a generated tournament bracket/group stage (see
+// the tournament data-shape comment above findTournament()) - once that
+// exists, pulling an entrant out would leave dangling references in already-
+// generated matches, so that specific case is blocked with a message to
+// contact the committee instead.
+app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const reg = db.registrations.find((r) => r.id === id);
+  if (!reg || reg.membershipNumber !== req.member.membershipNumber) {
+    return res.status(404).json({ error: "No such registration" });
+  }
+  const tournament = findTournament(db, reg.eventId);
+  if (tournament && (tournament.groups || tournament.knockout) && !reg.waitlisted) {
+    return res.status(400).json({
+      error: "This event's tournament bracket has already been generated - contact the committee to cancel this spot.",
+    });
+  }
+  db.registrations = db.registrations.filter((r) => r.id !== id);
+  // A confirmed spot just opened up - automatically hand it to whoever's
+  // been on the waiting list the longest, same effect as the admin's manual
+  // "promote" action (see POST /api/admin/registrations/:id/promote above).
+  let promoted = null;
+  if (!reg.waitlisted) {
+    promoted = db.registrations
+      .filter((r) => r.eventId === reg.eventId && r.waitlisted)
+      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
+    if (promoted) promoted.waitlisted = false;
+  }
+  const event = db.events.find((e) => e.id === reg.eventId);
+  logActivity(db, {
+    actorType: "member",
+    actorId: req.member.membershipNumber,
+    actorName: req.member.name,
+    action: "event_registration_cancelled",
+    details: `${event ? event.nameEn : "Event"}${reg.dependentName ? ` (for ${reg.dependentName})` : ""}${
+      promoted ? ` - waiting-list spot opened up for membership ${promoted.membershipNumber}` : ""
+    }`,
+  });
+  writeDb(db);
+  res.json({ ok: true, promoted: !!promoted });
+});
+
 // This is the "online registration" endpoint: the logged-in member signs up
 // for an event. Early registration is detected automatically from the
 // event's deadline.
