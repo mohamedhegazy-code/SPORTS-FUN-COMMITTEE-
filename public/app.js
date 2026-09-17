@@ -2823,6 +2823,8 @@ function activityActionLabel(action) {
     member_added: "alActionMemberAdded",
     members_imported: "alActionMembersImported",
     members_invited_to_event: "alActionMembersInvitedToEvent",
+    family_linked: "alActionFamilyLinked",
+    family_unlinked: "alActionFamilyUnlinked",
   };
   // Falls back to the raw action tag for anything not in the map yet, so a
   // newly added logActivity() call site still shows *something* readable
@@ -3771,6 +3773,43 @@ function renderDirectoryTable() {
           })
           .join("")}</tbody></table>`
       : `<p class="dashboard-empty-note">${t("noRegistrationsYet")}</p>`;
+    // Distinct from Family Members (dependents) above: these are OTHER club
+    // members with their OWN account/login, pooled into this member's
+    // familyGroup so their points count together (see poolingKey() in
+    // server.js) while each still registers for events independently. A
+    // member can link these themselves under My Family, and staff can do
+    // the same here for any two (or more) existing accounts - e.g. once a
+    // family member gets their own membership number and login, link it to
+    // the parent's here so their points still pool.
+    const poolMembers = (m.familyGroup || "").trim()
+      ? DIRECTORY_DATA.filter((other) => (other.familyGroup || "").trim() === m.familyGroup.trim())
+      : [];
+    const linkedHtml = poolMembers.length > 1
+      ? `<ul class="directory-list">${poolMembers
+          .filter((p) => p.membershipNumber !== m.membershipNumber)
+          .map(
+            (p) =>
+              `<li>${escapeAttr(p.name)} (#${escapeAttr(p.membershipNumber)}) <button class="secondary family-unlink-btn" data-me="${escapeAttr(
+                m.membershipNumber
+              )}" data-target="${escapeAttr(p.membershipNumber)}" style="margin-inline-start:8px;padding:2px 8px;font-size:0.72rem;">${t(
+                "btnUnlink"
+              )}</button></li>`
+          )
+          .join("")}</ul>`
+      : `<p class="dashboard-empty-note">${t("noLinkedAccounts")}</p>`;
+    const familyLinkHtml = `<div style="margin-top:14px;">
+        <h4 style="margin:6px 0;">${t("colLinkedAccounts")}</h4>
+        ${linkedHtml}
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center;">
+          <input class="family-link-input" data-me="${escapeAttr(m.membershipNumber)}" placeholder="${t(
+      "fieldMembership"
+    )}" style="max-width:140px;padding:6px 8px;font-size:0.8rem;" />
+          <button class="secondary family-link-btn" data-me="${escapeAttr(m.membershipNumber)}" style="padding:6px 10px;font-size:0.78rem;">${t(
+      "btnLinkFamilyMember"
+    )}</button>
+        </div>
+        <div class="msg family-link-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
+      </div>`;
     return `<tr data-directory-row data-search="${searchBlob}">
         <td>${escapeAttr(m.membershipNumber)}</td>
         <td>${escapeAttr(m.name)}</td>
@@ -3788,6 +3827,7 @@ function renderDirectoryTable() {
             <div><h4 style="margin:6px 0;">${t("colFamilyMembers")}</h4>${dependentsHtml}</div>
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
           </div>
+          ${familyLinkHtml}
         </td>
       </tr>`;
   }).join("");
@@ -3806,6 +3846,41 @@ function renderDirectoryTable() {
       detailRow.dataset.open = String(nowOpen);
       btn.textContent = nowOpen ? t("btnHideDetails") : t("btnDetails");
       applyDirectorySearchFilter();
+    });
+  });
+  wrap.querySelectorAll(".family-link-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const me = btn.dataset.me;
+      const input = wrap.querySelector(`.family-link-input[data-me="${me}"]`);
+      const msg = wrap.querySelector(`.family-link-msg[data-me="${me}"]`);
+      const otherId = input.value.trim();
+      if (!otherId) return showMsg(msg, t("errFillFields"), false);
+      try {
+        await api(`/api/admin/members/${encodeURIComponent(me)}/family/link`, {
+          method: "POST",
+          body: JSON.stringify({ membershipNumber: otherId }),
+        });
+        await loadAdminDirectory();
+      } catch (e) {
+        showMsg(msg, e.message, false);
+      }
+    });
+  });
+  wrap.querySelectorAll(".family-unlink-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const me = btn.dataset.me;
+      const target = btn.dataset.target;
+      const msg = wrap.querySelector(`.family-link-msg[data-me="${me}"]`);
+      if (!confirm(t("confirmUnlinkFamilyMember"))) return;
+      try {
+        await api(`/api/admin/members/${encodeURIComponent(me)}/family/unlink`, {
+          method: "POST",
+          body: JSON.stringify({ membershipNumber: target }),
+        });
+        await loadAdminDirectory();
+      } catch (e) {
+        showMsg(msg, e.message, false);
+      }
     });
   });
   applyDirectorySearchFilter();

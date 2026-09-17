@@ -654,6 +654,8 @@ const I18N = {
     alActionMemberAdded: "Member added",
     alActionMembersImported: "Members imported",
     alActionMembersInvitedToEvent: "Members invited to an event",
+    alActionFamilyLinked: "Family accounts linked",
+    alActionFamilyUnlinked: "Family accounts unlinked",
 
     // Admin: members import/export & invite
     adminMembersTitle: "Members",
@@ -704,6 +706,8 @@ const I18N = {
     directoryIntro: "Every member, in one place: contact details, points balance, family members, and their full registration history.",
     colPointsBalance: "Points balance",
     colFamilyMembers: "Family members",
+    colLinkedAccounts: "Linked accounts (shared points)",
+    noLinkedAccounts: "Not linked to any other account.",
     colStatus: "Status",
     colPoints: "Points",
     statusRegistered: "Registered",
@@ -1445,6 +1449,8 @@ const I18N = {
     alActionMemberAdded: "إضافة عضو",
     alActionMembersImported: "استيراد أعضاء",
     alActionMembersInvitedToEvent: "دعوة أعضاء لفعالية",
+    alActionFamilyLinked: "ربط حسابات عائلية",
+    alActionFamilyUnlinked: "إلغاء ربط حسابات عائلية",
 
     // الأعضاء: استيراد وتصدير ودعوة (المسؤول)
     adminMembersTitle: "الأعضاء",
@@ -1495,6 +1501,8 @@ const I18N = {
     directoryIntro: "كل عضو في مكان واحد: بيانات التواصل، رصيد النقاط، أفراد العائلة، وسجل التسجيلات الكامل.",
     colPointsBalance: "رصيد النقاط",
     colFamilyMembers: "أفراد العائلة",
+    colLinkedAccounts: "الحسابات المرتبطة (نقاط مشتركة)",
+    noLinkedAccounts: "غير مرتبط بأي حساب آخر.",
     colStatus: "الحالة",
     colPoints: "النقاط",
     statusRegistered: "مسجَّل",

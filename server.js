@@ -2468,38 +2468,71 @@ app.delete("/api/me/nickname", requireMember, (req, res) => {
 // connects two EXISTING club member accounts (e.g. a spouse or adult child
 // who already has their own membership number, and possibly their own
 // login) into the same familyGroup, so poolingKey() pools their points
-// together automatically - no separate "merge points" logic needed.
+// together automatically - no separate "merge points" logic needed. Each
+// member keeps registering for events under their own account; only the
+// points balance is shared.
+//
+// Shared by both the member self-service endpoints right below AND their
+// admin equivalents further down (POST /api/admin/members/:id/family/link
+// and .../unlink) - an admin doing this on a member's behalf, e.g. to link a
+// child's own new account to a parent's, without either of them needing to
+// be logged in or to already know each other's membership number.
+function linkFamilyGroups(db, memberA, memberB) {
+  if (memberA.membershipNumber === memberB.membershipNumber) {
+    return { ok: false, status: 400, error: "A member can't be linked to themselves" };
+  }
+  const groupA = memberA.familyGroup && memberA.familyGroup.trim() ? memberA.familyGroup.trim() : null;
+  const groupB = memberB.familyGroup && memberB.familyGroup.trim() ? memberB.familyGroup.trim() : null;
+  if (groupA && groupB && groupA !== groupB) {
+    // Both are already pooled with someone else under different groups -
+    // silently merging those two existing families together is more likely
+    // to be a typo than what was actually intended, so this asks for it to
+    // be sorted out explicitly (unlink one first) rather than guessing.
+    return { ok: false, status: 400, conflict: true };
+  }
+  // Whichever of the two already has a group wins (so linking a third or
+  // fourth member later keeps joining the same established group); if
+  // neither has one yet, mint a new one from memberA's own ID.
+  const sharedGroup = groupA || groupB || `FAM-${memberA.membershipNumber}`;
+  memberA.familyGroup = sharedGroup;
+  memberB.familyGroup = sharedGroup;
+  return { ok: true, sharedGroup };
+}
+
+// Undoes a link: only removes the TARGET member from the shared group (their
+// own familyGroup field is cleared), leaving everyone else in the pool
+// untouched. If that was the last other member in the group, there's no
+// pool left to be part of - `me`'s own familyGroup is cleared too instead of
+// leaving them "pooled" with nobody.
+function unlinkFamilyMember(db, me, target) {
+  const myKey = poolingKey(db, me.membershipNumber);
+  if (poolingKey(db, target.membershipNumber) !== myKey || target.membershipNumber === me.membershipNumber) {
+    return { ok: false, status: 400, error: "That member isn't linked to this family group" };
+  }
+  target.familyGroup = "";
+  const remaining = membersInPool(db, myKey).filter((m) => m.membershipNumber !== target.membershipNumber);
+  if (remaining.length <= 1) me.familyGroup = "";
+  return { ok: true };
+}
+
 app.post("/api/me/family/link", requireMember, (req, res) => {
   const db = req.db;
   const me = db.members[req.member.membershipNumber];
   const otherId = String(req.body.membershipNumber || "").trim();
   if (!otherId) return res.status(400).json({ error: "Club member ID is required" });
-  if (otherId === me.membershipNumber) {
-    return res.status(400).json({ error: "You can't link your own club member ID to yourself" });
-  }
   const other = db.members[otherId];
   if (!other) return res.status(404).json({ error: "No club member found with that ID" });
-
-  const myGroup = me.familyGroup && me.familyGroup.trim() ? me.familyGroup.trim() : null;
-  const otherGroup = other.familyGroup && other.familyGroup.trim() ? other.familyGroup.trim() : null;
-  if (myGroup && otherGroup && myGroup !== otherGroup) {
-    // Both are already pooled with someone else under different groups -
-    // silently merging those two existing families together is more likely
-    // to be a typo than what either member actually wants, so this asks
-    // them to sort it out with the committee instead of guessing.
-    return res.status(400).json({
-      error: "That member is already linked to a different family group. Contact the committee to merge them.",
+  const result = linkFamilyGroups(db, me, other);
+  if (!result.ok) {
+    return res.status(result.status).json({
+      error: result.conflict
+        ? "That member is already linked to a different family group. Contact the committee to merge them."
+        : result.error,
     });
   }
-  // Whichever of the two already has a group wins (so linking a third or
-  // fourth member later keeps joining the same established group); if
-  // neither has one yet, mint a new one from the initiating member's ID.
-  const sharedGroup = myGroup || otherGroup || `FAM-${me.membershipNumber}`;
-  me.familyGroup = sharedGroup;
-  other.familyGroup = sharedGroup;
   writeDb(db);
   res.json({
-    familyGroup: sharedGroup,
+    familyGroup: result.sharedGroup,
     poolMembers: membersInPool(db, poolingKey(db, me.membershipNumber)).map((m) => ({
       membershipNumber: m.membershipNumber,
       name: m.name,
@@ -2507,10 +2540,8 @@ app.post("/api/me/family/link", requireMember, (req, res) => {
   });
 });
 
-// Undoes a link: only removes the TARGET member from the shared group (their
-// own familyGroup field is cleared), leaving everyone else in the pool
-// untouched. Either side of a link can undo it - there's no separate
-// "owner" of a family group once two members are joined.
+// Either side of a link can undo it - there's no separate "owner" of a
+// family group once two members are joined.
 app.post("/api/me/family/unlink", requireMember, (req, res) => {
   const db = req.db;
   const me = db.members[req.member.membershipNumber];
@@ -2518,16 +2549,8 @@ app.post("/api/me/family/unlink", requireMember, (req, res) => {
   if (!targetId) return res.status(400).json({ error: "Club member ID is required" });
   const target = db.members[targetId];
   if (!target) return res.status(404).json({ error: "No club member found with that ID" });
-  const myKey = poolingKey(db, me.membershipNumber);
-  if (poolingKey(db, targetId) !== myKey || targetId === me.membershipNumber) {
-    return res.status(400).json({ error: "That member isn't linked to your family group" });
-  }
-  target.familyGroup = "";
-  // If that was the last other member in the group, there's no pool left to
-  // be part of - clear my own familyGroup too instead of leaving me "pooled"
-  // with nobody.
-  const remaining = membersInPool(db, myKey).filter((m) => m.membershipNumber !== targetId);
-  if (remaining.length <= 1) me.familyGroup = "";
+  const result = unlinkFamilyMember(db, me, target);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
   writeDb(db);
   res.json({
     poolMembers: membersInPool(db, poolingKey(db, me.membershipNumber)).map((m) => ({
@@ -3221,6 +3244,74 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
   writeDb(db);
   res.status(201).json({
     member: { membershipNumber, name, phone, familyGroup, hasLoggedInAccount: false, dependentsCount: 0 },
+  });
+});
+
+// Admin equivalent of the member self-service family link/unlink above (see
+// linkFamilyGroups()/unlinkFamilyMember() there) - lets staff pool any
+// number of EXISTING member accounts into one shared family group directly
+// from the Member Directory, without needing either member to be logged in
+// or to already know each other's membership number. Typical use: a family
+// member gets their own membership number and login (so they can register
+// for events themselves) but should still share the family's points - link
+// them here once, or call this again with a third/fourth account to grow
+// the same group.
+app.post("/api/admin/members/:membershipNumber/family/link", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const me = db.members[req.params.membershipNumber];
+  if (!me) return res.status(404).json({ error: "No such member" });
+  const otherId = String(req.body.membershipNumber || "").trim();
+  if (!otherId) return res.status(400).json({ error: "The other member's club ID is required" });
+  const other = db.members[otherId];
+  if (!other) return res.status(404).json({ error: "No club member found with that ID" });
+  const result = linkFamilyGroups(db, me, other);
+  if (!result.ok) {
+    return res.status(result.status).json({
+      error: result.conflict
+        ? "Both members are already linked to different family groups - unlink one from its current group first, then relink."
+        : result.error,
+    });
+  }
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "family_linked",
+    details: `${me.name} (#${me.membershipNumber}) + ${other.name} (#${other.membershipNumber})`,
+  });
+  writeDb(db);
+  res.json({
+    familyGroup: result.sharedGroup,
+    poolMembers: membersInPool(db, poolingKey(db, me.membershipNumber)).map((m) => ({
+      membershipNumber: m.membershipNumber,
+      name: m.name,
+    })),
+  });
+});
+
+app.post("/api/admin/members/:membershipNumber/family/unlink", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const me = db.members[req.params.membershipNumber];
+  if (!me) return res.status(404).json({ error: "No such member" });
+  const targetId = String(req.body.membershipNumber || "").trim();
+  if (!targetId) return res.status(400).json({ error: "The member's club ID is required" });
+  const target = db.members[targetId];
+  if (!target) return res.status(404).json({ error: "No club member found with that ID" });
+  const result = unlinkFamilyMember(db, me, target);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "family_unlinked",
+    details: `${target.name} (#${target.membershipNumber}) removed from ${me.name}'s (#${me.membershipNumber}) family group`,
+  });
+  writeDb(db);
+  res.json({
+    poolMembers: membersInPool(db, poolingKey(db, me.membershipNumber)).map((m) => ({
+      membershipNumber: m.membershipNumber,
+      name: m.name,
+    })),
   });
 });
 
