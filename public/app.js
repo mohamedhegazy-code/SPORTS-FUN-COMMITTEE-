@@ -439,6 +439,12 @@ function setLang(lang) {
   applyLandingPageToUI();
   renderLandingSectionsAdminList();
   renderLadder();
+  // My Family's relationship dropdowns are built with t() at render time
+  // (like the tournament panel below), so without this they'd keep showing
+  // English/Arabic option labels after a language switch even though the
+  // rest of the page flipped. Safe to call unconditionally: it no-ops when
+  // there's no logged-in member or the #mp-family-list element isn't there.
+  renderFamilyList();
   // Tournament admin panel (progress stepper, setup/schedule cards, setup
   // preview) has its own render function driven by the TOURNAMENT_DATA
   // global rather than by setLang's usual per-section calls above - without
@@ -2054,6 +2060,22 @@ document.getElementById("fam-link-add").addEventListener("click", async () => {
 });
 
 // -------------------------------------------------------------- my family --
+// Fixed relationship choices offered in the dropdown (stored as-is, in
+// English, regardless of UI language - "Other" reveals a free-text field so
+// wording that doesn't fit this list, including Arabic terms, still works).
+const FAMILY_RELATIONS = ["Father", "Mother", "Husband", "Wife", "Son", "Daughter", "Brother", "Sister"];
+function familyRelationSelectHtml(currentValue) {
+  const isKnown = FAMILY_RELATIONS.includes(currentValue);
+  const isOther = !!currentValue && !isKnown;
+  const options = [`<option value="" ${!currentValue ? "selected" : ""}>${t("relSelectPlaceholder")}</option>`]
+    .concat(
+      FAMILY_RELATIONS.map(
+        (r) => `<option value="${r}" ${currentValue === r ? "selected" : ""}>${t("rel" + r)}</option>`
+      )
+    )
+    .concat([`<option value="other" ${isOther ? "selected" : ""}>${t("relOther")}</option>`]);
+  return options.join("");
+}
 function renderFamilyList() {
   const wrap = document.getElementById("mp-family-list");
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
@@ -2067,10 +2089,13 @@ function renderFamilyList() {
             d.relationship ? ` <span class="fam-rel-badge">(${escapeAttr(d.relationship)})</span>` : ""
           }</span>
         <span class="fam-rel-edit">
-          <input class="fam-rel-input" data-dep-id="${d.id}" value="${escapeAttr(d.relationship || "")}" placeholder="${t(
-            "fieldRelationship"
-          )}" />
-          <button class="secondary fam-rel-save" data-dep-id="${d.id}" style="margin-top:0;padding:6px 10px;font-size:0.75rem;">${t(
+          <select class="fam-rel-select" data-dep-id="${d.id}">${familyRelationSelectHtml(d.relationship || "")}</select>
+          <input class="fam-rel-other-input ${
+            !!d.relationship && !FAMILY_RELATIONS.includes(d.relationship) ? "" : "hidden"
+          }" data-dep-id="${d.id}" value="${
+            !!d.relationship && !FAMILY_RELATIONS.includes(d.relationship) ? escapeAttr(d.relationship) : ""
+          }" placeholder="${t("fieldRelationship")}" style="margin-top:6px;" />
+          <button class="secondary fam-rel-save" data-dep-id="${d.id}" style="margin-top:6px;padding:6px 10px;font-size:0.75rem;">${t(
             "btnSaveRelationship"
           )}</button>
         </span>
@@ -2092,18 +2117,29 @@ function renderFamilyList() {
       }
     });
   });
+  // Toggle the free-text "other" field per row as its dropdown changes.
+  wrap.querySelectorAll(".fam-rel-select").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const otherInput = wrap.querySelector(`.fam-rel-other-input[data-dep-id="${sel.dataset.depId}"]`);
+      if (!otherInput) return;
+      otherInput.classList.toggle("hidden", sel.value !== "other");
+      if (sel.value === "other") otherInput.focus();
+    });
+  });
   // Lets a member identify who each family member actually is - tag (or
   // retag) the relationship on a dependent added before this feature
   // existed, without deleting and re-adding them (which would disconnect
   // them from any registrations already made in their name).
   wrap.querySelectorAll(".fam-rel-save").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const input = wrap.querySelector(`.fam-rel-input[data-dep-id="${btn.dataset.depId}"]`);
+      const sel = wrap.querySelector(`.fam-rel-select[data-dep-id="${btn.dataset.depId}"]`);
+      const otherInput = wrap.querySelector(`.fam-rel-other-input[data-dep-id="${btn.dataset.depId}"]`);
+      const relationship = sel.value === "other" ? otherInput.value.trim() : sel.value;
       const msg = document.getElementById("fam-msg");
       try {
         const result = await api("/api/me/dependents/" + btn.dataset.depId, {
           method: "PUT",
-          body: JSON.stringify({ relationship: input.value.trim() }),
+          body: JSON.stringify({ relationship }),
         });
         CURRENT_SESSION.member.dependents = result.dependents;
         showMsg(msg, t("famRelationshipSaved"), true);
@@ -2115,10 +2151,19 @@ function renderFamilyList() {
   });
 }
 
+document.getElementById("fam-relationship").addEventListener("change", (e) => {
+  const otherInput = document.getElementById("fam-relationship-other");
+  otherInput.classList.toggle("hidden", e.target.value !== "other");
+  if (e.target.value === "other") otherInput.focus();
+  else otherInput.value = "";
+});
+
 document.getElementById("fam-add").addEventListener("click", async () => {
   const nameInput = document.getElementById("fam-name");
-  const relInput = document.getElementById("fam-relationship");
+  const relSelect = document.getElementById("fam-relationship");
+  const relOtherInput = document.getElementById("fam-relationship-other");
   const name = nameInput.value.trim();
+  const relationship = relSelect.value === "other" ? relOtherInput.value.trim() : relSelect.value;
   const msg = document.getElementById("fam-msg");
   if (!name) {
     highlightMissingFields(["fam-name"]);
@@ -2128,11 +2173,13 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   try {
     const result = await api("/api/me/dependents", {
       method: "POST",
-      body: JSON.stringify({ name, relationship: relInput.value.trim() }),
+      body: JSON.stringify({ name, relationship }),
     });
     CURRENT_SESSION.member.dependents = result.dependents;
     nameInput.value = "";
-    relInput.value = "";
+    relSelect.value = "";
+    relOtherInput.value = "";
+    relOtherInput.classList.add("hidden");
     showMsg(msg, t("famAdded"), true);
     renderFamilyList();
     renderAttendeesChecklist();

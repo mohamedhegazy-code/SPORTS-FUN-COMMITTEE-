@@ -1875,8 +1875,11 @@ app.post("/api/me/dependents", requireMember, (req, res) => {
   if (!name) return res.status(400).json({ error: "Name is required" });
   // Optional relationship label (e.g. "Son", "Daughter", "Spouse", "Parent")
   // so the primary member can identify who each family member actually is
-  // on the My Family card and on admin/attendance rosters - free text, not
-  // a fixed enum, since real families use varied wording (and Arabic terms).
+  // on the My Family card and on admin/attendance rosters. The client offers
+  // a dropdown of the common relations plus "Other" (free text), but this
+  // stays an unvalidated string here - not a fixed enum - since "Other" and
+  // the PUT below (retagging an existing dependent) can both still send any
+  // wording, including Arabic terms.
   const relationship = (req.body.relationship || "").trim();
   const member = db.members[req.member.membershipNumber];
   member.dependents = member.dependents || [];

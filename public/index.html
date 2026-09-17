@@ -302,7 +302,22 @@
       <div id="mp-family-list"></div>
       <div class="grid-2" style="align-items:end;">
         <div><label class="required-label" data-i18n="fieldFamilyMemberName">Family member's name</label><input id="fam-name" placeholder="e.g. Sara Ahmed" /></div>
-        <div><label data-i18n="fieldRelationship">Relationship (optional)</label><input id="fam-relationship" placeholder="e.g. Son, Daughter, Spouse" /></div>
+        <div>
+          <label data-i18n="fieldRelationship">Relationship (optional)</label>
+          <select id="fam-relationship">
+            <option value="" data-i18n="relSelectPlaceholder">Select relationship</option>
+            <option value="Father" data-i18n="relFather">Father</option>
+            <option value="Mother" data-i18n="relMother">Mother</option>
+            <option value="Husband" data-i18n="relHusband">Husband</option>
+            <option value="Wife" data-i18n="relWife">Wife</option>
+            <option value="Son" data-i18n="relSon">Son</option>
+            <option value="Daughter" data-i18n="relDaughter">Daughter</option>
+            <option value="Brother" data-i18n="relBrother">Brother</option>
+            <option value="Sister" data-i18n="relSister">Sister</option>
+            <option value="other" data-i18n="relOther">Other</option>
+          </select>
+          <input id="fam-relationship-other" class="hidden" style="margin-top:8px;" placeholder="e.g. Cousin, Uncle, Grandparent" />
+        </div>
       </div>
       <button class="secondary" id="fam-add" style="margin-top:10px;" data-i18n="btnAddFamilyMember">Add family member</button>
       <div class="msg" id="fam-msg"></div>
