@@ -256,6 +256,46 @@ const uploadEventPhoto = multer({
   },
 });
 
+// ---------------------------------------------------- hero banner video ---
+// The hero banner can optionally have a background video alongside its
+// existing photo - two different file fields ("photo" and "video") in one
+// multipart form, so this needs its own multer instance whose fileFilter
+// branches on which field a given file arrived in; uploadEventPhoto above
+// can't be reused since it only ever expects a single image field. Lives
+// under data/uploads/ (the persistent-volume directory - see the comment
+// above EVENT_UPLOADS_DIR) via its own "hero" subfolder, same reasoning.
+const HERO_VIDEO_UPLOADS_DIR = path.join(__dirname, "data", "uploads", "hero");
+fs.mkdirSync(HERO_VIDEO_UPLOADS_DIR, { recursive: true });
+const heroMediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, file.fieldname === "video" ? HERO_VIDEO_UPLOADS_DIR : EVENT_UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (file.fieldname === "video") {
+      const safeExt = [".mp4", ".webm", ".mov"].includes(ext) ? ext : ".mp4";
+      return cb(null, `hero-video-${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+    }
+    const safeExt = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext) ? ext : ".jpg";
+    cb(null, `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+  },
+});
+const uploadHeroMedia = multer({
+  storage: heroMediaStorage,
+  // 60MB covers a short, reasonably-compressed hero clip without letting a
+  // single upload eat a large slice of the 500MB persistent volume - the
+  // handler below also deletes the previous video file whenever it's
+  // replaced or removed, so re-uploads don't pile up as orphaned files the
+  // way small photo replacements elsewhere in this app harmlessly do.
+  limits: { fileSize: 60 * 1024 * 1024, files: 2 },
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === "video") {
+      if (!/^video\//.test(file.mimetype)) return cb(new Error("Only video files (MP4, WebM, or MOV) are allowed"));
+      return cb(null, true);
+    }
+    if (!/^image\//.test(file.mimetype)) return cb(new Error("Only image files are allowed"));
+    cb(null, true);
+  },
+});
+
 // ------------------------------------------------------------- branding ---
 // Admin-set logo, stored on disk the same way event photos are - see the
 // data/ vs public/ note above the event-uploads block.
@@ -582,6 +622,12 @@ function readDb() {
   // optional landing-page photo field, so an existing deploy that's never
   // set one just keeps showing the plain color gradient it already had.
   if (typeof db.landingPage.hero.photo !== "string") db.landingPage.hero.photo = "";
+  // Optional background video, same on/off-by-empty-string pattern as the
+  // photo above. When both are set, the video takes priority and the photo
+  // is used as its <video poster> (shown while the video loads, and as the
+  // fallback for a browser that can't play it) - see applyHeroMedia() in
+  // app.js and the public landing-page rendering there.
+  if (typeof db.landingPage.hero.video !== "string") db.landingPage.hero.video = "";
   db.landingPage.about = db.landingPage.about || {};
   if (typeof db.landingPage.about.titleEn !== "string") db.landingPage.about.titleEn = "About us";
   if (typeof db.landingPage.about.titleAr !== "string") db.landingPage.about.titleAr = "من نحن";
@@ -2044,21 +2090,42 @@ app.put("/api/admin/terms", requireStaffRole("admin"), (req, res) => {
 // is folded into GET /api/settings (see below) since the public landing
 // page already fetches that once at load; these are just the admin write
 // endpoints. All reuse uploadEventPhoto for photos/logos, same as news and
-// spotlights above.
-app.put("/api/admin/landing/hero", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
-  const db = req.db;
-  const { headlineEn, headlineAr, taglineEn, taglineAr, removePhoto } = req.body;
-  if (!headlineEn || !headlineEn.trim()) return res.status(400).json({ error: "An English headline is required" });
-  db.landingPage.hero = {
-    headlineEn: headlineEn.trim(),
-    headlineAr: (headlineAr || "").trim(),
-    taglineEn: (taglineEn || "").trim(),
-    taglineAr: (taglineAr || "").trim(),
-    photo: req.file ? `/uploads/events/${req.file.filename}` : removePhoto === "true" ? "" : db.landingPage.hero.photo,
-  };
-  writeDb(db);
-  res.json({ hero: db.landingPage.hero });
-});
+// spotlights above - except the hero banner, which also optionally takes a
+// background video (see uploadHeroMedia above).
+app.put(
+  "/api/admin/landing/hero",
+  requireStaffRole("admin"),
+  uploadHeroMedia.fields([
+    { name: "photo", maxCount: 1 },
+    { name: "video", maxCount: 1 },
+  ]),
+  (req, res) => {
+    const db = req.db;
+    const { headlineEn, headlineAr, taglineEn, taglineAr, removePhoto, removeVideo } = req.body;
+    if (!headlineEn || !headlineEn.trim()) return res.status(400).json({ error: "An English headline is required" });
+    const newPhotoFile = req.files && req.files.photo && req.files.photo[0];
+    const newVideoFile = req.files && req.files.video && req.files.video[0];
+    const oldVideo = db.landingPage.hero.video;
+    // A video is a much bigger file than any photo this app handles, and
+    // the persistent volume is capped at 500MB total - unlike small photo
+    // replacements elsewhere in this file, delete the previous one on disk
+    // whenever it's being replaced or explicitly removed, so re-uploads
+    // (an admin trying a few different clips) don't silently pile up.
+    if (oldVideo && (newVideoFile || removeVideo === "true")) {
+      fs.unlink(path.join(HERO_VIDEO_UPLOADS_DIR, path.basename(oldVideo)), () => {});
+    }
+    db.landingPage.hero = {
+      headlineEn: headlineEn.trim(),
+      headlineAr: (headlineAr || "").trim(),
+      taglineEn: (taglineEn || "").trim(),
+      taglineAr: (taglineAr || "").trim(),
+      photo: newPhotoFile ? `/uploads/events/${newPhotoFile.filename}` : removePhoto === "true" ? "" : db.landingPage.hero.photo,
+      video: newVideoFile ? `/uploads/hero/${newVideoFile.filename}` : removeVideo === "true" ? "" : db.landingPage.hero.video,
+    };
+    writeDb(db);
+    res.json({ hero: db.landingPage.hero });
+  }
+);
 
 app.put("/api/admin/landing/about", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
   const db = req.db;
@@ -4775,7 +4842,7 @@ app.use((err, req, res, next) => {
     };
     return res.status(400).json({ error: messages[err.code] || err.message });
   }
-  if (err && (/only image files/i.test(err.message || "") || /\.xlsx file/i.test(err.message || ""))) {
+  if (err && (/only image files/i.test(err.message || "") || /\.xlsx file/i.test(err.message || "") || /only video files/i.test(err.message || ""))) {
     return res.status(400).json({ error: err.message });
   }
   next(err);

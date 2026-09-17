@@ -745,8 +745,32 @@ function applyLandingPageToUI() {
     // card falls back to the plain club-color gradient defined in CSS
     // (.hero-photo-card's own background) rather than an empty url(). When
     // a photo IS set, .hero-photo-overlay (a separate absolutely-positioned
-    // layer on top) is what tints it in the club's own colors.
+    // layer on top) is what tints it in the club's own colors. Still set
+    // even when a video is also active - it's the video's poster/fallback,
+    // see the video block right below.
     heroPhotoCard.style.backgroundImage = lp.hero.photo ? `url("${lp.hero.photo}")` : "";
+  }
+  const heroVideoEl = document.getElementById("hero-video-bg");
+  if (heroVideoEl) {
+    // A video takes priority over the plain photo when both are set - the
+    // photo becomes the <video poster> (shown while it loads, and as the
+    // fallback for a browser/network that can't play it) instead of just
+    // disappearing. Only touch .src when it's actually changing, so this
+    // (called on every settings load) doesn't restart an already-playing
+    // video on every unrelated re-render.
+    if (lp.hero.video) {
+      if (heroVideoEl.getAttribute("src") !== lp.hero.video) heroVideoEl.setAttribute("src", lp.hero.video);
+      heroVideoEl.poster = lp.hero.photo || "";
+      heroVideoEl.classList.remove("hidden");
+      // Autoplay can still be blocked by some browsers even when muted; if
+      // so this just fails silently and the poster (or the plain photo/
+      // gradient behind it) keeps showing - never an error the visitor sees.
+      heroVideoEl.play().catch(() => {});
+    } else {
+      heroVideoEl.classList.add("hidden");
+      heroVideoEl.removeAttribute("src");
+      heroVideoEl.load();
+    }
   }
 
   const aboutTitleEl = document.getElementById("landing-about-title");
@@ -4222,6 +4246,18 @@ function populateLandingAdminForms() {
       heroPreviewWrap.classList.add("hidden");
       heroRemoveBtn.classList.add("hidden");
     }
+    const heroVideoPreview = document.getElementById("hero-video-preview");
+    const heroVideoPreviewWrap = document.getElementById("hero-video-preview-wrap");
+    const heroRemoveVideoBtn = document.getElementById("hero-remove-video-btn");
+    if (lp.hero.video) {
+      heroVideoPreview.src = lp.hero.video;
+      heroVideoPreviewWrap.classList.remove("hidden");
+      heroRemoveVideoBtn.classList.remove("hidden");
+    } else {
+      heroVideoPreview.removeAttribute("src");
+      heroVideoPreviewWrap.classList.add("hidden");
+      heroRemoveVideoBtn.classList.add("hidden");
+    }
   }
   const aboutTitleEn = document.getElementById("about-title-en");
   if (aboutTitleEn) {
@@ -4371,11 +4407,14 @@ document.getElementById("hero-save-btn").addEventListener("click", async () => {
   fd.append("taglineAr", document.getElementById("hero-tagline-ar").value.trim());
   const fileInput = document.getElementById("hero-photo-file");
   if (fileInput.files[0]) fd.append("photo", fileInput.files[0]);
+  const videoInput = document.getElementById("hero-video-file");
+  if (videoInput.files[0]) fd.append("video", videoInput.files[0]);
   try {
     const result = await api("/api/admin/landing/hero", { method: "PUT", body: fd });
     SETTINGS.landingPage.hero = result.hero;
     LANDING_PAGE.hero = result.hero;
     fileInput.value = "";
+    videoInput.value = "";
     populateLandingAdminForms();
     applyLandingPageToUI();
     showMsg(msg, t("settingsSaved"), true);
@@ -4391,6 +4430,25 @@ document.getElementById("hero-remove-photo-btn").addEventListener("click", async
   fd.append("taglineEn", document.getElementById("hero-tagline-en").value.trim());
   fd.append("taglineAr", document.getElementById("hero-tagline-ar").value.trim());
   fd.append("removePhoto", "true");
+  try {
+    const result = await api("/api/admin/landing/hero", { method: "PUT", body: fd });
+    SETTINGS.landingPage.hero = result.hero;
+    LANDING_PAGE.hero = result.hero;
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("hero-remove-video-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("hero-msg");
+  const fd = new FormData();
+  fd.append("headlineEn", document.getElementById("hero-headline-en").value.trim());
+  fd.append("headlineAr", document.getElementById("hero-headline-ar").value.trim());
+  fd.append("taglineEn", document.getElementById("hero-tagline-en").value.trim());
+  fd.append("taglineAr", document.getElementById("hero-tagline-ar").value.trim());
+  fd.append("removeVideo", "true");
   try {
     const result = await api("/api/admin/landing/hero", { method: "PUT", body: fd });
     SETTINGS.landingPage.hero = result.hero;

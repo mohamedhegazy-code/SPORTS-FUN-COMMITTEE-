@@ -438,6 +438,15 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   align-items: flex-end;
   background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 55%, #3a0000 100%) center / cover no-repeat;
 }
+/* Sits behind .hero-photo-overlay in DOM order (so the same club-color tint
+   that already works over a background photo also washes over a playing
+   video) and behind .hero-photo-content, with no z-index needed since both
+   later elements paint on top of it in normal stacking order. */
+.hero-video-bg {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
 .hero-photo-overlay {
   position: absolute; inset: 0;
   /* A flat wash first (so no corner of any photo, however bright or oddly

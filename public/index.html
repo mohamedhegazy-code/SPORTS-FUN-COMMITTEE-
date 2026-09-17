@@ -49,6 +49,7 @@
   <section id="view-events" class="view active">
     <div class="hero-banner" data-landing-section="hero">
       <div class="hero-photo-card" id="hero-photo-card">
+        <video class="hero-video-bg hidden" id="hero-video-bg" muted loop playsinline preload="metadata"></video>
         <div class="hero-photo-overlay"></div>
         <div class="hero-photo-content">
           <span class="hero-eyebrow" data-i18n="heroEyebrow">Al Ahly Club &middot; Sports Entertainment Committee</span>
@@ -902,9 +903,14 @@
           <div id="hero-photo-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="hero-photo-preview" alt="" style="max-height:120px;border-radius:8px;display:block;margin-inline:auto;" /></div>
           <input type="file" id="hero-photo-file" accept="image/*" />
           <p class="hint-note" data-i18n="heroPhotoHint">A wide action photo works best - it's tinted with the club colors behind the text, so it stays readable with almost any photo.</p>
+          <label style="margin-top:14px;" data-i18n="fieldHeroVideo">Background video (optional)</label>
+          <div id="hero-video-preview-wrap" class="hidden" style="margin-bottom:8px;"><video id="hero-video-preview" muted loop playsinline controls style="max-height:160px;max-width:100%;border-radius:8px;display:block;margin-inline:auto;"></video></div>
+          <input type="file" id="hero-video-file" accept="video/*" />
+          <p class="hint-note" data-i18n="heroVideoHint">Plays muted and on a loop behind the text. Takes priority over the photo above when both are set - the photo is then only used as a fallback while the video loads. Up to 60MB; a short, compressed clip (a few seconds to under a minute) works best.</p>
           <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
             <button class="primary" id="hero-save-btn" data-i18n="btnSaveHero">Save hero banner</button>
             <button class="secondary hidden" id="hero-remove-photo-btn" data-i18n="btnRemovePhoto">Remove photo</button>
+            <button class="secondary hidden" id="hero-remove-video-btn" data-i18n="btnRemoveVideo">Remove video</button>
           </div>
           <div class="msg" id="hero-msg"></div>
         </div>
