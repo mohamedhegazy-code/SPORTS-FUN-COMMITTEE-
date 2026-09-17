@@ -1888,6 +1888,24 @@ document.getElementById("su-submit").addEventListener("click", async () => {
     SESSION_EXPIRY_HANDLED = false;
     document.getElementById("su-password").value = "";
     msg.classList.remove("show");
+    // Their family's club ID already had an account (e.g. a parent
+    // registering after their child), so the server minted them their own
+    // login id (e.g. 10234-2) under the same club ID, auto-pooled with the
+    // rest of the family. Make sure they see and can save it - it's what
+    // they log in with from now on, not the shared club card number - before
+    // moving on into the signed-in app.
+    if (result.assignedLoginId) {
+      document.getElementById("su-form-fields").classList.add("hidden");
+      const panel = document.getElementById("su-newid-panel");
+      document.getElementById("su-newid-msg").textContent = t("newLoginIdMsg").replace("{id}", result.assignedLoginId);
+      panel.classList.remove("hidden");
+      document.getElementById("su-newid-continue").onclick = () => {
+        panel.classList.add("hidden");
+        document.getElementById("su-form-fields").classList.remove("hidden");
+        updateUIForSession();
+      };
+      return;
+    }
     updateUIForSession();
   } catch (e) {
     showMsg(msg, e.message, false);

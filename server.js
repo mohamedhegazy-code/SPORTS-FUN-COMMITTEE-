@@ -623,6 +623,18 @@ function readDb() {
     // matches); admin-facing views always show the real name. Defaults to
     // unset for every member created before this feature existed.
     if (typeof db.members[key].nickname !== "string") db.members[key].nickname = "";
+    // Club ID: the number printed on the physical membership card, which the
+    // club issues ONE OF PER FAMILY (not per person) - so it's distinct from
+    // membershipNumber, which is this app's unique per-ACCOUNT key. Defaults
+    // to the member's own membershipNumber for every account created before
+    // this existed, which is exactly correct: they were (and remain) the
+    // only account under that card number, so nothing changes for them. See
+    // POST /api/auth/signup below for how a second family member gets their
+    // own account under the same clubId, and poolingKey() for how accounts
+    // sharing a clubId automatically pool points with no extra setup.
+    if (typeof db.members[key].clubId !== "string" || !db.members[key].clubId.trim()) {
+      db.members[key].clubId = key;
+    }
   }
   db.nextIds = db.nextIds || {};
   db.nextIds.dependent = db.nextIds.dependent || 1;
@@ -1055,13 +1067,22 @@ function potentialPoints(db, reg) {
   return registrationPoints(db, { ...reg, checkedIn: true });
 }
 
-// Pooling key mirrors the spreadsheet: family group if set, else the
-// membership number itself. This is what lets Phase Two (family pooling)
-// activate later with zero migration - the field exists from day one.
+// Pooling key: an explicit familyGroup (set by a member linking accounts
+// themselves, or by admin - see linkFamilyGroups() below) always wins, since
+// that's a deliberate choice to merge two otherwise-unrelated club IDs. Short
+// of that, accounts pool automatically by clubId - the club issues one
+// membership card per FAMILY, not per person, so every account created under
+// that same card number (see POST /api/auth/signup) shares one points pool
+// with zero extra setup. A member with no other account on their clubId
+// simply pools with themselves, which is exactly today's behavior - this is
+// what lets both pooling schemes activate with zero migration for existing
+// single-account members (their clubId defaults to their own
+// membershipNumber - see readDb() above).
 function poolingKey(db, membershipNumber) {
   const m = db.members[membershipNumber];
   if (!m) return membershipNumber;
-  return m.familyGroup && m.familyGroup.trim() ? `FAM:${m.familyGroup.trim()}` : membershipNumber;
+  if (m.familyGroup && m.familyGroup.trim()) return `FAM:${m.familyGroup.trim()}`;
+  return `CLUB:${(m.clubId && m.clubId.trim()) || membershipNumber}`;
 }
 
 function membersInPool(db, key) {
@@ -1098,12 +1119,15 @@ function balanceSnapshot(db, membershipNumber) {
   const earned = totalEarned(db, key);
   const redeemed = totalRedeemed(db, key);
   const balance = earned - redeemed;
+  const poolMembers = membersInPool(db, key);
   return {
     membershipNumber,
     member: publicMember(member),
     poolingKey: key,
-    familyPooled: key.startsWith("FAM:"),
-    poolMembers: membersInPool(db, key).map((m) => ({ membershipNumber: m.membershipNumber, name: m.name })),
+    // Pooled with someone else - whether via an explicit family-group link
+    // or automatically via a shared clubId - rather than pooling alone.
+    familyPooled: poolMembers.length > 1,
+    poolMembers: poolMembers.map((m) => ({ membershipNumber: m.membershipNumber, name: m.name })),
     totalEarned: earned,
     totalRedeemed: redeemed,
     balance,
@@ -1135,6 +1159,17 @@ function balanceSnapshot(db, membershipNumber) {
 // account to bcrypt.compare against) instead re-read fresh, synchronously,
 // immediately before their final write - see the comment in
 // POST /api/auth/login below.
+// Finds the next free account id for a second (third, fourth, ...) family
+// member signing up under the same clubId - see POST /api/auth/signup below.
+// clubId-2, clubId-3, ... - first gap wins, so a family that signs up,
+// unlinks, and re-signs-up doesn't accumulate ever-growing suffixes.
+function nextFamilyAccountId(db, clubId) {
+  for (let i = 2; ; i++) {
+    const candidate = `${clubId}-${i}`;
+    if (!db.members[candidate]) return candidate;
+  }
+}
+
 app.post("/api/auth/signup", async (req, res) => {
   const { membershipNumber, name, password, familyGroup, phone, email, agreeTerms } = req.body;
   if (!membershipNumber || !name || !password) {
@@ -1160,28 +1195,50 @@ app.post("/api/auth/signup", async (req, res) => {
   // the comment above this handler.
   const passwordHash = await bcrypt.hash(password, 10);
   const db = readDb();
-  const existing = db.members[membershipNumber];
+  // What the member typed here is the CLUB ID printed on the family's
+  // membership card - the club issues one per household, not one per
+  // person, so more than one person may legitimately "sign up with" the
+  // same number. `existing` is whoever (if anyone) already holds the plain,
+  // un-suffixed account for that card.
+  const clubId = String(membershipNumber).trim();
+  const existing = db.members[clubId];
+  let accountId = clubId;
+  let joiningExistingFamily = false;
   if (existing && existing.passwordHash) {
-    return res.status(409).json({ error: "An account already exists for this membership number. Please log in." });
+    // Someone else in the family already claimed the bare clubId as their
+    // login - rather than rejecting outright, give this person their own
+    // account under the same card number (clubId-2, clubId-3, ...), which
+    // poolingKey()/membersInPool() then pools with the rest of the family
+    // automatically, with no admin step and no waiting for anyone else to
+    // register first, in either order. See the accountId/clubId note in the
+    // response below - the frontend surfaces this new id prominently since
+    // it (not the club card number) is what this person logs in with.
+    accountId = nextFamilyAccountId(db, clubId);
+    joiningExistingFamily = true;
   }
-  // `existing` with no passwordHash means an admin imported this member
-  // ahead of time (see /api/admin/members/import) - this is them claiming
-  // that profile rather than starting from scratch, so keep whatever was
-  // already on file (family group, phone, email, dependents) unless they're
-  // explicitly overriding it here.
-  db.members[membershipNumber] = {
-    membershipNumber,
+  // `existing` with no passwordHash (only possible when accountId === clubId
+  // above) means an admin imported this member ahead of time (see
+  // /api/admin/members/import) - this is them claiming that profile rather
+  // than starting from scratch, so keep whatever was already on file (family
+  // group, phone, email, dependents) unless they're explicitly overriding it
+  // here.
+  const claiming = accountId === clubId ? existing : null;
+  db.members[accountId] = {
+    membershipNumber: accountId,
+    clubId,
     name,
-    familyGroup: familyGroup || (existing ? existing.familyGroup : "") || "",
-    phone: phone || (existing ? existing.phone : "") || "",
-    email: trimmedEmail || (existing ? existing.email : "") || "",
+    familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
+    phone: phone || (claiming ? claiming.phone : "") || "",
+    email: trimmedEmail || (claiming ? claiming.email : "") || "",
     passwordHash,
-    dependents: (existing && existing.dependents) || [],
-    nickname: (existing && existing.nickname) || "",
-    createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+    dependents: (claiming && claiming.dependents) || [],
+    nickname: (claiming && claiming.nickname) || "",
+    createdAt: (claiming && claiming.createdAt) || new Date().toISOString(),
     // This call is always the actual account-creation moment (a pre-existing
-    // passwordHash would have 409'd above), whether it's a brand-new member
-    // or someone claiming a profile the committee pre-loaded for them.
+    // passwordHash on this exact accountId would have been impossible to
+    // reach above), whether it's a brand-new member, someone claiming a
+    // profile the committee pre-loaded for them, or a second family member
+    // joining an already-registered clubId.
     accountCreatedAt: new Date().toISOString(),
     // Agreeing to the required checkbox above (validated) counts as
     // accepting whichever Terms & Conditions version is current right now.
@@ -1190,16 +1247,28 @@ app.post("/api/auth/signup", async (req, res) => {
   };
   logActivity(db, {
     actorType: "member",
-    actorId: membershipNumber,
+    actorId: accountId,
     actorName: name,
     action: "member_signup",
-    details: existing ? "Claimed an admin-created profile" : "Created a new account",
+    details: joiningExistingFamily
+      ? `Joined family club ID ${clubId} as an additional member`
+      : claiming
+      ? "Claimed an admin-created profile"
+      : "Created a new account",
   });
   writeDb(db);
 
-  const token = createSession("member", membershipNumber);
+  const token = createSession("member", accountId);
   setSessionCookie(req, res, token);
-  res.status(201).json({ member: publicMember(db.members[membershipNumber]) });
+  res.status(201).json({
+    member: publicMember(db.members[accountId]),
+    // Only present when this account's login id differs from the club card
+    // number the person typed in, i.e. they're joining a family that
+    // already has an account - the frontend uses this to make sure they
+    // save/see their own id before continuing, since that (not the shared
+    // clubId) is what they'll log in with from now on.
+    assignedLoginId: joiningExistingFamily ? accountId : null,
+  });
 });
 
 app.post("/api/auth/login", async (req, res) => {
