@@ -772,7 +772,9 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .family-item .name { font-weight: 600; }
 .family-item .name .fam-rel-badge { font-weight: 400; color: var(--muted); font-size: 0.85em; }
 .family-item .fam-rel-select,
-.family-item .fam-rel-other-input { max-width: 140px; margin: 0; padding: 6px 8px; font-size: 0.8rem; }
+.family-item .fam-rel-other-input,
+.family-item .fam-phone-input,
+.family-item .fam-email-input { max-width: 140px; margin: 0; padding: 6px 8px; font-size: 0.8rem; }
 .family-item .fam-rel-edit { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 180px; flex-wrap: wrap; }
 .my-reg-item { flex-wrap: wrap; }
 .my-reg-item .info { flex: 1; min-width: 160px; }

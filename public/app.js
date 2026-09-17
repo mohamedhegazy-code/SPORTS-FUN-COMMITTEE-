@@ -2243,7 +2243,7 @@ function renderFamilyList() {
           (d) => `<div class="family-item" data-dep-id="${d.id}">
         <span class="name">${escapeAttr(d.name)}${
             d.relationship ? ` <span class="fam-rel-badge">(${escapeAttr(d.relationship)})</span>` : ""
-          }</span>
+          }${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
         <span class="fam-rel-edit">
           <select class="fam-rel-select" data-dep-id="${d.id}">${familyRelationSelectHtml(d.relationship || "")}</select>
           <input class="fam-rel-other-input ${
@@ -2251,6 +2251,12 @@ function renderFamilyList() {
           }" data-dep-id="${d.id}" value="${
             !!d.relationship && !FAMILY_RELATIONS.includes(d.relationship) ? escapeAttr(d.relationship) : ""
           }" placeholder="${t("fieldRelationship")}" style="margin-top:6px;" />
+          <input class="fam-phone-input" type="tel" data-dep-id="${d.id}" value="${escapeAttr(
+            d.phone || ""
+          )}" placeholder="${t("fieldFamilyMemberPhone")}" style="margin-top:6px;" />
+          <input class="fam-email-input" type="email" data-dep-id="${d.id}" value="${escapeAttr(
+            d.email || ""
+          )}" placeholder="${t("fieldFamilyMemberEmail")}" style="margin-top:6px;" />
           <button class="secondary fam-rel-save" data-dep-id="${d.id}" style="margin-top:6px;padding:6px 10px;font-size:0.75rem;">${t(
             "btnSaveRelationship"
           )}</button>
@@ -2290,12 +2296,14 @@ function renderFamilyList() {
     btn.addEventListener("click", async () => {
       const sel = wrap.querySelector(`.fam-rel-select[data-dep-id="${btn.dataset.depId}"]`);
       const otherInput = wrap.querySelector(`.fam-rel-other-input[data-dep-id="${btn.dataset.depId}"]`);
+      const phoneInput = wrap.querySelector(`.fam-phone-input[data-dep-id="${btn.dataset.depId}"]`);
+      const emailInput = wrap.querySelector(`.fam-email-input[data-dep-id="${btn.dataset.depId}"]`);
       const relationship = sel.value === "other" ? otherInput.value.trim() : sel.value;
       const msg = document.getElementById("fam-msg");
       try {
         const result = await api("/api/me/dependents/" + btn.dataset.depId, {
           method: "PUT",
-          body: JSON.stringify({ relationship }),
+          body: JSON.stringify({ relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() }),
         });
         CURRENT_SESSION.member.dependents = result.dependents;
         showMsg(msg, t("famRelationshipSaved"), true);
@@ -2318,6 +2326,8 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   const nameInput = document.getElementById("fam-name");
   const relSelect = document.getElementById("fam-relationship");
   const relOtherInput = document.getElementById("fam-relationship-other");
+  const phoneInput = document.getElementById("fam-phone");
+  const emailInput = document.getElementById("fam-email");
   const name = nameInput.value.trim();
   const relationship = relSelect.value === "other" ? relOtherInput.value.trim() : relSelect.value;
   const msg = document.getElementById("fam-msg");
@@ -2329,13 +2339,15 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   try {
     const result = await api("/api/me/dependents", {
       method: "POST",
-      body: JSON.stringify({ name, relationship }),
+      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() }),
     });
     CURRENT_SESSION.member.dependents = result.dependents;
     nameInput.value = "";
     relSelect.value = "";
     relOtherInput.value = "";
     relOtherInput.classList.add("hidden");
+    phoneInput.value = "";
+    emailInput.value = "";
     showMsg(msg, t("famAdded"), true);
     renderFamilyList();
     renderAttendeesChecklist();
@@ -3740,7 +3752,12 @@ function renderDirectoryTable() {
   const rows = DIRECTORY_DATA.map((m, i) => {
     const searchBlob = escapeAttr(`${m.name} ${m.membershipNumber} ${m.phone} ${m.email || ""} ${m.familyGroup}`.toLowerCase());
     const dependentsHtml = m.dependents.length
-      ? `<ul class="directory-list">${m.dependents.map((d) => `<li>${escapeAttr(d.name)}</li>`).join("")}</ul>`
+      ? `<ul class="directory-list">${m.dependents
+          .map((d) => {
+            const bits = [d.relationship, d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ");
+            return `<li>${escapeAttr(d.name)}${bits ? ` <span style="color:var(--muted);">(${bits})</span>` : ""}</li>`;
+          })
+          .join("")}</ul>`
       : `<p class="dashboard-empty-note">${t("noDependents")}</p>`;
     const regsHtml = m.registrations.length
       ? `<table class="dashboard-table"><thead><tr>

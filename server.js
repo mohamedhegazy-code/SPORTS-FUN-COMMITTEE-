@@ -600,6 +600,14 @@ function readDb() {
     // "identify the family member" relationship label existed.
     for (const dep of db.members[key].dependents) {
       if (typeof dep.relationship !== "string") dep.relationship = "";
+      // Backward-compatible defaults for dependents created before their own
+      // optional phone/email existed - a plain contact record (shown to
+      // staff/admin, e.g. on the Member Directory) rather than a login of
+      // their own; there's no notification system in this app yet (for
+      // members OR dependents) that sends to either, so for now these are
+      // just stored for reference.
+      if (typeof dep.phone !== "string") dep.phone = "";
+      if (typeof dep.email !== "string") dep.email = "";
     }
     // Terms & Conditions acceptance: a member who signed up before this
     // feature existed has never accepted anything, so they default to
@@ -2383,25 +2391,36 @@ app.post("/api/me/dependents", requireMember, (req, res) => {
   // the PUT below (retagging an existing dependent) can both still send any
   // wording, including Arabic terms.
   const relationship = (req.body.relationship || "").trim();
+  // Optional contact details for the family member themselves - a plain
+  // stored record (visible to staff/admin, e.g. as an emergency contact on
+  // the Member Directory), not a login of their own and not, today, wired
+  // into any notification-sending (this app doesn't send SMS/email to
+  // anyone yet, including the primary member). Same "trim and store, no
+  // format validation" handling as the member's own phone/email above.
+  const phone = (req.body.phone || "").trim();
+  const email = (req.body.email || "").trim();
   const member = db.members[req.member.membershipNumber];
   member.dependents = member.dependents || [];
-  const dependent = { id: db.nextIds.dependent++, name, relationship };
+  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email };
   member.dependents.push(dependent);
   writeDb(db);
   res.status(201).json({ dependents: member.dependents });
 });
 
-// Lets a member add/change the relationship label on a dependent added
-// earlier (before this feature existed, or just to fix a typo) without
-// deleting and re-adding them - re-adding would mint a new dependent id and
-// disconnect them from any registrations already made in their name.
+// Lets a member update a dependent added earlier (before this feature
+// existed, or just to fix a typo) without deleting and re-adding them -
+// re-adding would mint a new dependent id and disconnect them from any
+// registrations already made in their name.
 app.put("/api/me/dependents/:id", requireMember, (req, res) => {
   const db = req.db;
   const member = db.members[req.member.membershipNumber];
   const id = Number(req.params.id);
   const dependent = (member.dependents || []).find((d) => d.id === id);
   if (!dependent) return res.status(404).json({ error: "No such family member" });
+  if (typeof req.body.name === "string" && req.body.name.trim()) dependent.name = req.body.name.trim();
   if (typeof req.body.relationship === "string") dependent.relationship = req.body.relationship.trim();
+  if (typeof req.body.phone === "string") dependent.phone = req.body.phone.trim();
+  if (typeof req.body.email === "string") dependent.email = req.body.email.trim();
   writeDb(db);
   res.json({ dependents: member.dependents });
 });
@@ -3482,7 +3501,13 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         familyGroup: m.familyGroup || "",
         hasLoggedInAccount: !!m.passwordHash,
         balance: snap ? snap.balance : 0,
-        dependents: (m.dependents || []).map((d) => ({ id: d.id, name: d.name })),
+        dependents: (m.dependents || []).map((d) => ({
+          id: d.id,
+          name: d.name,
+          relationship: d.relationship || "",
+          phone: d.phone || "",
+          email: d.email || "",
+        })),
         registrations,
         registeredCount: registrations.filter((r) => !r.waitlisted).length,
         checkedInCount: registrations.filter((r) => r.checkedIn).length,
