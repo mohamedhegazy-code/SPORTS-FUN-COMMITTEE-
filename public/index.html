@@ -172,10 +172,28 @@
         <label class="required-label" data-i18n="fieldMembership">Membership number</label>
         <input id="su-membership" placeholder="e.g. 10234" />
         <p class="hint-note" data-i18n="fieldMembershipClubHint">This is the club ID on your family's membership card - the whole family shares one. If it's already registered, you'll get your own personal login ID in seconds, kept in the same family points pool automatically.</p>
+        <label class="required-label" data-i18n="fieldMemberType">Member type</label>
+        <div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;">
+            <input type="radio" name="su-member-type" id="su-type-main" value="main" checked />
+            <span data-i18n="memberTypeMain">Main Member</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;">
+            <input type="radio" name="su-member-type" id="su-type-follower" value="follower" />
+            <span data-i18n="memberTypeFollower">Follower Member</span>
+          </label>
+        </div>
+        <div id="su-relationship-wrap" class="hidden">
+          <label class="required-label" data-i18n="fieldRelationship">Relationship</label>
+          <select id="su-relationship"></select>
+          <input id="su-relationship-other" class="hidden" placeholder="" style="margin-top:6px;" />
+        </div>
         <label class="required-label" data-i18n="fieldName">Full name</label>
         <input id="su-name" placeholder="e.g. Ahmed Samir" />
         <label class="required-label" data-i18n="fieldPassword">Password</label>
         <input id="su-password" type="password" placeholder="At least 6 characters" />
+        <label data-i18n="fieldNickname">Nickname</label>
+        <input id="su-nickname" maxlength="24" placeholder="e.g. Ace" />
         <label data-i18n="fieldFamily">Family group (optional)</label>
         <input id="su-family" placeholder="e.g. FAM-01" />
         <label data-i18n="fieldPhone">Phone (optional)</label>

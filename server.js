@@ -635,6 +635,23 @@ function readDb() {
     if (typeof db.members[key].clubId !== "string" || !db.members[key].clubId.trim()) {
       db.members[key].clubId = key;
     }
+    // Member type: a self-declared social role - "main" (عضو اساسي, the
+    // family's actual card holder) or "follower" (عضو تابع, another family
+    // member signing up under the same clubId) - independent of which of
+    // them technically ended up with the bare clubId as their own
+    // membershipNumber (see nextFamilyAccountId() and POST /api/auth/signup
+    // below). Defaults to "main" for every account created before this
+    // existed, which is harmless either way since it's purely descriptive
+    // and never affects pooling (that's still driven by clubId itself).
+    if (db.members[key].memberType !== "main" && db.members[key].memberType !== "follower") {
+      db.members[key].memberType = "main";
+    }
+    // Only meaningful for a "follower" member - who they are relative to
+    // the family's main member (Father/Son/Other free text, same list as
+    // the dependents relationship field). Always empty for "main".
+    if (typeof db.members[key].relationshipToMain !== "string") {
+      db.members[key].relationshipToMain = "";
+    }
   }
   db.nextIds = db.nextIds || {};
   db.nextIds.dependent = db.nextIds.dependent || 1;
@@ -1171,7 +1188,7 @@ function nextFamilyAccountId(db, clubId) {
 }
 
 app.post("/api/auth/signup", async (req, res) => {
-  const { membershipNumber, name, password, familyGroup, phone, email, agreeTerms } = req.body;
+  const { membershipNumber, name, password, familyGroup, phone, email, agreeTerms, memberType, relationshipToMain } = req.body;
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
   }
@@ -1182,6 +1199,18 @@ app.post("/api/auth/signup", async (req, res) => {
   // so a direct API call can't skip agreeing to the Terms & Conditions.
   if (agreeTerms !== true) {
     return res.status(400).json({ error: "You must agree to the Terms & Conditions to create an account" });
+  }
+  // Member type (Main Member/Follower Member - عضو اساسي/عضو تابع) is
+  // required from everyone, mirroring the required radio choice on the
+  // sign-up form - see the memberType/relationshipToMain comment in
+  // readDb()'s migration loop above for what these mean and why they're
+  // independent of accountId assignment below.
+  if (memberType !== "main" && memberType !== "follower") {
+    return res.status(400).json({ error: "Please choose your member type" });
+  }
+  const trimmedRelationship = (relationshipToMain || "").trim();
+  if (memberType === "follower" && !trimmedRelationship) {
+    return res.status(400).json({ error: "Please choose your relationship to the main member" });
   }
   // Optional - only a light shape check (not full RFC validation) so a
   // genuine typo like "ahmed@gmail" is caught without rejecting anything
@@ -1227,6 +1256,8 @@ app.post("/api/auth/signup", async (req, res) => {
     membershipNumber: accountId,
     clubId,
     name,
+    memberType,
+    relationshipToMain: memberType === "follower" ? trimmedRelationship : "",
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
     phone: phone || (claiming ? claiming.phone : "") || "",
     email: trimmedEmail || (claiming ? claiming.email : "") || "",
@@ -3659,6 +3690,8 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         phone: m.phone || "",
         email: m.email || "",
         familyGroup: m.familyGroup || "",
+        memberType: m.memberType || "main",
+        relationshipToMain: m.relationshipToMain || "",
         hasLoggedInAccount: !!m.passwordHash,
         balance: snap ? snap.balance : 0,
         dependents: (m.dependents || []).map((d) => ({

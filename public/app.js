@@ -455,6 +455,14 @@ function setLang(lang) {
   // rest of the page flipped. Safe to call unconditionally: it no-ops when
   // there's no logged-in member or the #mp-family-list element isn't there.
   renderFamilyList();
+  // Same reasoning as renderFamilyList() above, for the sign-up form's own
+  // relationship dropdown (built with t() at population time, not re-run on
+  // every render like renderFamilyList()) - preserves whatever was already
+  // selected instead of resetting it.
+  {
+    const suRel = document.getElementById("su-relationship");
+    if (suRel) suRel.innerHTML = familyRelationSelectHtml(suRel.value);
+  }
   // Tournament admin panel (progress stepper, setup/schedule cards, setup
   // preview) has its own render function driven by the TOURNAMENT_DATA
   // global rather than by setLang's usual per-section calls above - without
@@ -1856,14 +1864,38 @@ function updateRedeemButtonState() {
 document.getElementById("mp-tier").addEventListener("change", updateRedeemButtonState);
 
 // ------------------------------------------------------------- sign up/in --
+// Member type (Main Member/Follower Member - عضو اساسي/عضو تابع) is a
+// self-declared social role, independent of which of them technically ends
+// up with the bare club ID vs an auto-suffixed one (see nextFamilyAccountId
+// in server.js) - e.g. a son who happens to sign up first still tags
+// himself "Follower Member" if his father is the real head of the family's
+// account. Only a Follower Member picks a relationship (who are they a
+// follower OF) - a Main Member has no one to relate to, so that field stays
+// hidden and empty for them.
+document.getElementById("su-type-main").addEventListener("change", updateSignupRelationshipVisibility);
+document.getElementById("su-type-follower").addEventListener("change", updateSignupRelationshipVisibility);
+function updateSignupRelationshipVisibility() {
+  const isFollower = document.getElementById("su-type-follower").checked;
+  document.getElementById("su-relationship-wrap").classList.toggle("hidden", !isFollower);
+}
+document.getElementById("su-relationship").addEventListener("change", (e) => {
+  const otherInput = document.getElementById("su-relationship-other");
+  otherInput.classList.toggle("hidden", e.target.value !== "other");
+  if (e.target.value === "other") otherInput.focus();
+});
+
 document.getElementById("su-submit").addEventListener("click", async () => {
   const membershipNumber = document.getElementById("su-membership").value.trim();
   const name = document.getElementById("su-name").value.trim();
   const password = document.getElementById("su-password").value;
+  const nickname = document.getElementById("su-nickname").value.trim();
   const familyGroup = document.getElementById("su-family").value.trim();
   const phone = document.getElementById("su-phone").value.trim();
   const email = document.getElementById("su-email").value.trim();
   const agreeTerms = document.getElementById("su-agree-terms").checked;
+  const memberType = document.getElementById("su-type-follower").checked ? "follower" : "main";
+  const relSel = document.getElementById("su-relationship").value;
+  const relationshipToMain = memberType === "follower" ? (relSel === "other" ? document.getElementById("su-relationship-other").value.trim() : relSel) : "";
   const msg = document.getElementById("su-msg");
   if (!membershipNumber || !name || !password) {
     highlightMissingFields(["su-membership", "su-name", "su-password"]);
@@ -1874,6 +1906,11 @@ document.getElementById("su-submit").addEventListener("click", async () => {
     showMsg(msg, t("errPasswordShort"), false);
     return;
   }
+  if (memberType === "follower" && !relationshipToMain) {
+    highlightMissingFields(["su-relationship"]);
+    showMsg(msg, t("errRelationshipRequired"), false);
+    return;
+  }
   if (!agreeTerms) {
     highlightMissingFields(["su-agree-terms"]);
     showMsg(msg, t("errMustAcceptTerms"), false);
@@ -1882,11 +1919,24 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, email, agreeTerms }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, email, agreeTerms, memberType, relationshipToMain }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;
     document.getElementById("su-password").value = "";
+    // Best-effort - reuses the same unique-nickname endpoint Member Profile
+    // uses, so a taken nickname is skipped with a note rather than blocking
+    // the account that was just successfully created; they can retry it
+    // from Member Profile any time.
+    let nicknameNote = "";
+    if (nickname) {
+      try {
+        const nickResult = await api("/api/me/nickname", { method: "POST", body: JSON.stringify({ nickname }) });
+        CURRENT_SESSION.member.nickname = nickResult.nickname;
+      } catch (nickErr) {
+        nicknameNote = " " + t("signupNicknameSkipped");
+      }
+    }
     msg.classList.remove("show");
     // Their family's club ID already had an account (e.g. a parent
     // registering after their child), so the server minted them their own
@@ -1897,7 +1947,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
     if (result.assignedLoginId) {
       document.getElementById("su-form-fields").classList.add("hidden");
       const panel = document.getElementById("su-newid-panel");
-      document.getElementById("su-newid-msg").textContent = t("newLoginIdMsg").replace("{id}", result.assignedLoginId);
+      document.getElementById("su-newid-msg").textContent = t("newLoginIdMsg").replace("{id}", result.assignedLoginId) + nicknameNote;
       panel.classList.remove("hidden");
       document.getElementById("su-newid-continue").onclick = () => {
         panel.classList.add("hidden");
@@ -1906,6 +1956,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
       };
       return;
     }
+    if (nicknameNote) showMsg(msg, nicknameNote.trim(), true);
     updateUIForSession();
   } catch (e) {
     showMsg(msg, e.message, false);
@@ -2250,6 +2301,10 @@ function familyRelationSelectHtml(currentValue) {
     .concat([`<option value="other" ${isOther ? "selected" : ""}>${t("relOther")}</option>`]);
   return options.join("");
 }
+// Sign-up's "relationship to the main member" reuses this same fixed list
+// (Father/Mother/.../Other) - populated once here since su-relationship is
+// a plain <select>, not re-rendered per session like the family list below.
+document.getElementById("su-relationship").innerHTML = familyRelationSelectHtml("");
 function renderFamilyList() {
   const wrap = document.getElementById("mp-family-list");
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
@@ -3770,7 +3825,9 @@ function renderDirectoryTable() {
     return;
   }
   const rows = DIRECTORY_DATA.map((m, i) => {
-    const searchBlob = escapeAttr(`${m.name} ${m.membershipNumber} ${m.phone} ${m.email || ""} ${m.familyGroup}`.toLowerCase());
+    const searchBlob = escapeAttr(
+      `${m.name} ${m.membershipNumber} ${m.phone} ${m.email || ""} ${m.familyGroup} ${m.relationshipToMain || ""}`.toLowerCase()
+    );
     const dependentsHtml = m.dependents.length
       ? `<ul class="directory-list">${m.dependents
           .map((d) => {
@@ -3828,9 +3885,13 @@ function renderDirectoryTable() {
         </div>
         <div class="msg family-link-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
       </div>`;
+    const memberTypeBadge =
+      m.memberType === "follower"
+        ? ` <span class="fam-rel-badge">${t("memberTypeFollower")}${m.relationshipToMain ? ` · ${escapeAttr(m.relationshipToMain)}` : ""}</span>`
+        : "";
     return `<tr data-directory-row data-search="${searchBlob}">
         <td>${escapeAttr(m.membershipNumber)}</td>
-        <td>${escapeAttr(m.name)}</td>
+        <td>${escapeAttr(m.name)}${memberTypeBadge}</td>
         <td>${escapeAttr(m.phone)}</td>
         <td>${escapeAttr(m.email || "")}</td>
         <td>${escapeAttr(m.familyGroup)}</td>
