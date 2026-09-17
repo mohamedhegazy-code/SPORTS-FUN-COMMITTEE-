@@ -983,8 +983,26 @@ function balanceSnapshot(db, membershipNumber) {
 // -------------------------------------------------------------------------
 
 // Member sign-up: creates the member's account (and profile) in one step.
+//
+// IMPORTANT - lost-update race: readDb()/writeDb() are synchronous
+// (whole-file JSON read/replace, no per-record locking), so a handler is
+// only safe from concurrent writes for the code that runs between its
+// readDb() and writeDb() with NO `await` in between - Node's single
+// threaded event loop can never interleave two requests' synchronous code,
+// but an `await` (e.g. bcrypt, which is deliberately async so hashing
+// doesn't block the event loop) hands control back to the loop, and a
+// second concurrent request can run its own full read-modify-write cycle
+// in that window. Whichever writeDb() lands last wins, silently discarding
+// the other request's change. This was confirmed empirically under load
+// (concurrent signups losing ~90% of new accounts) and is fixed throughout
+// this file the same way: do any `await` (bcrypt hashing/comparing) BEFORE
+// the readDb() that starts the real critical section, so the final
+// read -> mutate -> write always runs as one synchronous, uninterruptible
+// block. Endpoints that need to read something first (e.g. login needs the
+// account to bcrypt.compare against) instead re-read fresh, synchronously,
+// immediately before their final write - see the comment in
+// POST /api/auth/login below.
 app.post("/api/auth/signup", async (req, res) => {
-  const db = readDb();
   const { membershipNumber, name, password, familyGroup, phone, email, agreeTerms } = req.body;
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
@@ -1004,6 +1022,11 @@ app.post("/api/auth/signup", async (req, res) => {
   if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
     return res.status(400).json({ error: "That doesn't look like a valid email address" });
   }
+  // Hashing first (before reading db) means it doesn't depend on db state,
+  // so the read -> mutate -> write below has no await in it at all - see
+  // the comment above this handler.
+  const passwordHash = await bcrypt.hash(password, 10);
+  const db = readDb();
   const existing = db.members[membershipNumber];
   if (existing && existing.passwordHash) {
     return res.status(409).json({ error: "An account already exists for this membership number. Please log in." });
@@ -1013,7 +1036,6 @@ app.post("/api/auth/signup", async (req, res) => {
   // that profile rather than starting from scratch, so keep whatever was
   // already on file (family group, phone, email, dependents) unless they're
   // explicitly overriding it here.
-  const passwordHash = await bcrypt.hash(password, 10);
   db.members[membershipNumber] = {
     membershipNumber,
     name,
@@ -1048,31 +1070,50 @@ app.post("/api/auth/signup", async (req, res) => {
 });
 
 app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
-  const db = readDb();
   const { membershipNumber, password } = req.body;
+  const db = readDb();
   const member = db.members[membershipNumber];
-  if (!member || !member.passwordHash || !(await bcrypt.compare(password || "", member.passwordHash))) {
+  const passwordOk = member && member.passwordHash && (await bcrypt.compare(password || "", member.passwordHash));
+  if (!passwordOk) {
     return res.status(401).json({ error: "Incorrect membership number or password" });
   }
-  logActivity(db, { actorType: "member", actorId: membershipNumber, actorName: member.name, action: "member_login" });
-  writeDb(db);
+  // Re-read right before the write: nothing above this line has mutated
+  // anything, so re-reading here - synchronously, with no further await
+  // before writeDb() - picks up whatever any other request wrote to
+  // db.json while this one was waiting on bcrypt.compare() above, instead
+  // of the stale copy from before the await silently overwriting it. See
+  // the longer comment above POST /api/auth/signup for the full race.
+  const freshDb = readDb();
+  const freshMember = freshDb.members[membershipNumber];
+  if (!freshMember) {
+    return res.status(401).json({ error: "Incorrect membership number or password" });
+  }
+  logActivity(freshDb, { actorType: "member", actorId: membershipNumber, actorName: freshMember.name, action: "member_login" });
+  writeDb(freshDb);
   const token = createSession("member", membershipNumber);
   setSessionCookie(req, res, token);
-  res.json({ member: publicMember(member) });
+  res.json({ member: publicMember(freshMember) });
 });
 
 app.post("/api/auth/staff-login", loginRateLimiter, async (req, res) => {
-  const db = readDb();
   const { username, password } = req.body;
+  const db = readDb();
   const staff = db.staffAccounts[username];
-  if (!staff || !(await bcrypt.compare(password || "", staff.passwordHash))) {
+  const passwordOk = staff && staff.passwordHash && (await bcrypt.compare(password || "", staff.passwordHash));
+  if (!passwordOk) {
     return res.status(401).json({ error: "Incorrect username or password" });
   }
-  logActivity(db, { actorType: "staff", actorId: username, actorName: staff.name, action: "staff_login", details: staff.role });
-  writeDb(db);
-  const token = createSession("staff", username, staff.role);
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const freshDb = readDb();
+  const freshStaff = freshDb.staffAccounts[username];
+  if (!freshStaff) {
+    return res.status(401).json({ error: "Incorrect username or password" });
+  }
+  logActivity(freshDb, { actorType: "staff", actorId: username, actorName: freshStaff.name, action: "staff_login", details: freshStaff.role });
+  writeDb(freshDb);
+  const token = createSession("staff", username, freshStaff.role);
   setSessionCookie(req, res, token);
-  res.json({ staff: publicStaff(staff) });
+  res.json({ staff: publicStaff(freshStaff) });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -1123,13 +1164,18 @@ app.post("/api/auth/change-password", async (req, res) => {
   if (!account || !(await bcrypt.compare(oldPassword || "", account.passwordHash))) {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
-  account.passwordHash = await bcrypt.hash(newPassword, 10);
+  const newPasswordHash = await bcrypt.hash(newPassword, 10);
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const freshDb = readDb();
+  const freshAccount = session.type === "member" ? freshDb.members[session.id] : freshDb.staffAccounts[session.id];
+  if (!freshAccount) return res.status(401).json({ error: "Please sign in" });
+  freshAccount.passwordHash = newPasswordHash;
   // A staff account created with a committee-chosen starting password (see
   // POST /api/staff/accounts) is required to set its own before it can do
   // anything else - this is the moment that requirement is satisfied.
-  if (session.type === "staff") account.mustChangePassword = false;
-  writeDb(db);
-  res.json({ ok: true, staff: session.type === "staff" ? publicStaff(account) : undefined });
+  if (session.type === "staff") freshAccount.mustChangePassword = false;
+  writeDb(freshDb);
+  res.json({ ok: true, staff: session.type === "staff" ? publicStaff(freshAccount) : undefined });
 });
 
 // Admin-only: onboard more staff/admin accounts (replaces the old shared-key model).
@@ -1141,18 +1187,20 @@ app.post("/api/auth/change-password", async (req, res) => {
 // applyMaybeShowMustChangePasswordGate() in app.js); it's cleared below the
 // moment /api/auth/change-password succeeds for that account.
 app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
-  const db = readDb();
   const { username, password, name, role } = req.body;
   if (!username || !password || !name || !["admin", "staff", "tournament", "management"].includes(role)) {
     return res.status(400).json({ error: "username, password, name, and a valid role are required" });
   }
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+  // Hash before reading db - see the comment above POST /api/auth/signup.
+  const passwordHash = await bcrypt.hash(password, 10);
+  const db = readDb();
   if (db.staffAccounts[username]) return res.status(409).json({ error: "That username is already taken" });
   db.staffAccounts[username] = {
     username,
     name,
     role,
-    passwordHash: await bcrypt.hash(password, 10),
+    passwordHash,
     mustChangePassword: true,
   };
   logActivity(db, {
@@ -1194,15 +1242,21 @@ app.delete("/api/staff/accounts/:username", requireStaffRole("admin"), (req, res
 // or by phone/WhatsApp. No token or identity check beyond "you're a logged
 // in admin" - same trust model as an admin creating staff accounts above.
 app.post("/api/staff/members/:membershipNumber/reset-password", requireStaffRole("admin"), async (req, res) => {
-  const db = req.db;
   const { membershipNumber } = req.params;
   const { newPassword } = req.body;
-  const member = db.members[membershipNumber];
-  if (!member) return res.status(404).json({ error: "No member found with that membership number" });
+  if (!req.db.members[membershipNumber]) {
+    return res.status(404).json({ error: "No member found with that membership number" });
+  }
   if (!newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: "New password must be at least 6 characters" });
   }
-  member.passwordHash = await bcrypt.hash(newPassword, 10);
+  // Hash before re-reading db - see the comment above POST /api/auth/signup.
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const db = readDb();
+  const member = db.members[membershipNumber];
+  if (!member) return res.status(404).json({ error: "No member found with that membership number" });
+  member.passwordHash = passwordHash;
   writeDb(db);
   res.json({ ok: true, member: publicMember(member) });
 });
@@ -1254,21 +1308,23 @@ function clearPinFailures(key) {
 }
 
 app.post("/api/me/recovery-pin", requireMember, async (req, res) => {
-  const db = req.db;
-  const member = req.member;
   const { password, pin } = req.body;
-  if (!(await bcrypt.compare(password || "", member.passwordHash))) {
+  if (!(await bcrypt.compare(password || "", req.member.passwordHash))) {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
   const trimmedPin = String(pin || "").trim();
-  if (!trimmedPin) {
-    member.recoveryPinHash = null;
-  } else {
+  let recoveryPinHash = null;
+  if (trimmedPin) {
     if (trimmedPin.length < MIN_PIN_LENGTH) {
       return res.status(400).json({ error: `Recovery PIN must be at least ${MIN_PIN_LENGTH} characters` });
     }
-    member.recoveryPinHash = await bcrypt.hash(trimmedPin, 10);
+    recoveryPinHash = await bcrypt.hash(trimmedPin, 10);
   }
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const db = readDb();
+  const member = db.members[req.member.membershipNumber];
+  if (!member) return res.status(401).json({ error: "Please log in" });
+  member.recoveryPinHash = recoveryPinHash;
   writeDb(db);
   res.json({ ok: true, hasRecoveryPin: !!member.recoveryPinHash });
 });
@@ -1290,21 +1346,23 @@ app.post("/api/me/accept-terms", requireMember, (req, res) => {
 
 // Any staff role (not just admin) can protect their own account this way.
 app.post("/api/staff/recovery-pin", requireStaffRole("staff"), async (req, res) => {
-  const db = req.db;
-  const staff = req.staff;
   const { password, pin } = req.body;
-  if (!(await bcrypt.compare(password || "", staff.passwordHash))) {
+  if (!(await bcrypt.compare(password || "", req.staff.passwordHash))) {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
   const trimmedPin = String(pin || "").trim();
-  if (!trimmedPin) {
-    staff.recoveryPinHash = null;
-  } else {
+  let recoveryPinHash = null;
+  if (trimmedPin) {
     if (trimmedPin.length < MIN_PIN_LENGTH) {
       return res.status(400).json({ error: `Recovery PIN must be at least ${MIN_PIN_LENGTH} characters` });
     }
-    staff.recoveryPinHash = await bcrypt.hash(trimmedPin, 10);
+    recoveryPinHash = await bcrypt.hash(trimmedPin, 10);
   }
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const db = readDb();
+  const staff = db.staffAccounts[req.staff.username];
+  if (!staff) return res.status(401).json({ error: "Please sign in" });
+  staff.recoveryPinHash = recoveryPinHash;
   writeDb(db);
   res.json({ ok: true, hasRecoveryPin: !!staff.recoveryPinHash });
 });
@@ -1337,11 +1395,20 @@ app.post("/api/auth/forgot-password", loginRateLimiter, async (req, res) => {
   if (!newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: "New password must be at least 6 characters" });
   }
-  member.passwordHash = await bcrypt.hash(newPassword, 10);
-  writeDb(db);
+  const newPasswordHash = await bcrypt.hash(newPassword, 10);
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const freshDb = readDb();
+  const freshMember = freshDb.members[membershipNumber];
+  if (!freshMember) {
+    return res.status(400).json({
+      error: "No recovery PIN is set for this membership number. Please contact the committee to reset your password.",
+    });
+  }
+  freshMember.passwordHash = newPasswordHash;
+  writeDb(freshDb);
   const token = createSession("member", membershipNumber);
   setSessionCookie(req, res, token);
-  res.json({ ok: true, member: publicMember(member) });
+  res.json({ ok: true, member: publicMember(freshMember) });
 });
 
 app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) => {
@@ -1368,11 +1435,20 @@ app.post("/api/auth/staff-forgot-password", loginRateLimiter, async (req, res) =
   if (!newPassword || String(newPassword).length < 6) {
     return res.status(400).json({ error: "New password must be at least 6 characters" });
   }
-  staff.passwordHash = await bcrypt.hash(newPassword, 10);
-  writeDb(db);
-  const token = createSession("staff", username, staff.role);
+  const newPasswordHash = await bcrypt.hash(newPassword, 10);
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const freshDb = readDb();
+  const freshStaff = freshDb.staffAccounts[username];
+  if (!freshStaff) {
+    return res.status(400).json({
+      error: "No recovery PIN is set for this account. Please ask an admin to reset your password.",
+    });
+  }
+  freshStaff.passwordHash = newPasswordHash;
+  writeDb(freshDb);
+  const token = createSession("staff", username, freshStaff.role);
   setSessionCookie(req, res, token);
-  res.json({ ok: true, staff: publicStaff(staff) });
+  res.json({ ok: true, staff: publicStaff(freshStaff) });
 });
 
 // -------------------------------------------------------------------------
