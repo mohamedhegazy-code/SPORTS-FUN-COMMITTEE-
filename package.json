@@ -1,7 +1,7 @@
 {
   "name": "ahlawy-points-system",
   "version": "1.0.0",
-  "description": "Ahlawy Online Registration & Points System - Al Ahly Club Sports Entertainment Committee (Fifth Settlement)",
+  "description": "Ahlawy Online Registration & Points System - Al Ahly Club Recreational Sports Committee (Fifth Settlement)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

@@ -1,5 +1,5 @@
 // MyAhlawy Online Registration & Points System
-// Al Ahly Club - Sports Entertainment Committee, Fifth Settlement
+// Al Ahly Club - Recreational Sports Committee, Fifth Settlement
 //
 // Simple, self-contained Node/Express app. Data persists to data/db.json
 // (a real database can replace this file's read/write functions later,
@@ -452,7 +452,7 @@ function ensureDbFile() {
         rewardAr: "خصم أكاديمية",
         descEn: "A discount on the favorite sport's academy program (duration TBD)",
         descAr: "خصم على برنامج أكاديمية الرياضة المفضلة (مدة تُحدَّد لاحقاً)",
-        approverEn: "Head of Sports Entertainment Committee",
+        approverEn: "Head of Recreational Sports Committee",
         approverAr: "رئيس لجنة الرياضة الترفيهية",
       },
       {
@@ -462,7 +462,7 @@ function ensureDbFile() {
         rewardAr: "باقة 4 أيام حضور مباريات",
         descEn: "4 tickets x 4 official local matches",
         descAr: "4 تذاكر × 4 مباريات محلية رسمية",
-        approverEn: "Head of Sports Entertainment Committee",
+        approverEn: "Head of Recreational Sports Committee",
         approverAr: "رئيس لجنة الرياضة الترفيهية",
       },
       {
@@ -472,7 +472,7 @@ function ensureDbFile() {
         rewardAr: "باقة 7 أيام حضور مباريات",
         descEn: "4 tickets x 7 matches: 3 local + 4 non-local, box/premium seating",
         descAr: "4 تذاكر × 7 مباريات: 3 محلية و4 غير محلية، مقصورة أو درجة متقدمة",
-        approverEn: "Head of Sports Entertainment Committee",
+        approverEn: "Head of Recreational Sports Committee",
         approverAr: "رئيس لجنة الرياضة الترفيهية",
       },
       {
@@ -545,13 +545,13 @@ const DEFAULT_TERMS_AR = `الشروط والأحكام - منصة ماي أهل
 
 const DEFAULT_TERMS_EN = `Terms & Conditions - MyAhlawy Platform
 
-Welcome to MyAhlawy, the online registration platform for the Sports Entertainment Committee at Al Ahly Club - Fifth Settlement. By using this platform or creating a membership account on it, you agree to the following terms:
+Welcome to MyAhlawy, the online registration platform for the Recreational Sports Committee at Al Ahly Club - Fifth Settlement. By using this platform or creating a membership account on it, you agree to the following terms:
 
 1. Data accuracy and member responsibility
 The member is responsible for entering accurate, correct, and up-to-date information when registering (membership number, name, phone number, email, and any other requested details), and bears sole responsibility for any incorrect, incomplete, or outdated information they enter or leave on file, including any effect this has on event registration, points calculation, or being contacted.
 
 2. Sharing data with the committee
-The member agrees that their account data (personal details, event registration and attendance history, points balance and history, and any other related data) may be viewed and shared with members of the Sports Entertainment Committee (the platform's authorized admins and staff), strictly for administrative purposes related to running events and tournaments, managing the points system, and communicating with members. This data will not be used for any commercial purpose or shared with any party outside the committee's work.
+The member agrees that their account data (personal details, event registration and attendance history, points balance and history, and any other related data) may be viewed and shared with members of the Recreational Sports Committee (the platform's authorized admins and staff), strictly for administrative purposes related to running events and tournaments, managing the points system, and communicating with members. This data will not be used for any commercial purpose or shared with any party outside the committee's work.
 
 3. Protecting login details
 The member must keep their account password confidential and must not share it with anyone else, and is responsible for any activity carried out through their account.
@@ -677,8 +677,8 @@ function readDb() {
   db.committee = db.committee || [];
   // Admin-editable section titles for the three tiers above - not baked
   // into i18n like most static UI text, since these are the club's own
-  // organizational naming (e.g. is the base one "Committee" or "Sports
-  // Entertainment Committee"?) and the admin should be able to fix them
+  // organizational naming (e.g. is the base one "Committee" or "Recreational
+  // Sports Committee"?) and the admin should be able to fix them
   // directly rather than asking for a code change every time. Starter
   // defaults below are placeholders the admin can edit any time from the
   // Committee admin card - see PUT /api/admin/committee/tier-labels.
@@ -2289,7 +2289,7 @@ app.get("/api/committee", (req, res) => {
 
 // Lets the admin set the three section titles themselves (bilingual) rather
 // than asking for a code change - e.g. whether the base tier is called
-// "Committee" or "Sports Entertainment Committee". Also returned publicly
+// "Committee" or "Recreational Sports Committee". Also returned publicly
 // via GET /api/settings (committeeTierLabels) so the public Committee page
 // can render the right titles with no login required.
 app.put("/api/admin/committee/tier-labels", requireStaffRole("admin"), (req, res) => {
