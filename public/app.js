@@ -362,6 +362,7 @@ function switchTab(view) {
   if (view === "mypoints" && CURRENT_SESSION && CURRENT_SESSION.type === "member") loadMyChat();
   if (view === "admin" && CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin") {
     loadChatThreadsList();
+    loadInquiriesList();
   }
 }
 // While the Events or Annual Activities tab is the one on screen, keep
@@ -842,6 +843,12 @@ function applyLandingPageToUI() {
   }
   renderMpWhatsappCard();
 
+  const contactTitleEl = document.getElementById("landing-contact-title");
+  const contactBodyEl = document.getElementById("landing-contact-body");
+  const contact = lp.contact || {};
+  if (contactTitleEl) contactTitleEl.textContent = bilingual(contact.titleEn, contact.titleAr) || t("contactCommunityTitle");
+  if (contactBodyEl) contactBodyEl.textContent = bilingual(contact.bodyEn, contact.bodyAr);
+
   renderGalleryGrid(lp.gallery || []);
   renderSponsorsStrip(lp.sponsors || []);
   applyLandingSectionOrder(lp.sections || []);
@@ -874,6 +881,47 @@ function renderMpWhatsappCard() {
   } else {
     link.classList.add("hidden");
   }
+}
+
+// Public "Contact the Committee" form on the landing page - no login
+// required (unlike the Member Profile chat card), so this just posts a
+// one-way message and clears the form on success rather than opening any
+// kind of thread.
+const contactSubmitBtn = document.getElementById("contact-submit");
+if (contactSubmitBtn) {
+  contactSubmitBtn.addEventListener("click", async () => {
+    const msg = document.getElementById("contact-msg");
+    const nameInput = document.getElementById("contact-name");
+    const phoneInput = document.getElementById("contact-phone");
+    const emailInput = document.getElementById("contact-email");
+    const messageInput = document.getElementById("contact-message");
+    const name = nameInput.value.trim();
+    const phone = phoneInput.value.trim();
+    const email = emailInput.value.trim();
+    const message = messageInput.value.trim();
+    if (!name || !message) {
+      highlightMissingFields(["contact-name", "contact-message"]);
+      showMsg(msg, t("errFillFields"), false);
+      return;
+    }
+    if (!phone && !email) {
+      showMsg(msg, t("contactFormHint"), false);
+      return;
+    }
+    contactSubmitBtn.disabled = true;
+    try {
+      await api("/api/public/inquiries", { method: "POST", body: JSON.stringify({ name, phone, email, message }) });
+      nameInput.value = "";
+      phoneInput.value = "";
+      emailInput.value = "";
+      messageInput.value = "";
+      showMsg(msg, t("inquirySent"), true);
+    } catch (e) {
+      showMsg(msg, e.message || t("inquirySendError"), false);
+    } finally {
+      contactSubmitBtn.disabled = false;
+    }
+  });
 }
 
 function renderGalleryGrid(items) {
@@ -1128,6 +1176,7 @@ function updateUIForSession() {
       loadRulesForEdit();
       renderLadderEdit();
       loadChatThreadsList();
+      loadInquiriesList();
       updateAdminChatBadge();
       loadNewsAdminList();
       loadSpotlightAdminList();
@@ -2710,33 +2759,158 @@ async function refreshOpenAdminChatThread() {
     /* ignore - next poll will retry */
   }
 }
+// Combines member-chat and public-inquiry unread counts into one number for
+// the "Content & Chat" tab badge, while also updating each feature's own
+// badge (admin-chat-badge, admin-inquiries-badge) separately - so the tab
+// pill reflects "anything needs attention in here" while each card still
+// shows its own specific count.
 async function updateAdminChatBadge() {
   const badge = document.getElementById("admin-chat-badge");
+  const inquiriesBadge = document.getElementById("admin-inquiries-badge");
   const tabBadge = document.getElementById("admin-tab-badge-content");
   if (!badge) return;
   if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || CURRENT_SESSION.staff.role !== "admin") {
     badge.classList.add("hidden");
+    if (inquiriesBadge) inquiriesBadge.classList.add("hidden");
     if (tabBadge) tabBadge.classList.add("hidden");
     return;
   }
   try {
-    const { count } = await api("/api/staff/chats/unread-count");
-    if (count > 0) {
-      const text = count > 9 ? "9+" : String(count);
-      badge.textContent = text;
+    const [chatResult, inquiriesResult] = await Promise.all([
+      api("/api/staff/chats/unread-count"),
+      api("/api/staff/inquiries/unread-count"),
+    ]);
+    const chatCount = chatResult.count;
+    const inquiriesCount = inquiriesResult.count;
+    if (chatCount > 0) {
+      badge.textContent = chatCount > 9 ? "9+" : String(chatCount);
       badge.classList.remove("hidden");
-      if (tabBadge) {
-        tabBadge.textContent = text;
-        tabBadge.classList.remove("hidden");
-      }
     } else {
       badge.classList.add("hidden");
-      if (tabBadge) tabBadge.classList.add("hidden");
+    }
+    if (inquiriesBadge) {
+      if (inquiriesCount > 0) {
+        inquiriesBadge.textContent = inquiriesCount > 9 ? "9+" : String(inquiriesCount);
+        inquiriesBadge.classList.remove("hidden");
+      } else {
+        inquiriesBadge.classList.add("hidden");
+      }
+    }
+    const total = chatCount + inquiriesCount;
+    if (tabBadge) {
+      if (total > 0) {
+        tabBadge.textContent = total > 9 ? "9+" : String(total);
+        tabBadge.classList.remove("hidden");
+      } else {
+        tabBadge.classList.add("hidden");
+      }
     }
   } catch (e) {
     /* ignore */
   }
 }
+// -- admin: public contact-form inquiries inbox --
+// Same list/detail-panel shape as the member-chat inbox above, but each
+// inquiry is a single message (no thread/reply-in-app - see the PUBLIC
+// CONTACT FORM comment in server.js for why) with read/resolved tracking
+// and an optional internal note instead of a reply box.
+let ADMIN_INQUIRY_OPEN_ID = null;
+let INQUIRIES_CACHE = [];
+async function loadInquiriesList() {
+  const wrap = document.getElementById("inquiries-list");
+  if (!wrap) return;
+  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || CURRENT_SESSION.staff.role !== "admin") return;
+  try {
+    INQUIRIES_CACHE = await api("/api/staff/inquiries");
+    if (!INQUIRIES_CACHE.length) {
+      wrap.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;">${escapeAttr(t("noInquiries"))}</p>`;
+    } else {
+      wrap.innerHTML = INQUIRIES_CACHE
+        .map(
+          (inq) => `<div class="chat-thread-item ${inq.id === ADMIN_INQUIRY_OPEN_ID ? "active" : ""}" data-id="${inq.id}">
+        <div>
+          <div class="name">${escapeAttr(inq.name)}${inq.resolved ? ` <span style="color:var(--muted);font-weight:400;">(${escapeAttr(t("inquiryResolvedLabel"))})</span>` : ""}</div>
+          <div class="snippet">${escapeAttr(inq.message)}</div>
+        </div>
+        ${!inq.read ? `<div class="unread-dot">&bull;</div>` : ""}
+      </div>`
+        )
+        .join("");
+      wrap.querySelectorAll(".chat-thread-item").forEach((el) => {
+        el.addEventListener("click", () => openInquiryDetail(Number(el.dataset.id)));
+      });
+    }
+    updateAdminChatBadge();
+  } catch (e) {
+    wrap.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;">${escapeAttr(t("errGeneric"))}</p>`;
+  }
+}
+async function openInquiryDetail(id) {
+  ADMIN_INQUIRY_OPEN_ID = id;
+  const panel = document.getElementById("inquiry-detail-panel");
+  panel.classList.remove("hidden");
+  const inquiry = INQUIRIES_CACHE.find((i) => i.id === id);
+  if (!inquiry) return;
+  document.getElementById("inquiry-detail-name").textContent = inquiry.name;
+  const contactBits = [inquiry.phone, inquiry.email].filter(Boolean).join(" · ");
+  document.getElementById("inquiry-detail-contact").textContent =
+    contactBits + " · " + new Date(inquiry.submittedAt).toLocaleString();
+  document.getElementById("inquiry-detail-message").textContent = inquiry.message;
+  document.getElementById("inquiry-note-input").value = inquiry.staffNote || "";
+  const toggleBtn = document.getElementById("inquiry-toggle-resolved-btn");
+  toggleBtn.textContent = inquiry.resolved ? t("btnMarkUnresolved") : t("btnMarkResolved");
+  document.getElementById("inquiry-detail-msg").textContent = "";
+  if (!inquiry.read) {
+    try {
+      await api(`/api/staff/inquiries/${id}/read`, { method: "POST" });
+      inquiry.read = true;
+      loadInquiriesList();
+    } catch (e) {
+      /* ignore - next poll will retry */
+    }
+  }
+}
+document.getElementById("inquiry-save-note-btn").addEventListener("click", async () => {
+  if (!ADMIN_INQUIRY_OPEN_ID) return;
+  const inquiry = INQUIRIES_CACHE.find((i) => i.id === ADMIN_INQUIRY_OPEN_ID);
+  if (!inquiry) return;
+  const msg = document.getElementById("inquiry-detail-msg");
+  const note = document.getElementById("inquiry-note-input").value.trim();
+  try {
+    // Sends the CURRENT resolved value explicitly - the endpoint toggles
+    // resolved when that field is left out of the request body, which
+    // would flip it as a side effect of an unrelated "just save the note"
+    // click if omitted here.
+    const result = await api(`/api/staff/inquiries/${ADMIN_INQUIRY_OPEN_ID}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolved: inquiry.resolved, staffNote: note }),
+    });
+    Object.assign(inquiry, result);
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("inquiry-toggle-resolved-btn").addEventListener("click", async () => {
+  if (!ADMIN_INQUIRY_OPEN_ID) return;
+  const inquiry = INQUIRIES_CACHE.find((i) => i.id === ADMIN_INQUIRY_OPEN_ID);
+  if (!inquiry) return;
+  const msg = document.getElementById("inquiry-detail-msg");
+  try {
+    const result = await api(`/api/staff/inquiries/${ADMIN_INQUIRY_OPEN_ID}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolved: !inquiry.resolved }),
+    });
+    Object.assign(inquiry, result);
+    document.getElementById("inquiry-toggle-resolved-btn").textContent = inquiry.resolved
+      ? t("btnMarkUnresolved")
+      : t("btnMarkResolved");
+    showMsg(msg, t("settingsSaved"), true);
+    loadInquiriesList();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
 document.getElementById("admin-chat-send").addEventListener("click", sendAdminChatMessage);
 document.getElementById("admin-chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -4842,6 +5016,13 @@ function populateLandingAdminForms() {
       removeBtn.classList.add("hidden");
     }
   }
+  const contactTitleEnInput = document.getElementById("contact-title-en");
+  if (contactTitleEnInput && lp.contact) {
+    contactTitleEnInput.value = lp.contact.titleEn || "";
+    document.getElementById("contact-title-ar").value = lp.contact.titleAr || "";
+    document.getElementById("contact-body-en").value = lp.contact.bodyEn || "";
+    document.getElementById("contact-body-ar").value = lp.contact.bodyAr || "";
+  }
   renderLandingSectionsAdminList();
   renderGalleryAdminList(lp.gallery || []);
   renderSponsorsAdminList(lp.sponsors || []);
@@ -4858,6 +5039,7 @@ const LANDING_SECTION_LABEL_KEYS = {
   gallery: "landingSecGallery",
   sponsors: "landingSecSponsors",
   whatsapp: "landingSecWhatsapp",
+  contact: "landingSecContact",
 };
 // Index of the row currently being mouse-dragged, while a drag is in
 // progress - shared across the drag*/drop handlers wired up below, and
@@ -5084,6 +5266,27 @@ document.getElementById("whatsapp-remove-qr-btn").addEventListener("click", asyn
     const result = await api("/api/admin/landing/whatsapp", { method: "PUT", body: fd });
     SETTINGS.landingPage.whatsapp = result.whatsapp;
     LANDING_PAGE.whatsapp = result.whatsapp;
+    populateLandingAdminForms();
+    applyLandingPageToUI();
+    showMsg(msg, t("settingsSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("contact-save-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("contact-admin-msg");
+  try {
+    const result = await api("/api/admin/landing/contact", {
+      method: "PUT",
+      body: JSON.stringify({
+        titleEn: document.getElementById("contact-title-en").value.trim(),
+        titleAr: document.getElementById("contact-title-ar").value.trim(),
+        bodyEn: document.getElementById("contact-body-en").value.trim(),
+        bodyAr: document.getElementById("contact-body-ar").value.trim(),
+      }),
+    });
+    SETTINGS.landingPage.contact = result.contact;
+    LANDING_PAGE.contact = result.contact;
     populateLandingAdminForms();
     applyLandingPageToUI();
     showMsg(msg, t("settingsSaved"), true);
