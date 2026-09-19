@@ -353,7 +353,7 @@ const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 // tab's own card grid (see startRegisterFlow()/renderRegisterEventsGrid()
 // in app.js) as an always-available way to sign up even with this section
 // hidden from the landing page, so there's no dead end if an admin does.
-const LANDING_SECTION_KEYS = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors", "whatsapp"];
+const LANDING_SECTION_KEYS = ["hero", "events", "annual", "about", "news", "community", "spotlight", "gallery", "sponsors", "whatsapp", "contact"];
 
 const brandingLogoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, BRANDING_UPLOADS_DIR),
@@ -501,10 +501,11 @@ function ensureDbFile() {
     staffAccounts: {},
     registrations: [],
     redemptions: [],
-    nextIds: { event: 1, registration: 1, redemption: 1, dependent: 1, chatMessage: 1, newsPost: 1, spotlight: 1 },
+    nextIds: { event: 1, registration: 1, redemption: 1, dependent: 1, chatMessage: 1, newsPost: 1, spotlight: 1, publicInquiry: 1 },
     chatMessages: [],
     newsPosts: [],
     spotlights: [],
+    publicInquiries: [],
     settings: { pointsVisibleToMembers: true },
     sessions: {},
   };
@@ -663,6 +664,11 @@ function readDb() {
   db.nextIds.dependent = db.nextIds.dependent || 1;
   db.nextIds.chatMessage = db.nextIds.chatMessage || 1;
   db.chatMessages = db.chatMessages || [];
+  // Public contact-form submissions - see the PUBLIC CONTACT FORM section
+  // further down for why this is separate from chatMessages above (no
+  // account/login needed to send one).
+  db.nextIds.publicInquiry = db.nextIds.publicInquiry || 1;
+  db.publicInquiries = db.publicInquiries || [];
   db.nextIds.newsPost = db.nextIds.newsPost || 1;
   db.newsPosts = db.newsPosts || [];
   db.nextIds.spotlight = db.nextIds.spotlight || 1;
@@ -762,6 +768,20 @@ function readDb() {
   if (typeof db.landingPage.whatsapp.bodyAr !== "string") db.landingPage.whatsapp.bodyAr = "";
   if (typeof db.landingPage.whatsapp.qrImage !== "string") db.landingPage.whatsapp.qrImage = "";
   if (typeof db.landingPage.whatsapp.link !== "string") db.landingPage.whatsapp.link = "";
+  // Public contact form block: title/intro shown above the form on the
+  // landing page - same bilingual title/body pattern as "about" and
+  // "whatsapp" above. The form itself needs no admin-curated content
+  // beyond this text, so (unlike about/gallery/sponsors) it's on by
+  // default - see defaultLandingSections below.
+  db.landingPage.contact = db.landingPage.contact || {};
+  if (typeof db.landingPage.contact.titleEn !== "string") db.landingPage.contact.titleEn = "Contact the Committee";
+  if (typeof db.landingPage.contact.titleAr !== "string") db.landingPage.contact.titleAr = "تواصل مع اللجنة";
+  if (typeof db.landingPage.contact.bodyEn !== "string") {
+    db.landingPage.contact.bodyEn = "Have a question before you register? Send us a message and we'll get back to you.";
+  }
+  if (typeof db.landingPage.contact.bodyAr !== "string") {
+    db.landingPage.contact.bodyAr = "عندك سؤال قبل التسجيل؟ ابعتلنا رسالة وهنرد عليك.";
+  }
   db.landingPage.gallery = db.landingPage.gallery || [];
   db.landingPage.sponsors = db.landingPage.sponsors || [];
   db.nextIds.galleryPhoto = db.nextIds.galleryPhoto || 1;
@@ -785,6 +805,10 @@ function readDb() {
     { key: "gallery", enabled: false },
     { key: "sponsors", enabled: false },
     { key: "whatsapp", enabled: false },
+    // On by default, unlike whatsapp/about/gallery/sponsors above - it's a
+    // functional form rather than admin-curated content, so there's
+    // nothing to "fill in" first the way there is for those.
+    { key: "contact", enabled: true },
   ];
   if (!Array.isArray(db.landingPage.sections)) {
     db.landingPage.sections = defaultLandingSections;
@@ -1876,6 +1900,101 @@ app.post("/api/staff/chats/:membershipNumber", requireStaffRole("admin"), (req, 
 });
 
 // -------------------------------------------------------------------------
+// PUBLIC CONTACT FORM (anonymous visitor -> committee)
+// -------------------------------------------------------------------------
+// Unlike the support chat above, this needs no member account - it's for
+// someone on the public landing page who isn't registered yet (or just
+// hasn't logged in). One-way and anonymous, so there's no in-app "reply":
+// staff see the message plus whatever phone/email the visitor gave, and
+// follow up directly (call, WhatsApp, email) outside the platform. Kept as
+// its own collection rather than folded into chatMessages, since it has no
+// membershipNumber to key a thread on.
+const inquirySubmitsByIp = new Map();
+const INQUIRY_LIMIT_MAX_SUBMITS = 5;
+const INQUIRY_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+// Simple per-IP throttle against spam/abuse of an unauthenticated POST
+// endpoint - same Map-based shape as loginFailuresByIp above, sized for a
+// genuine visitor (who'd never send more than one or two messages an hour)
+// rather than a scripted flood.
+function inquiryRateLimited(ip) {
+  const rec = inquirySubmitsByIp.get(ip);
+  if (!rec || Date.now() - rec.first > INQUIRY_LIMIT_WINDOW_MS) {
+    inquirySubmitsByIp.set(ip, { count: 1, first: Date.now() });
+    return false;
+  }
+  rec.count++;
+  return rec.count > INQUIRY_LIMIT_MAX_SUBMITS;
+}
+
+app.post("/api/public/inquiries", (req, res) => {
+  if (inquiryRateLimited(req.ip)) {
+    return res.status(429).json({ error: "Too many messages sent from here recently. Please try again later." });
+  }
+  const db = readDb();
+  const name = (req.body.name || "").trim().slice(0, 200);
+  const phone = (req.body.phone || "").trim().slice(0, 40);
+  const email = (req.body.email || "").trim().slice(0, 200);
+  const message = (req.body.message || "").trim().slice(0, 2000);
+  if (!name || !message) return res.status(400).json({ error: "Name and message are required" });
+  if (!phone && !email) {
+    return res.status(400).json({ error: "Please provide a phone number or an email address so we can reply" });
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "That doesn't look like a valid email address" });
+  }
+  const inquiry = {
+    id: db.nextIds.publicInquiry++,
+    name,
+    phone,
+    email,
+    message,
+    submittedAt: new Date().toISOString(),
+    read: false,
+    resolved: false,
+    staffNote: "",
+  };
+  db.publicInquiries.push(inquiry);
+  writeDb(db);
+  res.status(201).json({ ok: true });
+});
+
+app.get("/api/staff/inquiries", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const list = db.publicInquiries.slice().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+  res.json(list);
+});
+
+app.get("/api/staff/inquiries/unread-count", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const count = db.publicInquiries.filter((i) => !i.read).length;
+  res.json({ count });
+});
+
+app.post("/api/staff/inquiries/:id/read", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const inquiry = db.publicInquiries.find((i) => i.id === id);
+  if (!inquiry) return res.status(404).json({ error: "No such inquiry" });
+  if (!inquiry.read) {
+    inquiry.read = true;
+    writeDb(db);
+  }
+  res.json(inquiry);
+});
+
+app.post("/api/staff/inquiries/:id/resolve", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const inquiry = db.publicInquiries.find((i) => i.id === id);
+  if (!inquiry) return res.status(404).json({ error: "No such inquiry" });
+  inquiry.resolved = typeof req.body.resolved === "boolean" ? req.body.resolved : !inquiry.resolved;
+  if (typeof req.body.staffNote === "string") inquiry.staffNote = req.body.staffNote.trim().slice(0, 500);
+  inquiry.read = true;
+  writeDb(db);
+  res.json(inquiry);
+});
+
+// -------------------------------------------------------------------------
 // EVENTS
 // -------------------------------------------------------------------------
 // Used to gate event edits: an event's details can be changed any time up
@@ -2529,6 +2648,19 @@ app.put("/api/admin/landing/whatsapp", requireStaffRole("admin"), uploadEventPho
   }
   writeDb(db);
   res.json({ whatsapp: db.landingPage.whatsapp });
+});
+
+app.put("/api/admin/landing/contact", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const { titleEn, titleAr, bodyEn, bodyAr } = req.body;
+  db.landingPage.contact = {
+    titleEn: (titleEn || "").trim() || db.landingPage.contact.titleEn,
+    titleAr: (titleAr || "").trim(),
+    bodyEn: (bodyEn || "").trim(),
+    bodyAr: (bodyAr || "").trim(),
+  };
+  writeDb(db);
+  res.json({ contact: db.landingPage.contact });
 });
 
 app.post("/api/admin/landing/gallery", requireStaffRole("admin"), uploadEventPhoto.single("photo"), (req, res) => {
