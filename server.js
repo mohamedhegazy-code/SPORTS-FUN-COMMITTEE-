@@ -3330,10 +3330,17 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), async (r
       .map(async (r) => {
         const member = db.members[r.membershipNumber];
         const canShowQr = !r.checkedIn && !r.waitlisted && !eventOver;
+        // Whoever is actually attending gets their own phone used first (a
+        // dependent can have one on file - see /api/me/dependents), falling
+        // back to the primary member's phone. Feeds the "Send WhatsApp
+        // confirmation" click-to-chat link in the admin UI - never sent from
+        // here server-side, just handed to the client to build a wa.me URL.
+        const dependent = r.dependentId && member ? (member.dependents || []).find((d) => d.id === r.dependentId) : null;
         return {
           registrationId: r.id,
           attendeeName: r.dependentName || (member ? member.name : r.membershipNumber),
           membershipNumber: r.membershipNumber,
+          phone: (dependent && dependent.phone) || (member ? member.phone : "") || "",
           checkedIn: !!r.checkedIn,
           checkInAt: r.checkInAt,
           waitlisted: !!r.waitlisted,
