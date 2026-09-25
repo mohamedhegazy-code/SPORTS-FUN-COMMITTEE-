@@ -3644,7 +3644,7 @@ document.getElementById("admin-hub-close").addEventListener("click", () => {
 document.getElementById("hub-checkin-search").addEventListener("input", () => {
   const wrap = document.getElementById("hub-checkin-wrap");
   const query = (document.getElementById("hub-checkin-search").value || "").trim().toLowerCase();
-  wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query);
+  wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query, HUB_EVENT_ID);
 });
 document.getElementById("hub-checkin-wrap").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-checkin-reg]");
@@ -3759,7 +3759,7 @@ async function loadHubRoster(preserveMsg) {
   try {
     HUB_ROSTER = await api("/api/staff/events/" + HUB_EVENT_ID + "/roster");
     const query = (document.getElementById("hub-checkin-search").value || "").trim().toLowerCase();
-    wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query);
+    wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query, HUB_EVENT_ID);
     const checkedIn = HUB_ROSTER.filter((r) => r.checkedIn).length;
     const confirmed = HUB_ROSTER.filter((r) => !r.waitlisted).length;
     document.getElementById("admin-hub-stats").innerHTML = `
@@ -7527,20 +7527,62 @@ function renderCheckinRoster() {
     return;
   }
   const query = (document.getElementById("checkin-search").value || "").trim().toLowerCase();
-  wrap.innerHTML = rosterTableHtml(CHECKIN_ROSTER, query);
+  wrap.innerHTML = rosterTableHtml(CHECKIN_ROSTER, query, document.getElementById("checkin-event-select").value);
+}
+// Direct WhatsApp "click to chat" - the official wa.me URL scheme, not the
+// Cloud API. This only ever builds a link; the admin/staff member still has
+// to click it and tap Send themselves in their own WhatsApp (app or Web), so
+// there's no bot, no automated sending, and no account-ban risk - the same
+// mechanism millions of businesses link from a "Chat on WhatsApp" button.
+// Turns whatever a phone field has on file (local "01xxxxxxxxx", "+20...",
+// "0020...", or already-bare digits) into the "2xxxxxxxxxxx" country-code
+// form wa.me requires. Assumes Egypt (country code 20) for a bare local
+// number, since that's every phone number this club collects.
+function waDigits(phone) {
+  let d = String(phone || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("0020")) d = d.slice(2); // 0020xxxxxxxxxx -> 20xxxxxxxxxx
+  else if (d.startsWith("00")) d = d.slice(2);
+  else if (d.startsWith("0")) d = "20" + d.slice(1); // local 01xxxxxxxxx -> 201xxxxxxxxx
+  else if (!d.startsWith("20")) d = "20" + d; // bare 1xxxxxxxxx -> 201xxxxxxxxx
+  return d;
+}
+function waLink(phone, message) {
+  const digits = waDigits(phone);
+  if (!digits) return "";
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+// The pre-filled confirmation text, in whichever language the admin/staff
+// member currently has the UI set to (see bilingual()) - they can still edit
+// it in WhatsApp itself before hitting Send.
+function waConfirmMessage(attendeeName, eventName, eventDate) {
+  return bilingual(
+    `Hi ${attendeeName}, this confirms your registration for "${eventName}"${eventDate ? ` on ${eventDate}` : ""}. See you there! - MyAhlawy Committee`,
+    `مرحبًا ${attendeeName}، تم تأكيد تسجيلك في "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. نراك هناك! - لجنة ماي أهلاوي`
+  );
+}
+function waConfirmBtnHtml(r, eventName, eventDate) {
+  const href = waLink(r.phone, waConfirmMessage(r.attendeeName, eventName || "", eventDate || ""));
+  if (!href) return "";
+  return `<a class="secondary small" href="${escapeAttr(href)}" target="_blank" rel="noopener">${escapeAttr(t("btnSendWhatsappConfirm"))}</a>`;
 }
 // Shared by the Gate Scanner's manual check-in list and the per-event Admin
 // hub's attendance section, so the two never drift - one row shape, one set
 // of status/action rules. Pure function (no DOM reads/writes) so it's safe
 // to call from either context; the caller wires its own data-checkin-reg
-// click delegation on whatever container it rendered into.
-function rosterTableHtml(roster, query) {
+// click delegation on whatever container it rendered into. eventId is
+// optional context just for the WhatsApp confirmation link's message text
+// (event name/date) - everything else about the row works without it.
+function rosterTableHtml(roster, query, eventId) {
   const filtered = roster.filter(
     (r) => !query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)
   );
   if (!filtered.length) {
     return `<p style="color:var(--muted);">${escapeAttr(t("checkinNoMatches"))}</p>`;
   }
+  const ev = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
+  const eventName = ev ? bilingual(ev.nameEn, ev.nameAr) : "";
+  const eventDate = ev ? ev.date : "";
   return `<table><tbody>${filtered
     .map((r) => {
       let status, action;
@@ -7555,11 +7597,12 @@ function rosterTableHtml(roster, query) {
         status = "";
         action = `<button class="secondary small" data-checkin-reg="${r.registrationId}">${t("btnCheckIn")}</button>`;
       }
+      const waBtn = waConfirmBtnHtml(r, eventName, eventDate);
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td>${status}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
-        <td>${action}</td>
+        <td>${action}${action && waBtn ? "<br/><br/>" : ""}${waBtn}</td>
       </tr>`;
     })
     .join("")}</tbody></table>`;
