@@ -7553,19 +7553,29 @@ function waLink(phone, message) {
   if (!digits) return "";
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
-// The pre-filled confirmation text, in whichever language the admin/staff
-// member currently has the UI set to (see bilingual()) - they can still edit
-// it in WhatsApp itself before hitting Send.
+// The pre-filled confirmation text - always both languages, Arabic first
+// then English, regardless of which language the admin/staff member
+// currently has the UI set to (the member on the receiving end may prefer
+// either). Staff can still edit it in WhatsApp itself before hitting Send.
 function waConfirmMessage(attendeeName, eventName, eventDate) {
-  return bilingual(
-    `Hi ${attendeeName}, this confirms your registration for "${eventName}"${eventDate ? ` on ${eventDate}` : ""}. See you there! - MyAhlawy Committee`,
-    `مرحبًا ${attendeeName}، تم تأكيد تسجيلك في "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. نراك هناك! - لجنة ماي أهلاوي`
-  );
+  const ar = `مرحبًا ${attendeeName}، تم تأكيد تسجيلك في "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. نراك هناك! - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
+  const en = `Hi ${attendeeName}, this confirms your registration for "${eventName}"${eventDate ? ` on ${eventDate}` : ""}. See you there! - Recreational Sports Committee — New Cairo Branch`;
+  return `${ar}\n\n${en}`;
 }
+// wa.me's click-to-chat link can only pre-fill TEXT (it's a URL scheme, not
+// an API - there's no official way to pre-attach an image/file to the draft
+// message). So when this registration actually has a QR to send, we show a
+// one-line reminder pointing at the QR thumbnail/download button that
+// already sits in the previous column (rosterQrCellHtml) - staff download it
+// once, then drag/attach that image into the WhatsApp chat before sending.
 function waConfirmBtnHtml(r, eventName, eventDate) {
   const href = waLink(r.phone, waConfirmMessage(r.attendeeName, eventName || "", eventDate || ""));
   if (!href) return "";
-  return `<a class="secondary small" href="${escapeAttr(href)}" target="_blank" rel="noopener">${escapeAttr(t("btnSendWhatsappConfirm"))}</a>`;
+  const btn = `<a class="secondary small" href="${escapeAttr(href)}" target="_blank" rel="noopener">${escapeAttr(t("btnSendWhatsappConfirm"))}</a>`;
+  const hint = r.qrDataUrl
+    ? `<br/><small style="color:var(--muted);">${escapeAttr(t("waConfirmQrHint"))}</small>`
+    : "";
+  return btn + hint;
 }
 // Shared by the Gate Scanner's manual check-in list and the per-event Admin
 // hub's attendance section, so the two never drift - one row shape, one set
