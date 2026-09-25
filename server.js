@@ -1,5 +1,6 @@
 // MyAhlawy Online Registration & Points System
 // Al Ahly Club - Recreational Sports Committee, Fifth Settlement
+// build: 2026-09-25T07:02:00Z (deploy-staleness test)
 //
 // Simple, self-contained Node/Express app. Data persists to data/db.json
 // (a real database can replace this file's read/write functions later,
