@@ -1,3 +1,4 @@
+// build: 2026-09-25T07:02:00Z (deploy-staleness test)
 const I18N = {
   en: {
     appTitle: "MyAhlawy — Online Registration & Points",

@@ -1,3 +1,4 @@
+// build: 2026-09-25T07:02:00Z (deploy-staleness test)
 let CURRENT_SESSION = null; // null | { type: 'member', member } | { type: 'staff', staff }
 let CURRENT_BALANCE = null; // the signed-in member's own points balance, kept in sync by loadMyBalance() - used to grey out redemption-ladder tiers the member can't afford yet
 let LADDER_DATA = null;
