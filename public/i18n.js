@@ -665,7 +665,7 @@ const I18N = {
 
     // Admin: event dashboard
     adminDashboardTitle: "Event dashboard",
-    adminDashboardIntro: "Registrations, waiting list, and attendance for every event, newest first.",
+    adminDashboardIntro: "Registrations, waiting list, and attendance for upcoming events, soonest first.",
     noEventsYet: "No events yet.",
     minTarget: "min target",
     colEvent: "Event",
@@ -1551,7 +1551,7 @@ const I18N = {
 
     // لوحة تحكم الفعاليات (المسؤول)
     adminDashboardTitle: "لوحة تحكم الفعاليات",
-    adminDashboardIntro: "التسجيلات وقائمة الانتظار والحضور لكل فعالية، الأحدث أولاً.",
+    adminDashboardIntro: "التسجيلات وقائمة الانتظار والحضور للفعاليات القادمة، الأقرب أولاً.",
     noEventsYet: "لا توجد فعاليات بعد.",
     minTarget: "الهدف الأدنى",
     colEvent: "الفعالية",
