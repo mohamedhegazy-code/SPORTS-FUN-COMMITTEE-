@@ -3208,6 +3208,7 @@ app.post("/api/register", requireMember, async (req, res) => {
     checkedIn: false,
     checkInAt: null,
     waitlisted: isWaitlisted,
+    whatsappConfirmedAt: null,
   };
   db.registrations.push(registration);
   logActivity(db, {
@@ -3364,12 +3365,30 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), async (r
           checkedIn: !!r.checkedIn,
           checkInAt: r.checkInAt,
           waitlisted: !!r.waitlisted,
+          registeredAt: r.registeredAt || null,
+          whatsappConfirmedAt: r.whatsappConfirmedAt || null,
           qrDataUrl: canShowQr ? await qrDataUrl(r) : null,
         };
       })
   );
   roster.sort((a, b) => a.attendeeName.localeCompare(b.attendeeName));
   res.json(roster);
+});
+
+// Marks a registration's WhatsApp confirmation as sent, so the admin/staff
+// roster can show "Sent" + when instead of a bare "Send" button forever, and
+// offer "Resend" afterwards. There's still no real send mechanism here (see
+// waLink()/waConfirmBtnHtml() in app.js) - clicking "Send"/"Resend" just
+// opens the pre-filled wa.me chat in the staff member's own WhatsApp, and
+// this records that they did so. Callable any number of times; each call
+// simply bumps the timestamp forward rather than refusing a resend.
+app.post("/api/staff/registrations/:id/whatsapp-confirmed", requireStaffRole("staff"), (req, res) => {
+  const db = req.db;
+  const reg = db.registrations.find((r) => r.id === Number(req.params.id));
+  if (!reg) return res.status(404).json({ error: "Registration not found" });
+  reg.whatsappConfirmedAt = new Date().toISOString();
+  writeDb(db);
+  res.json({ whatsappConfirmedAt: reg.whatsappConfirmedAt });
 });
 
 // Staff-only: manual check-in by picking a row on that roster, for a member
@@ -4150,6 +4169,7 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
       checkedIn: false,
       checkInAt: null,
       waitlisted: false,
+      whatsappConfirmedAt: null,
     };
     db.registrations.push(registration);
     invited.push({ membershipNumber, name: member.name, registrationId: registration.id });
