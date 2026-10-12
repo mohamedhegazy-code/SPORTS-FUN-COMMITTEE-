@@ -2052,8 +2052,8 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const relSel = document.getElementById("su-relationship").value;
   const relationshipToMain = memberType === "follower" ? (relSel === "other" ? document.getElementById("su-relationship-other").value.trim() : relSel) : "";
   const msg = document.getElementById("su-msg");
-  if (!membershipNumber || !name || !password) {
-    highlightMissingFields(["su-membership", "su-name", "su-password"]);
+  if (!membershipNumber || !name || !password || !phone) {
+    highlightMissingFields(["su-membership", "su-name", "su-password", "su-phone"]);
     showMsg(msg, t("errFillFields"), false);
     return;
   }
