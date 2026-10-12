@@ -188,6 +188,21 @@ function isUpcoming(ev) {
 function isPastEvent(ev) {
   return eventEndDate(ev) < todayStr();
 }
+// Shared ordering for every event-picker dropdown that lists more than one
+// event: whichever event is most relevant right now should be first (and
+// so the browser's default selection), not whatever happens to be first in
+// storage order. Upcoming events always sort before past ones, soonest
+// upcoming first; past events (where a chooser includes them at all, e.g.
+// Tournament or Enter results) sort most-recent-first after that, so an
+// admin opening any of these dropdowns lands on the next event by default.
+function sortEventsForChooser(events) {
+  return events.slice().sort((a, b) => {
+    const aUp = isUpcoming(a);
+    const bUp = isUpcoming(b);
+    if (aUp !== bUp) return aUp ? -1 : 1;
+    return aUp ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date);
+  });
+}
 // Full weekday name for a "YYYY-MM-DD" date string, in the current
 // language. Anchors to local midnight (rather than parsing the bare date
 // string, which JS treats as UTC) so the weekday can't shift by a day
@@ -1365,7 +1380,7 @@ function renderEventDropdowns() {
   // just leads to a waiting-list offer instead of an instant confirmed spot.
   // Parent "event day" wrappers with activities under them are excluded -
   // there's nothing to directly register for on the parent itself.
-  const upcoming = EVENTS_DATA.filter(isUpcoming);
+  const upcoming = sortEventsForChooser(EVENTS_DATA.filter(isUpcoming));
   const regOpts = upcoming
     .filter((ev) => !isParentEventWithChildren(ev))
     .map(
@@ -1382,8 +1397,12 @@ function renderEventDropdowns() {
 
   const upcomingOpts = upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
 
-  // Admins need every event (including past ones) to enter results.
-  const allOpts = EVENTS_DATA.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
+  // Admins need every event (including past ones) to enter results - the
+  // soonest upcoming one first, so the dropdown defaults to what's actually
+  // next instead of an arbitrary past event (see sortEventsForChooser).
+  const allOpts = sortEventsForChooser(EVENTS_DATA)
+    .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
+    .join("");
   const resSel = document.getElementById("res-event");
   if (resSel) resSel.innerHTML = allOpts || `<option value="">--</option>`;
 
@@ -1411,11 +1430,13 @@ function renderEventDropdowns() {
 
   // Tournament: any event that isn't itself a parent-with-children (which
   // has no direct registrations of its own to run a tournament from),
-  // upcoming or past.
+  // upcoming or past - soonest upcoming event first (see
+  // sortEventsForChooser), so this defaults to the next event rather than
+  // whichever event happens to sort first in storage.
   const tournSel = document.getElementById("tourn-event-select");
   if (tournSel) {
     const prevTournValue = tournSel.value;
-    const tournOpts = EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev))
+    const tournOpts = sortEventsForChooser(EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev)))
       .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
       .join("");
     tournSel.innerHTML = tournOpts || `<option value="">--</option>`;
@@ -1451,7 +1472,7 @@ function populateParentEventOptions() {
   const noneLabel = t("parentEventNone");
   const buildOptions = (excludeEventId) =>
     `<option value="">${escapeAttr(noneLabel)}</option>` +
-    EVENTS_DATA.filter((ev) => !ev.parentEventId && ev.id !== excludeEventId)
+    sortEventsForChooser(EVENTS_DATA.filter((ev) => !ev.parentEventId && ev.id !== excludeEventId))
       .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
       .join("");
 
@@ -3949,7 +3970,7 @@ async function loadAdminMembers() {
 function renderMembersInviteEventDropdown() {
   const sel = document.getElementById("members-invite-event");
   const prevValue = sel.value;
-  const upcoming = EVENTS_DATA.filter(isUpcoming);
+  const upcoming = sortEventsForChooser(EVENTS_DATA.filter(isUpcoming));
   sel.innerHTML = upcoming.length
     ? upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("")
     : `<option value="">${t("noEventsToInvite")}</option>`;
@@ -3963,7 +3984,7 @@ function renderMembersInviteEventDropdown() {
 function renderMemberAddEventDropdown() {
   const sel = document.getElementById("member-add-event");
   const prevValue = sel.value;
-  const upcoming = EVENTS_DATA.filter(isUpcoming);
+  const upcoming = sortEventsForChooser(EVENTS_DATA.filter(isUpcoming));
   const noInviteOption = `<option value="">${t("optionNoInvite")}</option>`;
   sel.innerHTML =
     noInviteOption + upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
