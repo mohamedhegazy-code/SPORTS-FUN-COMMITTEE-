@@ -1261,8 +1261,19 @@ function nextFamilyAccountId(db, clubId) {
   }
 }
 
+// The four self-reported age bands (Kids/Teens/Adults/Seniors) a member may
+// optionally pick for themselves, or an admin may set on their behalf - used
+// wherever an incoming ageGroup value needs a defense-in-depth check against
+// anything unexpected reaching the server directly (the dropdown already
+// constrains it client-side).
+const VALID_AGE_GROUPS = ["under12", "12to17", "18to45", "46plus"];
+function sanitizeAgeGroup(value) {
+  const trimmed = String(value || "").trim();
+  return VALID_AGE_GROUPS.includes(trimmed) ? trimmed : "";
+}
+
 app.post("/api/auth/signup", async (req, res) => {
-  const { membershipNumber, name, password, familyGroup, phone, email, agreeTerms, memberType, relationshipToMain } = req.body;
+  const { membershipNumber, name, password, familyGroup, phone, ageGroup, email, agreeTerms, memberType, relationshipToMain } = req.body;
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
   }
@@ -1340,6 +1351,7 @@ app.post("/api/auth/signup", async (req, res) => {
     relationshipToMain: memberType === "follower" ? trimmedRelationship : "",
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
     phone: trimmedPhone,
+    ageGroup: sanitizeAgeGroup(ageGroup) || (claiming ? claiming.ageGroup : "") || "",
     email: trimmedEmail || (claiming ? claiming.email : "") || "",
     passwordHash,
     dependents: (claiming && claiming.dependents) || [],
@@ -2823,11 +2835,12 @@ app.get("/api/me/balance", requireMember, (req, res) => {
 
 app.patch("/api/me/profile", requireMember, (req, res) => {
   const db = req.db;
-  const { name, familyGroup, phone } = req.body;
+  const { name, familyGroup, phone, ageGroup } = req.body;
   const member = db.members[req.member.membershipNumber];
   if (name) member.name = name;
   if (familyGroup !== undefined) member.familyGroup = familyGroup;
   if (phone !== undefined) member.phone = phone;
+  if (ageGroup !== undefined) member.ageGroup = sanitizeAgeGroup(ageGroup);
   writeDb(db);
   res.json({ member: publicMember(member) });
 });
@@ -3765,6 +3778,7 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
       name: m.name,
       phone: m.phone || "",
       familyGroup: m.familyGroup || "",
+      ageGroup: m.ageGroup || "",
       hasLoggedInAccount: !!m.passwordHash,
       dependentsCount: (m.dependents || []).length,
     }))
@@ -3785,6 +3799,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
   const name = String(req.body.name || "").trim();
   const phone = String(req.body.phone || "").trim();
   const familyGroup = String(req.body.familyGroup || "").trim();
+  const ageGroup = sanitizeAgeGroup(req.body.ageGroup);
   if (!membershipNumber || !name) {
     return res.status(400).json({ error: "Membership number and name are required" });
   }
@@ -3796,6 +3811,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
     name,
     familyGroup,
     phone,
+    ageGroup,
     passwordHash: null,
     dependents: [],
     nickname: "",
@@ -3816,7 +3832,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
   });
   writeDb(db);
   res.status(201).json({
-    member: { membershipNumber, name, phone, familyGroup, hasLoggedInAccount: false, dependentsCount: 0 },
+    member: { membershipNumber, name, phone, familyGroup, ageGroup, hasLoggedInAccount: false, dependentsCount: 0 },
   });
 });
 
@@ -3888,6 +3904,38 @@ app.post("/api/admin/members/:membershipNumber/family/unlink", requireStaffRole(
   });
 });
 
+// Plain-English labels for the export column / what the import parser below
+// accepts back - kept in sync with VALID_AGE_GROUPS and the client-side
+// ageGroup dropdown options (see AGE_GROUP_LABEL_KEYS in app.js).
+const AGE_GROUP_EXPORT_LABELS = {
+  under12: "Kids (Under 12)",
+  "12to17": "Teens (12-17)",
+  "18to45": "Adults (18-45)",
+  "46plus": "Seniors (46+)",
+};
+const AGE_GROUP_IMPORT_LOOKUP = {
+  "kids (under 12)": "under12",
+  "under 12": "under12",
+  kids: "under12",
+  "teens (12-17)": "12to17",
+  "12-17": "12to17",
+  teens: "12to17",
+  "adults (18-45)": "18to45",
+  "18-45": "18to45",
+  adults: "18to45",
+  "seniors (46+)": "46plus",
+  "46+": "46plus",
+  seniors: "46plus",
+};
+// Also accepts the raw internal codes (under12/12to17/18to45/46plus), so a
+// roster exported from here always re-imports cleanly.
+function parseAgeGroupCell(raw) {
+  const normalized = String(raw || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (VALID_AGE_GROUPS.includes(normalized)) return normalized;
+  return AGE_GROUP_IMPORT_LOOKUP[normalized] || "";
+}
+
 // Exports the member roster as an .xlsx file. Re-importing this same file
 // (see below) is a safe no-op for anyone unchanged, so this also doubles as
 // a simple backup/round-trip format.
@@ -3898,6 +3946,7 @@ app.get("/api/admin/members/export", requireStaffRole("admin"), (req, res) => {
     Name: m.name,
     Phone: m.phone || "",
     "Family Group": m.familyGroup || "",
+    "Age Group": AGE_GROUP_EXPORT_LABELS[m.ageGroup] || "",
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
@@ -3910,7 +3959,9 @@ app.get("/api/admin/members/export", requireStaffRole("admin"), (req, res) => {
 
 // Bulk-imports members from an .xlsx file. Expected columns (case-insensitive,
 // any order): "Membership Number", "Name", "Phone" (optional), "Family Group"
-// (optional) - matching the export above. Header cells are also tolerant of
+// (optional), "Age Group" (optional - accepts the export's labels like "Kids
+// (Under 12)", a bare range like "18-45", or the internal code) - matching
+// the export above. Header cells are also tolerant of
 // stray leading/trailing quote characters (straight or curly) - some
 // club-exported sheets literally bake a `"Membership Number"` string,
 // quotes and all, into the header cell, which would otherwise silently fail
@@ -3974,6 +4025,7 @@ app.post(
       const name = pick(row, ["name"]);
       const phone = pick(row, ["phone", "phone number"]);
       const familyGroup = pick(row, ["family group", "familygroup"]);
+      const ageGroup = parseAgeGroupCell(pick(row, ["age group", "agegroup", "age"]));
       const rowNum = i + 2; // header row + 1-indexing
 
       if (!membershipNumber || !name) {
@@ -3981,7 +4033,7 @@ app.post(
         return;
       }
       if (!groups.has(membershipNumber)) groups.set(membershipNumber, []);
-      groups.get(membershipNumber).push({ name, phone, familyGroup, rowNum });
+      groups.get(membershipNumber).push({ name, phone, familyGroup, ageGroup, rowNum });
     });
 
     groups.forEach((groupRows, membershipNumber) => {
@@ -3992,6 +4044,7 @@ app.post(
         existing.name = primaryRow.name;
         if (primaryRow.phone) existing.phone = primaryRow.phone;
         if (primaryRow.familyGroup) existing.familyGroup = primaryRow.familyGroup;
+        if (primaryRow.ageGroup) existing.ageGroup = primaryRow.ageGroup;
         member = existing;
         updated.push({ membershipNumber, name: primaryRow.name });
       } else {
@@ -4000,6 +4053,7 @@ app.post(
           name: primaryRow.name,
           familyGroup: primaryRow.familyGroup || "",
           phone: primaryRow.phone || "",
+          ageGroup: primaryRow.ageGroup || "",
           passwordHash: null,
           dependents: [],
           nickname: "",
@@ -4163,6 +4217,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         phone: m.phone || "",
         email: m.email || "",
         familyGroup: m.familyGroup || "",
+        ageGroup: m.ageGroup || "",
         memberType: m.memberType || "main",
         relationshipToMain: m.relationshipToMain || "",
         hasLoggedInAccount: !!m.passwordHash,
