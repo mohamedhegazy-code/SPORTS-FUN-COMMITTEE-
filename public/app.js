@@ -3128,10 +3128,59 @@ async function loadAdminDashboard() {
   } catch (e) {
     document.getElementById("admin-dashboard-table").innerHTML =
       `<p class="dashboard-empty-note">${escapeAttr(e.message)}</p>`;
+    const glance = document.getElementById("admin-dashboard-glance");
+    if (glance) glance.innerHTML = "";
   }
+}
+// Not-started/in-progress/completed/casual pill for a dashboard row's
+// tournament column - mirrors tournamentActiveStatusLabel()'s wording for
+// the three states a tournament object can already be in, plus the
+// "no tournament record yet" state that only this table-level view needs.
+function tournamentDashboardStatusInfo(row) {
+  if (!row.tournamentStatus) return { label: t("tournStatusNotStarted"), cls: "not-started" };
+  if (row.tournamentStatus === "completed") return { label: t("tournStatusCompleted"), cls: "completed" };
+  if (row.tournamentFormat === "casual") return { label: t("tournStatusCasual"), cls: "casual" };
+  return { label: t("tournStatusInProgress"), cls: "in-progress" };
+}
+// "Today" / "Tomorrow" / "In N days" for the glance row's next-event tile.
+function daysUntilLabel(dateStr) {
+  const diffMs = new Date(dateStr + "T00:00:00Z") - new Date(todayStr() + "T00:00:00Z");
+  const diffDays = Math.round(diffMs / 86400000);
+  if (diffDays <= 0) return t("glanceToday");
+  if (diffDays === 1) return t("glanceTomorrow");
+  return t("glanceInDays").replace("{n}", diffDays);
+}
+// Compact "at a glance" strip above the Event dashboard table - visible to
+// Admin and Tournament Manager alike (unlike #admin-stats, which is
+// admin-full-only and shows platform-wide totals a Tournament Manager has
+// no access to). Built from the same upcoming-events rows the table itself
+// renders, so no extra request.
+function renderAdminDashboardGlance(rows) {
+  const wrap = document.getElementById("admin-dashboard-glance");
+  if (!wrap) return;
+  if (!rows.length) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const totalRegs = rows.reduce((sum, r) => sum + r.confirmedCount, 0);
+  const totalWaitlist = rows.reduce((sum, r) => sum + r.waitlistCount, 0);
+  const tournEligible = rows.filter((r) => !r.hasChildren);
+  const tournDone = tournEligible.filter((r) => r.tournamentStatus === "completed").length;
+  const next = rows[0];
+  const tournamentsTile = tournEligible.length
+    ? `<div class="stat"><div class="n">${fmt(tournDone)} / ${fmt(tournEligible.length)}</div><div class="l">${t("glanceTournamentsDone")}</div></div>`
+    : "";
+  wrap.innerHTML = `
+    <div class="stat"><div class="n">${fmt(rows.length)}</div><div class="l">${t("glanceUpcomingEvents")}</div></div>
+    <div class="stat"><div class="n">${fmt(totalRegs)}</div><div class="l">${t("glanceRegistrations")}</div></div>
+    <div class="stat"><div class="n">${fmt(totalWaitlist)}</div><div class="l">${t("glanceWaitlisted")}</div></div>
+    <div class="stat stat-accent"><div class="n">${escapeAttr(daysUntilLabel(next.date))}</div><div class="l">${escapeAttr(t("glanceNextEvent"))}: ${escapeAttr(eventLabel({ nameEn: next.nameEn, nameAr: next.nameAr }))}</div></div>
+    ${tournamentsTile}
+  `;
 }
 function renderAdminDashboardTable(rows) {
   const wrap = document.getElementById("admin-dashboard-table");
+  renderAdminDashboardGlance(rows);
   if (!rows.length) {
     wrap.innerHTML = `<p class="dashboard-empty-note">${t("noEventsYet")}</p>`;
     return;
@@ -3145,6 +3194,16 @@ function renderAdminDashboardTable(rows) {
         r.waitlistCount > 0
           ? `<button class="secondary" data-waitlist-event="${r.eventId}" data-waitlist-label="${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}" style="padding:3px 10px;font-size:0.78rem;">${fmt(r.waitlistCount)} ${t("waitlistLabel")}</button>`
           : "0";
+      // Parent "event day" posters have no tournament of their own (see
+      // hasChildren on the /api/admin/dashboard row) - nothing to show or
+      // jump to, so the column is a plain dash for those rows.
+      const statusInfo = r.hasChildren ? null : tournamentDashboardStatusInfo(r);
+      const tournCell = statusInfo
+        ? `<span class="tourn-status-pill ${statusInfo.cls}">${escapeAttr(statusInfo.label)}</span>`
+        : `<span class="hint-note">—</span>`;
+      const tournBtn = r.hasChildren
+        ? ""
+        : `<button class="secondary small" data-tourn-jump="${r.eventId}">${t("btnOpenTournament")}</button>`;
       return `<tr>
         <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
         <td>${escapeAttr(r.date)}</td>
@@ -3152,14 +3211,18 @@ function renderAdminDashboardTable(rows) {
         <td>${waitlistCell}</td>
         <td class="num">${fmt(r.checkedInCount)}</td>
         <td>${attendance}</td>
-        <td><button class="secondary small" data-hub-event="${r.eventId}" data-hub-label="${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}">${t("btnManageEvent")}</button></td>
+        <td>${tournCell}</td>
+        <td style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="secondary small" data-hub-event="${r.eventId}" data-hub-label="${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}">${t("btnManageEvent")}</button>
+          ${tournBtn}
+        </td>
       </tr>`;
     })
     .join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
       <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colRegistrations")}</th>
-      <th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th><th></th>
+      <th>${t("colWaitlist")}</th><th>${t("colCheckedIn")}</th><th>${t("colAttendance")}</th><th>${t("colTournament")}</th><th></th>
     </tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
@@ -3170,6 +3233,9 @@ function renderAdminDashboardTable(rows) {
   });
   wrap.querySelectorAll("[data-hub-event]").forEach((btn) => {
     btn.addEventListener("click", () => openAdminEventHub(Number(btn.dataset.hubEvent), btn.dataset.hubLabel));
+  });
+  wrap.querySelectorAll("[data-tourn-jump]").forEach((btn) => {
+    btn.addEventListener("click", () => jumpToTournamentCard(Number(btn.dataset.tournJump)));
   });
 }
 
