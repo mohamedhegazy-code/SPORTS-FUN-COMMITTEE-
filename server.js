@@ -1266,6 +1266,12 @@ app.post("/api/auth/signup", async (req, res) => {
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
   }
+  // Mirrors the required mobile-number field on the sign-up form - re-checked
+  // here too so a direct API call can't skip it.
+  const trimmedPhone = String(phone || "").trim();
+  if (!trimmedPhone) {
+    return res.status(400).json({ error: "Please enter your mobile phone number" });
+  }
   if (String(password).length < 6) {
     return res.status(400).json({ error: "Password must be at least 6 characters" });
   }
@@ -1333,7 +1339,7 @@ app.post("/api/auth/signup", async (req, res) => {
     memberType,
     relationshipToMain: memberType === "follower" ? trimmedRelationship : "",
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
-    phone: phone || (claiming ? claiming.phone : "") || "",
+    phone: trimmedPhone,
     email: trimmedEmail || (claiming ? claiming.email : "") || "",
     passwordHash,
     dependents: (claiming && claiming.dependents) || [],
