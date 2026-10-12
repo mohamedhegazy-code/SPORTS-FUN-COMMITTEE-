@@ -3772,6 +3772,11 @@ document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
   if (!btn) return;
   openCancelRegModal(Number(btn.dataset.cancelReg), btn.dataset.cancelName);
 });
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const waBtn = e.target.closest("[data-wa-confirm]");
+  if (!waBtn) return;
+  sendWhatsappConfirm(waBtn, document.getElementById("hub-checkin-msg"), () => loadHubRoster(true));
+});
 function openCancelRegModal(registrationId, attendeeName) {
   CANCEL_REG_ID = registrationId;
   document.getElementById("cancel-reg-name").textContent = attendeeName || "";
@@ -7771,14 +7776,45 @@ function waConfirmMessage(attendeeName, eventName, eventDate) {
 // one-line reminder pointing at the QR thumbnail/download button that
 // already sits in the previous column (rosterQrCellHtml) - staff download it
 // once, then drag/attach that image into the WhatsApp chat before sending.
-function waConfirmBtnHtml(r, eventName, eventDate) {
+//
+// Builds the whole WhatsApp cell: a status pill (sent-at time, or "not sent
+// yet") plus a Send/Resend button. The button is a <button> (not a plain
+// <a>), because clicking it does two things in order - record the send via
+// POST /api/staff/registrations/:id/whatsapp-confirmed (see
+// sendWhatsappConfirm() below) so the status persists for whoever looks at
+// this roster next, THEN open the pre-filled wa.me chat. No phone on file
+// shows a plain note instead of a dead button.
+function waStatusCellHtml(r, eventName, eventDate) {
   const href = waLink(r.phone, waConfirmMessage(r.attendeeName, eventName || "", eventDate || ""));
-  if (!href) return "";
-  const btn = `<a class="secondary small" href="${escapeAttr(href)}" target="_blank" rel="noopener">${escapeAttr(t("btnSendWhatsappConfirm"))}</a>`;
+  if (!href) {
+    return `<small style="color:var(--muted);">${escapeAttr(t("waNoPhoneNote"))}</small>`;
+  }
+  const pill = r.whatsappConfirmedAt
+    ? `<span class="wa-status-pill sent">${escapeAttr(t("waStatusSent"))}</span><br/><small style="color:var(--muted);">${escapeAttr(new Date(r.whatsappConfirmedAt).toLocaleString())}</small>`
+    : `<span class="wa-status-pill not-sent">${escapeAttr(t("waStatusNotSent"))}</span>`;
+  const btnLabel = r.whatsappConfirmedAt ? t("btnResendWhatsappConfirm") : t("btnSendWhatsappConfirm");
+  const btn = `<button class="secondary small" data-wa-confirm="${r.registrationId}" data-wa-href="${escapeAttr(href)}">${escapeAttr(btnLabel)}</button>`;
   const hint = r.qrDataUrl
     ? `<br/><small style="color:var(--muted);">${escapeAttr(t("waConfirmQrHint"))}</small>`
     : "";
-  return btn + hint;
+  return `${pill}<br/>${btn}${hint}`;
+}
+// Shared by the Gate Scanner's and the Event hub's WhatsApp confirm/resend
+// buttons (data-wa-confirm, built above). Records the send via the server
+// first - so the "Sent"/time status persists even if the staff member closes
+// the WhatsApp tab without actually hitting Send in there - then opens the
+// pre-filled wa.me chat. onDone is the caller's own roster reload, run only
+// after a successful record so the pill/button flip to "Sent"/"Resend".
+async function sendWhatsappConfirm(btn, msgEl, onDone) {
+  btn.disabled = true;
+  try {
+    await api(`/api/staff/registrations/${btn.dataset.waConfirm}/whatsapp-confirmed`, { method: "POST" });
+    window.open(btn.dataset.waHref, "_blank", "noopener");
+    if (onDone) await onDone();
+  } catch (e) {
+    if (msgEl) showMsg(msgEl, e.message, false);
+    btn.disabled = false;
+  }
 }
 // Shared by the Gate Scanner's manual check-in list and the per-event Admin
 // hub's attendance section, so the two never drift - one row shape, one set
@@ -7797,7 +7833,7 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
   const ev = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
   const eventName = ev ? bilingual(ev.nameEn, ev.nameAr) : "";
   const eventDate = ev ? ev.date : "";
-  return `<table><tbody>${filtered
+  const body = filtered
     .map((r) => {
       let status, action;
       if (r.waitlisted) {
@@ -7814,15 +7850,24 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
       const cancelBtn = showCancel
         ? `<button class="danger small" data-cancel-reg="${r.registrationId}" data-cancel-name="${escapeAttr(r.attendeeName)}">${t("btnCancelRegistration")}</button>`
         : "";
-      const waBtn = waConfirmBtnHtml(r, eventName, eventDate);
+      const registeredAt = r.registeredAt ? new Date(r.registeredAt).toLocaleString() : "—";
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
+        <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
-        <td>${action}${action && cancelBtn ? "<br/><br/>" : ""}${cancelBtn}${(action || cancelBtn) && waBtn ? "<br/><br/>" : ""}${waBtn}</td>
+        <td>${action}${action && cancelBtn ? "<br/><br/>" : ""}${cancelBtn}</td>
+        <td>${waStatusCellHtml(r, eventName, eventDate)}</td>
       </tr>`;
     })
-    .join("")}</tbody></table>`;
+    .join("");
+  return `<div class="dashboard-table-wrap"><table class="dashboard-table">
+    <thead><tr>
+      <th>${t("colMember")}</th><th>${t("colRegisteredAt")}</th><th>${t("colStatus")}</th>
+      <th>${t("colQrCode")}</th><th>${t("colActions")}</th><th>${t("colWhatsapp")}</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
 }
 // Small QR thumbnail + a Download link, shown next to a roster row whenever
 // the backend decided this registration's QR is still worth showing (not
@@ -7854,6 +7899,11 @@ document.getElementById("checkin-roster-wrap").addEventListener("click", async (
     showMsg(msg, err.message, false);
     btn.disabled = false;
   }
+});
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const waBtn = e.target.closest("[data-wa-confirm]");
+  if (!waBtn) return;
+  sendWhatsappConfirm(waBtn, document.getElementById("checkin-roster-msg"), () => loadCheckinRoster(true));
 });
 
 // ------------------------------------------------------------------- init --

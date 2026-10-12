@@ -1255,6 +1255,16 @@ h2 .lang-ar, h3 .lang-ar { font-weight: inherit; }
 .tourn-status-pill.completed { color: var(--green); background: #eaf6ec; border-color: #bfe3c5; }
 .tourn-status-pill.casual { color: var(--red); background: #fdeaea; border-color: #f3c9c9; }
 
+/* WhatsApp confirmation status pill used in the attendance/check-in roster's
+   WhatsApp column (Gate Scanner and the per-event Admin hub). */
+.wa-status-pill {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.wa-status-pill.sent { color: var(--green); background: #eaf6ec; border-color: #bfe3c5; }
+.wa-status-pill.not-sent { color: var(--gray); background: #f4f3f1; border-color: var(--border); }
+
 .directory-list { margin: 4px 0 0; padding-left: 18px; font-size: 0.85rem; }
 [dir="rtl"] .directory-list { padding-left: 0; padding-right: 18px; }
 
