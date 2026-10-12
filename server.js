@@ -3611,6 +3611,12 @@ app.get("/api/admin/dashboard", requireStaffRole(["tournament"]), (req, res) => 
       const confirmed = regs.filter((r) => !r.waitlisted);
       const waitlist = regs.filter((r) => r.waitlisted);
       const checkedIn = confirmed.filter((r) => r.checkedIn);
+      // Lets the dashboard show a tournament-status pill and an "Open
+      // tournament" quick-jump per row without a separate round-trip per
+      // event - hasChildren mirrors the same "no direct tournament of its
+      // own" rule the Tournament dropdown already applies (see
+      // isParentEventWithChildren() client-side / eventHasChildren() here).
+      const tournament = findTournament(db, ev.id);
       return {
         eventId: ev.id,
         nameEn: ev.nameEn,
@@ -3622,6 +3628,9 @@ app.get("/api/admin/dashboard", requireStaffRole(["tournament"]), (req, res) => 
         waitlistCount: waitlist.length,
         checkedInCount: checkedIn.length,
         attendanceRate: confirmed.length ? Math.round((checkedIn.length / confirmed.length) * 100) : null,
+        tournamentStatus: tournament ? tournament.status : null,
+        tournamentFormat: tournament ? tournament.format : null,
+        hasChildren: eventHasChildren(db, ev.id),
       };
     });
   res.json(rows);
