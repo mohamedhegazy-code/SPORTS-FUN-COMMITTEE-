@@ -3601,9 +3601,11 @@ app.get("/api/admin/activity-log/export.xlsx", requireStaffRole("admin"), (req, 
 // it never blocks a registration.
 app.get("/api/admin/dashboard", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
+  const today = todayStr();
   const rows = db.events
+    .filter((ev) => eventEndDate(ev) >= today)
     .slice()
-    .sort((a, b) => b.date.localeCompare(a.date))
+    .sort((a, b) => a.date.localeCompare(b.date))
     .map((ev) => {
       const regs = db.registrations.filter((r) => r.eventId === ev.id);
       const confirmed = regs.filter((r) => !r.waitlisted);
