@@ -235,6 +235,14 @@
         <input id="su-family" placeholder="e.g. FAM-01" />
         <label class="required-label" data-i18n="fieldSignupPhone">Mobile number</label>
         <input id="su-phone" placeholder="01xxxxxxxxx" required />
+        <label data-i18n="fieldAgeGroup">Age group (optional)</label>
+        <select id="su-age-group">
+          <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
+          <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
+          <option value="12to17" data-i18n="ageGroupTeens">Teens (12–17)</option>
+          <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
+          <option value="46plus" data-i18n="ageGroupSeniors">Seniors (46+)</option>
+        </select>
         <label data-i18n="fieldEmail">Email (optional)</label>
         <input id="su-email" type="email" placeholder="e.g. ahmed@example.com" />
         <label class="checkbox-row" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:0.85rem;">
@@ -359,6 +367,24 @@
         <button class="secondary" id="mp-nickname-clear" data-i18n="btnClearNickname">Remove nickname</button>
       </div>
       <div class="msg" id="mp-nickname-msg"></div>
+    </div>
+
+    <div class="card hidden" id="mp-agegroup-card">
+      <h2 data-i18n="ageGroupTitle">Age group</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="ageGroupIntro">Let the club know your age group so events and tournaments can be organized appropriately. This is optional and only visible to staff.</p>
+      <p class="hint-note" id="mp-agegroup-status"></p>
+      <label data-i18n="fieldAgeGroup">Age group (optional)</label>
+      <select id="mp-agegroup-select">
+        <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
+        <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
+        <option value="12to17" data-i18n="ageGroupTeens">Teens (12–17)</option>
+        <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
+        <option value="46plus" data-i18n="ageGroupSeniors">Seniors (46+)</option>
+      </select>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button class="primary" id="mp-agegroup-save" data-i18n="btnSaveAgeGroup">Save age group</button>
+      </div>
+      <div class="msg" id="mp-agegroup-msg"></div>
     </div>
 
     <div class="card hidden" id="mp-whatsapp-card" style="text-align:center;">
@@ -826,6 +852,16 @@
             <div>
               <label data-i18n="fieldFamilyGroup">Family group (optional)</label>
               <input id="member-add-family" type="text" />
+            </div>
+            <div>
+              <label data-i18n="fieldAgeGroup">Age group (optional)</label>
+              <select id="member-add-age-group">
+                <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
+                <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
+                <option value="12to17" data-i18n="ageGroupTeens">Teens (12–17)</option>
+                <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
+                <option value="46plus" data-i18n="ageGroupSeniors">Seniors (46+)</option>
+              </select>
             </div>
           </div>
           <label data-i18n="fieldAlsoRegisterEvent">Also register for an event (optional)</label>

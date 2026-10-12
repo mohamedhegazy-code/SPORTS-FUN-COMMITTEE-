@@ -517,6 +517,12 @@ function setLang(lang) {
     renderFamilyList();
     loadFamilyPoolMembers();
     loadMyRegistrations();
+    // Nickname/age-group status lines are plain textContent set with t() at
+    // render time (not data-i18n markup), so without this they'd keep
+    // showing whichever language they were last rendered in after a
+    // language toggle, same gap as renderFamilyList() above.
+    renderNicknameStatus();
+    renderAgeGroupStatus();
     // Same "don't mark as read unless the tab is actually open" guard as
     // updateUIForSession() - a language toggle shouldn't silently clear
     // the unread badge either.
@@ -1107,6 +1113,7 @@ function updateUIForSession() {
   // My Points tab
   document.getElementById("mp-signed-out").classList.toggle("hidden", isMember);
   document.getElementById("mp-nickname-card").classList.toggle("hidden", !isMember);
+  document.getElementById("mp-agegroup-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-family-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-registrations-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-chat-card").classList.toggle("hidden", !isMember);
@@ -1115,6 +1122,7 @@ function updateUIForSession() {
   if (isMember) {
     renderRecoveryPinStatus("mp-recovery-pin-status", CURRENT_SESSION.member.hasRecoveryPin);
     renderNicknameStatus();
+    renderAgeGroupStatus();
     if (pointsVisible()) {
       document.getElementById("mp-points-disabled-note").classList.add("hidden");
       loadMyBalance();
@@ -2046,6 +2054,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const nickname = document.getElementById("su-nickname").value.trim();
   const familyGroup = document.getElementById("su-family").value.trim();
   const phone = document.getElementById("su-phone").value.trim();
+  const ageGroup = document.getElementById("su-age-group").value;
   const email = document.getElementById("su-email").value.trim();
   const agreeTerms = document.getElementById("su-agree-terms").checked;
   const memberType = document.getElementById("su-type-follower").checked ? "follower" : "main";
@@ -2074,7 +2083,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, email, agreeTerms, memberType, relationshipToMain }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, ageGroup, email, agreeTerms, memberType, relationshipToMain }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;
@@ -4073,6 +4082,7 @@ function renderMembersTable() {
       <td>${escapeAttr(m.name)}</td>
       <td>${escapeAttr(m.phone)}</td>
       <td>${escapeAttr(m.familyGroup)}</td>
+      <td>${escapeAttr(ageGroupLabel(m.ageGroup))}</td>
       <td>${m.hasLoggedInAccount ? t("yesLabel") : t("noLabel")}</td>
     </tr>`;
   }).join("");
@@ -4080,7 +4090,7 @@ function renderMembersTable() {
     <thead><tr>
       <th><input type="checkbox" data-select-all-members title="${escapeAttr(t("selectAllLabel"))}" aria-label="${escapeAttr(t("selectAllLabel"))}" /></th>
       <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th>
-      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colHasAccount")}</th>
+      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colAgeGroup")}</th><th>${t("colHasAccount")}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -4135,6 +4145,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   const name = document.getElementById("member-add-name").value.trim();
   const phone = document.getElementById("member-add-phone").value.trim();
   const familyGroup = document.getElementById("member-add-family").value.trim();
+  const ageGroup = document.getElementById("member-add-age-group").value;
   const eventId = document.getElementById("member-add-event").value;
   if (!membershipNumber || !name) {
     highlightMissingFields(["member-add-number", "member-add-name"]);
@@ -4143,7 +4154,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   try {
     const result = await api("/api/admin/members", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, phone, familyGroup }),
+      body: JSON.stringify({ membershipNumber, name, phone, familyGroup, ageGroup }),
     });
     let text = `${t("memberAddedLabel")} ${escapeAttr(result.member.name)}.`;
     // Registering the brand-new member for an event is a second, independent
@@ -4170,6 +4181,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
     document.getElementById("member-add-name").value = "";
     document.getElementById("member-add-phone").value = "";
     document.getElementById("member-add-family").value = "";
+    document.getElementById("member-add-age-group").value = "";
     document.getElementById("member-add-event").value = "";
     await loadAdminMembers();
     loadAdminDashboard();
@@ -7462,6 +7474,44 @@ document.getElementById("mp-nickname-clear").addEventListener("click", async () 
     document.getElementById("mp-nickname-input").value = "";
     renderNicknameStatus();
     showMsg(msg, t("okNicknameCleared"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+
+// ------------------------------------------------------------- age group --
+// Optional self-reported age band (Kids/Teens/Adults/Seniors), shown only to
+// club staff (e.g. the Members list/export) - never surfaced on public pages.
+// Saved via the existing PATCH /api/me/profile endpoint rather than a new
+// one, since that endpoint already accepts partial profile updates.
+const AGE_GROUP_LABEL_KEYS = {
+  under12: "ageGroupKids",
+  "12to17": "ageGroupTeens",
+  "18to45": "ageGroupAdults",
+  "46plus": "ageGroupSeniors",
+};
+function ageGroupLabel(code) {
+  return code && AGE_GROUP_LABEL_KEYS[code] ? t(AGE_GROUP_LABEL_KEYS[code]) : "—";
+}
+function renderAgeGroupStatus() {
+  const el = document.getElementById("mp-agegroup-status");
+  if (!el) return;
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const ageGroup = member && member.ageGroup;
+  el.textContent = ageGroup ? `${t("ageGroupStatusSet")} ${ageGroupLabel(ageGroup)}` : t("ageGroupStatusNotSet");
+  const select = document.getElementById("mp-agegroup-select");
+  if (select && document.activeElement !== select) select.value = ageGroup || "";
+}
+
+document.getElementById("mp-agegroup-save").addEventListener("click", async () => {
+  const select = document.getElementById("mp-agegroup-select");
+  const msg = document.getElementById("mp-agegroup-msg");
+  const ageGroup = select.value;
+  try {
+    const result = await api("/api/me/profile", { method: "PATCH", body: JSON.stringify({ ageGroup }) });
+    CURRENT_SESSION.member.ageGroup = result.member.ageGroup;
+    renderAgeGroupStatus();
+    showMsg(msg, t("okAgeGroupSaved"), true);
   } catch (e) {
     showMsg(msg, e.message, false);
   }
