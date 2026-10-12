@@ -3637,7 +3637,8 @@ app.get("/api/admin/events/:eventId/attendance-rollup", requireStaffRole(["tourn
     const regs = db.registrations.filter((r) => r.eventId === id);
     const confirmed = regs.filter((r) => !r.waitlisted);
     const checkedIn = confirmed.filter((r) => r.checkedIn);
-    return { confirmedCount: confirmed.length, checkedInCount: checkedIn.length };
+    const waitlisted = regs.filter((r) => r.waitlisted);
+    return { confirmedCount: confirmed.length, checkedInCount: checkedIn.length, waitlistCount: waitlisted.length };
   }
 
   const own = countsFor(eventId);
@@ -3648,6 +3649,7 @@ app.get("/api/admin/events/:eventId/attendance-rollup", requireStaffRole(["tourn
     (acc, c) => ({
       confirmedCount: acc.confirmedCount + c.confirmedCount,
       checkedInCount: acc.checkedInCount + c.checkedInCount,
+      waitlistCount: acc.waitlistCount + c.waitlistCount,
     }),
     { ...own }
   );
@@ -3683,6 +3685,52 @@ app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]
   reg.waitlisted = false;
   writeDb(db);
   res.json(reg);
+});
+
+// Staff-side cancellation of a member's registration - same underlying
+// effect as the member's own self-service cancel just above (remove the
+// registration, auto-promote whoever's been longest on the waiting list
+// into the now-open confirmed spot), but reachable from the Event Manage
+// hub for when a member asks staff to pull them from an event, or a spot
+// needs freeing up for any other reason. A short reason is required and
+// kept in the activity log - this is someone else's registration being
+// removed on their behalf, not the member's own action, so it needs an
+// audit trail the self-cancel path doesn't.
+app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const reason = String(req.body.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Please enter a reason for this cancellation" });
+  const reg = db.registrations.find((r) => r.id === id);
+  if (!reg) return res.status(404).json({ error: "No such registration" });
+  const tournament = findTournament(db, reg.eventId);
+  if (tournament && (tournament.groups || tournament.knockout) && !reg.waitlisted) {
+    return res.status(400).json({
+      error: "This event's tournament bracket has already been generated - cancelling this spot isn't safe. A full admin can remove it directly from the database if it really has to go.",
+    });
+  }
+  const member = db.members[reg.membershipNumber];
+  const attendeeName = reg.dependentName || (member ? member.name : reg.membershipNumber);
+  db.registrations = db.registrations.filter((r) => r.id !== id);
+  let promoted = null;
+  if (!reg.waitlisted) {
+    promoted = db.registrations
+      .filter((r) => r.eventId === reg.eventId && r.waitlisted)
+      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
+    if (promoted) promoted.waitlisted = false;
+  }
+  const event = db.events.find((e) => e.id === reg.eventId);
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "registration_cancelled_by_staff",
+    details: `${attendeeName} - ${event ? event.nameEn : "Event"} - reason: ${reason}${
+      promoted ? ` - waiting-list spot opened up for membership ${promoted.membershipNumber}` : ""
+    }`,
+  });
+  writeDb(db);
+  res.json({ ok: true, promoted: !!promoted, attendeeName });
 });
 
 // -------------------------------------------------------------------------
