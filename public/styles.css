@@ -1130,10 +1130,26 @@ button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
 .tourn-ko-note { width: 100%; padding: 4px 6px; font-size: 0.72rem; margin: 4px 0; box-sizing: border-box; }
 
 .tourn-bracket { display: flex; gap: 22px; overflow-x: auto; padding-bottom: 8px; }
-.tourn-bracket-round { display: flex; flex-direction: column; justify-content: space-around; gap: 16px; min-width: 190px; }
+.tourn-bracket-round { position: relative; display: flex; flex-direction: column; justify-content: space-around; gap: 16px; min-width: 190px; }
 .tourn-bracket-round h4 { font-size: 0.78rem; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; text-align: center; }
 .tourn-bracket-match {
   border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden;
+}
+/* A connecting rail down the middle of the gap between each pair of round
+   columns, so the bracket reads as one flowing sequence of stages instead
+   of disconnected lists side by side. Deliberately NOT per-match stub
+   lines (which would need overflow:visible on .tourn-bracket-match and
+   break its rounded-corner clipping of the winner-highlighted slot
+   background) - a simple full-height rail is zero-risk and reads just as
+   clearly as "round 1 flows into round 2" at this card size. inset-inline-*
+   so it's on the correct side in the Arabic/RTL layout automatically. */
+.tourn-bracket-round:not(:first-child)::before {
+  content: ""; position: absolute; top: 0; bottom: 0; inset-inline-start: -12px;
+  width: 1px; background: var(--border);
+}
+/* The Final gets a small gold lift - the culmination of the bracket. */
+.tourn-bracket-round:last-child .tourn-bracket-match {
+  border-color: var(--gold); box-shadow: 0 1px 4px rgba(201, 162, 39, 0.18);
 }
 .tourn-bracket-time { padding: 4px 10px 0; font-size: 0.7rem; color: var(--muted); font-weight: 600; text-align: center; }
 .tourn-bracket-slot { padding: 7px 10px; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
@@ -1212,10 +1228,32 @@ h2 .lang-ar, h3 .lang-ar { font-weight: inherit; }
 }
 [dir="rtl"] .dashboard-table th, [dir="rtl"] .dashboard-table td { text-align: right; }
 .dashboard-table th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+.dashboard-table tbody tr:nth-child(even) { background: #fbfaf7; }
 .dashboard-table tbody tr:hover { background: #fffaf0; }
 .dashboard-table .num { font-weight: 700; color: var(--red); }
-.dashboard-table-wrap { overflow-x: auto; }
+.dashboard-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.dashboard-table-wrap .dashboard-table { border: none; }
+.dashboard-table-wrap .dashboard-table tbody tr:last-child td { border-bottom: none; }
 .dashboard-empty-note { color: var(--muted); font-size: 0.85rem; }
+
+/* Event dashboard "at a glance" strip - shared by Admin and Tournament
+   Manager (unlike #admin-stats, which is admin-full-only). The accent tile
+   (next upcoming event / countdown) gets a gold tint to stand out from the
+   plain count tiles beside it. */
+#admin-dashboard-glance .stat.stat-accent { border-color: var(--gold); background: #fffaf0; }
+#admin-dashboard-glance .stat.stat-accent .n { color: var(--amber); font-size: 1.1rem; }
+#admin-dashboard-glance .stat.stat-accent .l { font-weight: 600; }
+
+/* Tournament-status pill used in the dashboard table's Tournament column. */
+.tourn-status-pill {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border);
+  color: var(--gray); background: #f4f3f1; white-space: nowrap;
+}
+.tourn-status-pill.not-started { color: var(--gray); background: #f4f3f1; border-color: var(--border); }
+.tourn-status-pill.in-progress { color: var(--amber); background: #fff7e6; border-color: #f0dca8; }
+.tourn-status-pill.completed { color: var(--green); background: #eaf6ec; border-color: #bfe3c5; }
+.tourn-status-pill.casual { color: var(--red); background: #fdeaea; border-color: #f3c9c9; }
 
 .directory-list { margin: 4px 0 0; padding-left: 18px; font-size: 0.85rem; }
 [dir="rtl"] .directory-list { padding-left: 0; padding-right: 18px; }
