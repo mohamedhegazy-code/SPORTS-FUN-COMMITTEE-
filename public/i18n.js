@@ -694,6 +694,13 @@ const I18N = {
     btnPromote: "Promote to confirmed",
     promoted: "Promoted to a confirmed spot.",
     currentlyRegistered: "Currently registered",
+    colCapacity: "Capacity",
+    btnCancelRegistration: "Cancel registration",
+    cancelRegReasonLabel: "Reason",
+    cancelRegReasonPlaceholder: "e.g. member asked to cancel, no-show, duplicate entry\u2026",
+    cancelRegReasonRequired: "Please enter a reason before cancelling.",
+    cancelRegSuccess: "Registration cancelled.",
+    cancelRegPromotedNote: "\u2014 a waiting-list spot opened up and was filled automatically.",
 
     // Admin: activity log (platform-wide audit report, admin-only)
     activityLogTitle: "Activity log",
@@ -1572,6 +1579,13 @@ const I18N = {
     btnPromote: "ترقية إلى مؤكَّد",
     promoted: "تمت الترقية إلى مكان مؤكَّد.",
     currentlyRegistered: "المسجَّلون حالياً",
+    colCapacity: "السعة",
+    btnCancelRegistration: "إلغاء التسجيل",
+    cancelRegReasonLabel: "السبب",
+    cancelRegReasonPlaceholder: "مثال: طلب العضو الإلغاء، لم يحضر، تسجيل مكرر...",
+    cancelRegReasonRequired: "يرجى كتابة سبب قبل الإلغاء.",
+    cancelRegSuccess: "تم إلغاء التسجيل.",
+    cancelRegPromotedNote: "\u2014 تم فتح مكان من قائمة الانتظار وتعبئته تلقائياً.",
 
     // سجل النشاط (تقرير شامل للمنصة، للمسؤول فقط)
     activityLogTitle: "سجل النشاط",

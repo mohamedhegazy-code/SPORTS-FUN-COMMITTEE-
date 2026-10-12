@@ -3645,7 +3645,7 @@ document.getElementById("admin-hub-close").addEventListener("click", () => {
 document.getElementById("hub-checkin-search").addEventListener("input", () => {
   const wrap = document.getElementById("hub-checkin-wrap");
   const query = (document.getElementById("hub-checkin-search").value || "").trim().toLowerCase();
-  wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query, HUB_EVENT_ID);
+  wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query, HUB_EVENT_ID, true);
 });
 document.getElementById("hub-checkin-wrap").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-checkin-reg]");
@@ -3661,6 +3661,63 @@ document.getElementById("hub-checkin-wrap").addEventListener("click", async (e) 
     await loadHubRoster(true);
   } catch (err) {
     showMsg(msg, err.message, false);
+    btn.disabled = false;
+  }
+});
+// "Cancel registration" (Event Manage hub only - see showCancel in
+// rosterTableHtml): opens a small modal asking for a short reason rather
+// than acting immediately, since this removes someone else's spot on their
+// behalf and the reason is kept in the activity log. Works the same way
+// for a confirmed, checked-in, or waitlisted row - the backend endpoint
+// handles all three (see POST /api/admin/registrations/:id/cancel).
+let CANCEL_REG_ID = null;
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-cancel-reg]");
+  if (!btn) return;
+  openCancelRegModal(Number(btn.dataset.cancelReg), btn.dataset.cancelName);
+});
+function openCancelRegModal(registrationId, attendeeName) {
+  CANCEL_REG_ID = registrationId;
+  document.getElementById("cancel-reg-name").textContent = attendeeName || "";
+  document.getElementById("cancel-reg-reason").value = "";
+  document.getElementById("cancel-reg-msg").textContent = "";
+  document.getElementById("cancel-reg-modal").classList.remove("hidden");
+}
+function closeCancelRegModal() {
+  document.getElementById("cancel-reg-modal").classList.add("hidden");
+  CANCEL_REG_ID = null;
+}
+document.getElementById("cancel-reg-modal-close").addEventListener("click", closeCancelRegModal);
+document.getElementById("cancel-reg-modal").addEventListener("click", (e) => {
+  if (e.target.id === "cancel-reg-modal") closeCancelRegModal();
+});
+document.getElementById("cancel-reg-confirm-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("cancel-reg-msg");
+  const reason = document.getElementById("cancel-reg-reason").value.trim();
+  if (!reason) {
+    showMsg(msg, t("cancelRegReasonRequired"), false);
+    return;
+  }
+  const btn = document.getElementById("cancel-reg-confirm-btn");
+  btn.disabled = true;
+  try {
+    const result = await api(`/api/admin/registrations/${CANCEL_REG_ID}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    closeCancelRegModal();
+    const hubMsg = document.getElementById("hub-checkin-msg");
+    showMsg(
+      hubMsg,
+      `${result.attendeeName} — ${t("cancelRegSuccess")}${result.promoted ? ` ${t("cancelRegPromotedNote")}` : ""}`,
+      true
+    );
+    await loadHubRoster(true);
+    loadAdminDashboard();
+    loadAdminOverview();
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  } finally {
     btn.disabled = false;
   }
 });
@@ -3760,12 +3817,20 @@ async function loadHubRoster(preserveMsg) {
   try {
     HUB_ROSTER = await api("/api/staff/events/" + HUB_EVENT_ID + "/roster");
     const query = (document.getElementById("hub-checkin-search").value || "").trim().toLowerCase();
-    wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query, HUB_EVENT_ID);
+    wrap.innerHTML = rosterTableHtml(HUB_ROSTER, query, HUB_EVENT_ID, true);
     const checkedIn = HUB_ROSTER.filter((r) => r.checkedIn).length;
     const confirmed = HUB_ROSTER.filter((r) => !r.waitlisted).length;
+    const waitlisted = HUB_ROSTER.length - confirmed;
+    const hubEvent = EVENTS_DATA.find((e) => e.id === HUB_EVENT_ID);
+    const capacityBadge =
+      hubEvent && hubEvent.maxCapacity != null
+        ? `<span class="tourn-summary-badge">${fmt(confirmed)} / ${fmt(hubEvent.maxCapacity)} ${t("colCapacity")}</span>`
+        : "";
     document.getElementById("admin-hub-stats").innerHTML = `
       <span class="tourn-summary-badge">${fmt(confirmed)} ${t("colRegistrations")}</span>
       <span class="tourn-summary-badge">${fmt(checkedIn)} / ${fmt(confirmed)} ${t("colCheckedIn")}</span>
+      <span class="tourn-summary-badge">${fmt(waitlisted)} ${t("colWaitlist")}</span>
+      ${capacityBadge}
     `;
     // A parent "event day" rolls up every sub-activity's own attendance into
     // one combined figure here (plus a per-activity breakdown below), so
@@ -3780,6 +3845,7 @@ async function loadHubRoster(preserveMsg) {
       document.getElementById("admin-hub-stats").innerHTML = `
         <span class="tourn-summary-badge">${fmt(rollup.combined.confirmedCount)} ${t("colRegistrations")}</span>
         <span class="tourn-summary-badge">${fmt(rollup.combined.checkedInCount)} / ${fmt(rollup.combined.confirmedCount)} ${t("colCheckedIn")}</span>
+        <span class="tourn-summary-badge">${fmt(rollup.combined.waitlistCount)} ${t("colWaitlist")}</span>
       `;
       const rows = rollup.children
         .map(
@@ -7584,7 +7650,7 @@ function waConfirmBtnHtml(r, eventName, eventDate) {
 // click delegation on whatever container it rendered into. eventId is
 // optional context just for the WhatsApp confirmation link's message text
 // (event name/date) - everything else about the row works without it.
-function rosterTableHtml(roster, query, eventId) {
+function rosterTableHtml(roster, query, eventId, showCancel) {
   const filtered = roster.filter(
     (r) => !query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)
   );
@@ -7608,12 +7674,15 @@ function rosterTableHtml(roster, query, eventId) {
         status = "";
         action = `<button class="secondary small" data-checkin-reg="${r.registrationId}">${t("btnCheckIn")}</button>`;
       }
+      const cancelBtn = showCancel
+        ? `<button class="danger small" data-cancel-reg="${r.registrationId}" data-cancel-name="${escapeAttr(r.attendeeName)}">${t("btnCancelRegistration")}</button>`
+        : "";
       const waBtn = waConfirmBtnHtml(r, eventName, eventDate);
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td>${status}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
-        <td>${action}${action && waBtn ? "<br/><br/>" : ""}${waBtn}</td>
+        <td>${action}${action && cancelBtn ? "<br/><br/>" : ""}${cancelBtn}${(action || cancelBtn) && waBtn ? "<br/><br/>" : ""}${waBtn}</td>
       </tr>`;
     })
     .join("")}</tbody></table>`;

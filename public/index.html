@@ -1319,6 +1319,23 @@
   </div>
 </div>
 
+<!-- Cancel-a-member's-registration (Event Manage hub only - see
+     openCancelRegModal()/showCancel in app.js). Asks for a short reason
+     before calling POST /api/admin/registrations/:id/cancel, since this
+     removes someone else's spot on their behalf - the reason is kept in
+     the activity log as an audit trail. -->
+<div class="modal-overlay hidden" id="cancel-reg-modal" style="z-index:205;">
+  <div class="modal-box" style="max-width:420px;">
+    <button class="modal-close" id="cancel-reg-modal-close" aria-label="Close">&times;</button>
+    <h2 data-i18n="btnCancelRegistration">Cancel registration</h2>
+    <p id="cancel-reg-name" style="color:var(--muted);font-size:0.95rem;font-weight:600;"></p>
+    <label class="required-label" data-i18n="cancelRegReasonLabel">Reason</label>
+    <textarea id="cancel-reg-reason" rows="2" placeholder="e.g. member asked to cancel, no-show, duplicate entry\u2026"></textarea>
+    <button class="danger" id="cancel-reg-confirm-btn" style="margin-top:10px;" data-i18n="btnCancelRegistration">Cancel registration</button>
+    <div class="msg" id="cancel-reg-msg"></div>
+  </div>
+</div>
+
 <script src="i18n.js"></script>
 <script src="jsQR.js"></script>
 <script src="app.js"></script>
