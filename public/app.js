@@ -5742,7 +5742,7 @@ document.getElementById("tourn-body").addEventListener("change", (e) => {
 // creation form or the post-creation schedule editor.
 const TOURN_CREATE_PREVIEW_FIELDS = new Set([
   "tourn-mode", "tourn-format", "tourn-num-groups", "tourn-advance-per-group",
-  "tourn-win-points", "tourn-draw-points", "tourn-loss-points",
+  "tourn-win-points", "tourn-draw-points", "tourn-loss-points", "tourn-planning-count",
   "tourn-courts", "tourn-match-minutes", "tourn-start-time", "tourn-break-minutes", "tourn-available-hours",
 ]);
 const TOURN_EDIT_PREVIEW_FIELDS = new Set([
@@ -6193,7 +6193,7 @@ function setupPreviewHtml(p, cfg) {
     p.fitsAvailableHours === null
       ? ""
       : `<div class="stat"><div class="n">${p.fitsAvailableHours ? "✓" : "✗"}</div><div class="l">${t("statFitsHours")}</div></div>`;
-  const activeLabel = cfg.mode === "team" ? t("statActiveTeams") : t("statActivePlayers");
+  const activeLabel = (cfg.mode === "team" ? t("statActiveTeams") : t("statActivePlayers")) + (cfg.isPlanning ? ` ${t("planningBadge")}` : "");
   const slotsLine = p.groupStageSlots || p.knockoutSlots
     ? `
       <div class="stat-row" style="margin-top:10px;">
@@ -6225,11 +6225,19 @@ function setupPreviewHtml(p, cfg) {
 function tournSetupCfgFromCreateForm() {
   const mode = document.getElementById("tourn-mode") ? document.getElementById("tourn-mode").value : "individual";
   const format = document.getElementById("tourn-format") ? document.getElementById("tourn-format").value : "knockout";
-  const activeTeams = mode === "team" ? 0 : TOURNAMENT_REGISTRATIONS.length;
+  const realCount = mode === "team" ? 0 : TOURNAMENT_REGISTRATIONS.length;
+  // Optional "what if" planning count: lets an admin test a hypothetical
+  // tournament size (e.g. "what if we had 150 players") before that many
+  // people have actually signed up, instead of only ever previewing against
+  // today's real registration count.
+  const planningRaw = byIdVal("tourn-planning-count").trim();
+  const isPlanning = planningRaw !== "";
+  const activeTeams = isPlanning ? Number(planningRaw) : realCount;
   return {
     mode,
     format,
     activeTeams,
+    isPlanning,
     numGroups: byIdVal("tourn-num-groups"),
     advancePerGroup: byIdVal("tourn-advance-per-group"),
     courts: byIdVal("tourn-courts"),
@@ -6304,6 +6312,10 @@ function renderTournamentCreateForm() {
         <div><label>${t("fieldDrawPoints")}</label><input id="tourn-draw-points" type="number" min="0" value="1" /></div>
         <div><label>${t("fieldLossPoints")}</label><input id="tourn-loss-points" type="number" min="0" value="0" /></div>
       </div>
+      <div class="grid-2" style="margin-top:14px;">
+        <div><label>${t("fieldPlanningCount")}</label><input id="tourn-planning-count" type="number" min="0" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+      </div>
+      <p class="hint-note">${t("planningCountHint")}</p>
       <p class="hint-note" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
       <div class="grid-2">
         <div><label>${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
