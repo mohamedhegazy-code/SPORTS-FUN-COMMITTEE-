@@ -938,8 +938,8 @@ function writeDb(db) {
 // Never send a password hash back to a client.
 function publicMember(m) {
   if (!m) return m;
-  const { passwordHash, recoveryPinHash, ...rest } = m;
-  return { ...rest, hasRecoveryPin: !!recoveryPinHash };
+  const { passwordHash, recoveryPinHash, claimCodeHash, ...rest } = m;
+  return { ...rest, hasRecoveryPin: !!recoveryPinHash, hasClaimCode: !!claimCodeHash };
 }
 function publicStaff(s) {
   if (!s) return s;
@@ -1272,7 +1272,29 @@ function sanitizeAgeGroup(value) {
   return VALID_AGE_GROUPS.includes(trimmed) ? trimmed : "";
 }
 
+// Shared by the two readDb() calls in /api/auth/signup below (an early
+// "peek" read used only to decide things, and a fresh read taken right
+// before the actual mutate+write - see the comment inside the handler) so
+// the accountId/claiming logic is identical on both reads instead of
+// duplicated by hand.
+function resolveSignupAccount(db, clubId) {
+  const existing = db.members[clubId];
+  let accountId = clubId;
+  let joiningExistingFamily = false;
+  if (existing && existing.passwordHash) {
+    accountId = nextFamilyAccountId(db, clubId);
+    joiningExistingFamily = true;
+  }
+  const claiming = accountId === clubId ? existing : null;
+  return { accountId, existing, claiming, joiningExistingFamily };
+}
+
 app.post("/api/auth/signup", async (req, res) => {
+  // Same IP-based lockout used by login/forgot-password - without it, an
+  // attacker with just a membership number (printed on every family's club
+  // card, not a secret) could script repeated signup/claim attempts trying
+  // phone-number guesses against the check below with no rate limit at all.
+  if (loginRateLimitCheck(req, res)) return;
   const { membershipNumber, name, password, familyGroup, phone, ageGroup, email, agreeTerms, memberType, relationshipToMain } = req.body;
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
@@ -1314,35 +1336,61 @@ app.post("/api/auth/signup", async (req, res) => {
   // so the read -> mutate -> write below has no await in it at all - see
   // the comment above this handler.
   const passwordHash = await bcrypt.hash(password, 10);
-  const db = readDb();
   // What the member typed here is the CLUB ID printed on the family's
   // membership card - the club issues one per household, not one per
   // person, so more than one person may legitimately "sign up with" the
   // same number. `existing` is whoever (if anyone) already holds the plain,
-  // un-suffixed account for that card.
+  // un-suffixed account for that card. `accountId` becomes clubId-2,
+  // clubId-3, etc. instead when someone else already claimed the bare
+  // clubId - see resolveSignupAccount() above and the response's
+  // assignedLoginId note below.
   const clubId = String(membershipNumber).trim();
-  const existing = db.members[clubId];
-  let accountId = clubId;
-  let joiningExistingFamily = false;
-  if (existing && existing.passwordHash) {
-    // Someone else in the family already claimed the bare clubId as their
-    // login - rather than rejecting outright, give this person their own
-    // account under the same card number (clubId-2, clubId-3, ...), which
-    // poolingKey()/membersInPool() then pools with the rest of the family
-    // automatically, with no admin step and no waiting for anyone else to
-    // register first, in either order. See the accountId/clubId note in the
-    // response below - the frontend surfaces this new id prominently since
-    // it (not the club card number) is what this person logs in with.
-    accountId = nextFamilyAccountId(db, clubId);
-    joiningExistingFamily = true;
-  }
-  // `existing` with no passwordHash (only possible when accountId === clubId
+  // A "peek" read, used only to decide whether this signup should be
+  // allowed - NOT the read the eventual mutate+write uses (see the fresh
+  // readDb() further down). `existing`/`claiming` below both come from this
+  // peek.
+  const peekDb = readDb();
+  const peek = resolveSignupAccount(peekDb, clubId);
+  // `claiming` with no passwordHash (only possible when accountId === clubId
   // above) means an admin imported this member ahead of time (see
   // /api/admin/members/import) - this is them claiming that profile rather
   // than starting from scratch, so keep whatever was already on file (family
   // group, phone, email, dependents) unless they're explicitly overriding it
   // here.
-  const claiming = accountId === clubId ? existing : null;
+  //
+  // An admin-imported profile being claimed for the first time may already
+  // have a phone number and/or a claim code on file (the committee can set
+  // either when importing/adding the member - see POST /api/admin/members
+  // and the import endpoint). If a phone is on file, it must match what's
+  // typed here. If a claim code is on file, the correct code must be typed
+  // here too, on top of the phone match. Without at least one of these,
+  // membershipNumber alone (printed on every family's club card, not a
+  // secret) would let anyone claim someone else's pre-loaded profile -
+  // including their name, family group, and dependents - just by
+  // guessing/knowing the card number and picking any password.
+  if (peek.claiming && peek.claiming.phone && peek.claiming.phone !== trimmedPhone) {
+    recordLoginFailure(req.ip);
+    return res.status(403).json({
+      error: "That membership number already has a profile on file whose phone number doesn't match what you entered. If this is your account, contact the committee to verify your details.",
+    });
+  }
+  if (peek.claiming && peek.claiming.claimCodeHash) {
+    const trimmedClaimCode = String(req.body.claimCode || "").trim();
+    const claimCodeOk = trimmedClaimCode && (await bcrypt.compare(trimmedClaimCode, peek.claiming.claimCodeHash));
+    if (!claimCodeOk) {
+      recordLoginFailure(req.ip);
+      return res.status(403).json({
+        error: "That membership number already has a profile on file that requires a claim code to activate. Please enter the code the committee gave you, or contact them if you don't have it.",
+      });
+    }
+  }
+  // Re-read right before the write (see the comment in POST /api/auth/login)
+  // - the bcrypt.compare() above is the only await since peekDb was read, so
+  // accountId/claiming are recomputed from a fresh copy rather than reusing
+  // peek's, in case another signup changed something about this exact
+  // clubId in the meantime.
+  const db = readDb();
+  const { accountId, claiming, joiningExistingFamily } = resolveSignupAccount(db, clubId);
   db.members[accountId] = {
     membershipNumber: accountId,
     clubId,
@@ -3534,6 +3582,26 @@ app.post("/api/redemptions/:id/status", requireStaffRole("admin"), (req, res) =>
   if (!valid.includes(status)) return res.status(400).json({ error: "Invalid status" });
   const redemption = db.redemptions.find((r) => r.id === id);
   if (!redemption) return res.status(404).json({ error: "Redemption not found" });
+  // /api/redeem only checks the member's balance at the moment they submit a
+  // request - it does not (and can't) know about other Pending requests
+  // from the same member/family pool that haven't been decided yet, since
+  // totalRedeemed() only counts Approved/Fulfilled redemptions. That means
+  // a member can have several Pending requests outstanding whose combined
+  // cost exceeds their real balance, and nothing previously stopped an
+  // admin from approving all of them, one by one, driving the balance
+  // negative. Re-check right before a Pending/Rejected redemption is moved
+  // to Approved/Fulfilled (using the balance as of right now, which does
+  // reflect every other redemption already Approved/Fulfilled) so this
+  // specific approval is still affordable.
+  const movingIntoApproved = (status === "Approved" || status === "Fulfilled") && redemption.status !== "Approved" && redemption.status !== "Fulfilled";
+  if (movingIntoApproved) {
+    const snapshot = balanceSnapshot(db, redemption.membershipNumber);
+    if (!snapshot || snapshot.balance < redemption.pointsCost) {
+      return res.status(409).json({
+        error: `This member's current balance (${snapshot ? snapshot.balance : 0}) no longer covers this reward's cost (${redemption.pointsCost}) - likely because another redemption was approved in the meantime.`,
+      });
+    }
+  }
   redemption.status = status;
   // Recorded automatically from the logged-in admin's own account now,
   // instead of free-typed text - a real audit trail.
@@ -3799,6 +3867,7 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
       familyGroup: m.familyGroup || "",
       ageGroup: m.ageGroup || "",
       hasLoggedInAccount: !!m.passwordHash,
+      hasClaimCode: !!m.claimCodeHash,
       dependentsCount: (m.dependents || []).length,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -3812,16 +3881,31 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
 // "create new" action, so a collision almost certainly means the admin
 // meant to search for the existing member (e.g. via the invite table or the
 // per-event hub) instead of silently overwriting them.
-app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
-  const db = req.db;
+app.post("/api/admin/members", requireStaffRole("admin"), async (req, res) => {
   const membershipNumber = String(req.body.membershipNumber || "").trim();
   const name = String(req.body.name || "").trim();
   const phone = String(req.body.phone || "").trim();
   const familyGroup = String(req.body.familyGroup || "").trim();
   const ageGroup = sanitizeAgeGroup(req.body.ageGroup);
+  // Optional claim code - a secret the committee hands this member through
+  // some channel OTHER than their printed club card (text message, a slip
+  // of paper, in person), separate from the membershipNumber itself (which
+  // IS printed on the card and isn't secret). When set, claiming this
+  // profile at sign-up (see /api/auth/signup) requires typing this code
+  // too, on top of the existing phone-match check - closing the gap where
+  // anyone who only knew/saw the card number could otherwise claim the
+  // profile. Hashed immediately, same as a password, so it's never stored
+  // or shown back in plain text - if it's lost, the admin sets a new one.
+  const trimmedClaimCode = String(req.body.claimCode || "").trim();
+  if (trimmedClaimCode && trimmedClaimCode.length < MIN_PIN_LENGTH) {
+    return res.status(400).json({ error: `Claim code must be at least ${MIN_PIN_LENGTH} characters` });
+  }
+  const claimCodeHash = trimmedClaimCode ? await bcrypt.hash(trimmedClaimCode, 10) : null;
   if (!membershipNumber || !name) {
     return res.status(400).json({ error: "Membership number and name are required" });
   }
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const db = readDb();
   if (db.members[membershipNumber]) {
     return res.status(409).json({ error: "A member with this membership number already exists" });
   }
@@ -3832,6 +3916,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
     phone,
     ageGroup,
     passwordHash: null,
+    claimCodeHash,
     dependents: [],
     nickname: "",
     // Used by the management dashboard's club-growth chart. Only tracked
@@ -3851,7 +3936,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), (req, res) => {
   });
   writeDb(db);
   res.status(201).json({
-    member: { membershipNumber, name, phone, familyGroup, ageGroup, hasLoggedInAccount: false, dependentsCount: 0 },
+    member: { membershipNumber, name, phone, familyGroup, ageGroup, hasLoggedInAccount: false, hasClaimCode: !!claimCodeHash, dependentsCount: 0 },
   });
 });
 
@@ -4005,7 +4090,7 @@ app.post(
   "/api/admin/members/import",
   requireStaffRole("admin"),
   uploadMembersFile.single("file"),
-  (req, res) => {
+  async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     let workbook;
     try {
@@ -4029,7 +4114,6 @@ app.post(
       return "";
     };
 
-    const db = req.db;
     const created = [];
     const updated = [];
     const errors = [];
@@ -4045,18 +4129,44 @@ app.post(
       const phone = pick(row, ["phone", "phone number"]);
       const familyGroup = pick(row, ["family group", "familygroup"]);
       const ageGroup = parseAgeGroupCell(pick(row, ["age group", "agegroup", "age"]));
+      // Optional claim code column - see the comment on POST /api/admin/members
+      // for why this exists. Never exported back out (it's a secret, hashed
+      // on the way in, same as a password) - only a sheet the committee
+      // builds themselves would ever carry one.
+      const claimCode = pick(row, ["claim code", "claimcode", "secret code", "secret number"]);
       const rowNum = i + 2; // header row + 1-indexing
 
       if (!membershipNumber || !name) {
         errors.push({ row: rowNum, reason: "Missing membership number or name" });
         return;
       }
+      if (claimCode && claimCode.length < MIN_PIN_LENGTH) {
+        errors.push({ row: rowNum, reason: `Claim code must be at least ${MIN_PIN_LENGTH} characters - member was still saved/updated without it` });
+      }
       if (!groups.has(membershipNumber)) groups.set(membershipNumber, []);
-      groups.get(membershipNumber).push({ name, phone, familyGroup, ageGroup, rowNum });
+      groups.get(membershipNumber).push({ name, phone, familyGroup, ageGroup, claimCode: claimCode.length >= MIN_PIN_LENGTH ? claimCode : "", rowNum });
     });
+
+    // Hashing is async, so every claim code in the sheet is hashed up front,
+    // before any readDb()/writeDb() - same reasoning as the single "add a
+    // member" endpoint's "re-read right before the write" comment: no await
+    // may sit between reading the db and writing it back, or a concurrent
+    // request's write in that window would be silently discarded.
+    const primaryRows = Array.from(groups.values()).map((groupRows) => groupRows[0]);
+    const claimCodeHashes = await Promise.all(
+      primaryRows.map((row) => (row.claimCode ? bcrypt.hash(row.claimCode, 10) : Promise.resolve(null)))
+    );
+    const claimCodeHashByMembershipNumber = new Map();
+    Array.from(groups.keys()).forEach((membershipNumber, idx) => {
+      if (claimCodeHashes[idx]) claimCodeHashByMembershipNumber.set(membershipNumber, claimCodeHashes[idx]);
+    });
+
+    // Re-read right before the write - see the comment in POST /api/auth/login.
+    const db = readDb();
 
     groups.forEach((groupRows, membershipNumber) => {
       const [primaryRow, ...dependentRows] = groupRows;
+      const newClaimCodeHash = claimCodeHashByMembershipNumber.get(membershipNumber) || null;
       const existing = db.members[membershipNumber];
       let member;
       if (existing) {
@@ -4064,6 +4174,7 @@ app.post(
         if (primaryRow.phone) existing.phone = primaryRow.phone;
         if (primaryRow.familyGroup) existing.familyGroup = primaryRow.familyGroup;
         if (primaryRow.ageGroup) existing.ageGroup = primaryRow.ageGroup;
+        if (newClaimCodeHash) existing.claimCodeHash = newClaimCodeHash;
         member = existing;
         updated.push({ membershipNumber, name: primaryRow.name });
       } else {
@@ -4074,6 +4185,7 @@ app.post(
           phone: primaryRow.phone || "",
           ageGroup: primaryRow.ageGroup || "",
           passwordHash: null,
+          claimCodeHash: newClaimCodeHash,
           dependents: [],
           nickname: "",
           createdAt: new Date().toISOString(),
