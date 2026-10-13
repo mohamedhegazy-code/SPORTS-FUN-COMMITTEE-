@@ -235,6 +235,9 @@
         <input id="su-family" placeholder="e.g. FAM-01" />
         <label class="required-label" data-i18n="fieldSignupPhone">Mobile number</label>
         <input id="su-phone" placeholder="01xxxxxxxxx" required />
+        <label data-i18n="fieldClaimCode">Claim code (optional)</label>
+        <input id="su-claimcode" placeholder="e.g. 482913" />
+        <p class="hint-note" data-i18n="claimCodeHint">Only needed if the committee gave you a claim code for this membership number - leave blank otherwise.</p>
         <label data-i18n="fieldAgeGroup">Age group (optional)</label>
         <select id="su-age-group">
           <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
@@ -863,6 +866,11 @@
                 <option value="46plus" data-i18n="ageGroupSeniors">Seniors (46+)</option>
               </select>
             </div>
+            <div>
+              <label data-i18n="fieldClaimCode">Claim code (optional)</label>
+              <input id="member-add-claimcode" type="text" placeholder="e.g. 482913" />
+              <p class="hint-note" data-i18n="claimCodeAdminHint">Give this to the member yourself (text, in person) - not on anything printed alongside their membership number. Required from them to claim this profile.</p>
+            </div>
           </div>
           <label data-i18n="fieldAlsoRegisterEvent">Also register for an event (optional)</label>
           <select id="member-add-event"></select>
@@ -1367,7 +1375,7 @@
     <h2 data-i18n="btnCancelRegistration">Cancel registration</h2>
     <p id="cancel-reg-name" style="color:var(--muted);font-size:0.95rem;font-weight:600;"></p>
     <label class="required-label" data-i18n="cancelRegReasonLabel">Reason</label>
-    <textarea id="cancel-reg-reason" rows="2" placeholder="e.g. member asked to cancel, no-show, duplicate entry\u2026"></textarea>
+    <textarea id="cancel-reg-reason" rows="2" placeholder="e.g. member asked to cancel, no-show, duplicate entry…"></textarea>
     <button class="danger" id="cancel-reg-confirm-btn" style="margin-top:10px;" data-i18n="btnCancelRegistration">Cancel registration</button>
     <div class="msg" id="cancel-reg-msg"></div>
   </div>

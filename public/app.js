@@ -1393,7 +1393,7 @@ function renderEventDropdowns() {
     .filter((ev) => !isParentEventWithChildren(ev))
     .map(
       (ev) =>
-        `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}${isEventFull(ev) ? " — " + t("badgeFull") : ""}</option>`
+        `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}${isEventFull(ev) ? " — " + t("badgeFull") : ""}</option>`
     )
     .join("");
   const regSel = document.getElementById("reg-event");
@@ -1403,13 +1403,13 @@ function renderEventDropdowns() {
   updateRegCapacityNote();
   updateRegSelectedEventLabel();
 
-  const upcomingOpts = upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
+  const upcomingOpts = upcoming.map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`).join("");
 
   // Admins need every event (including past ones) to enter results - the
   // soonest upcoming one first, so the dropdown defaults to what's actually
   // next instead of an arbitrary past event (see sortEventsForChooser).
   const allOpts = sortEventsForChooser(EVENTS_DATA)
-    .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
+    .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
     .join("");
   const resSel = document.getElementById("res-event");
   if (resSel) resSel.innerHTML = allOpts || `<option value="">--</option>`;
@@ -1427,7 +1427,7 @@ function renderEventDropdowns() {
       .sort((a, b) => b.date.localeCompare(a.date))
       .map(
         (ev) =>
-          `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}${isPastEvent(ev) ? ` — ${t("eventPast")}` : ""}</option>`
+          `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}${isPastEvent(ev) ? ` — ${t("eventPast")}` : ""}</option>`
       )
       .join("");
     deleteSel.innerHTML = deleteOpts || `<option value="">--</option>`;
@@ -1445,7 +1445,7 @@ function renderEventDropdowns() {
   if (tournSel) {
     const prevTournValue = tournSel.value;
     const tournOpts = sortEventsForChooser(EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev)))
-      .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
+      .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
       .join("");
     tournSel.innerHTML = tournOpts || `<option value="">--</option>`;
     if (prevTournValue && Array.from(tournSel.options).some((o) => o.value === prevTournValue)) {
@@ -1460,7 +1460,7 @@ function renderEventDropdowns() {
     const prevCheckinValue = checkinSel.value;
     const checkinOpts = EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev))
       .sort((a, b) => b.date.localeCompare(a.date))
-      .map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`)
+      .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
       .join("");
     checkinSel.innerHTML = checkinOpts || `<option value="">--</option>`;
     if (prevCheckinValue && Array.from(checkinSel.options).some((o) => o.value === prevCheckinValue)) {
@@ -1975,10 +1975,10 @@ function renderLadder() {
     <div class="ladder-item">
       <div class="pts">${fmt(tier.pointsRequired)}</div>
       <div class="info">
-        <div class="name">${ladderLabel(tier)}</div>
-        <div class="desc">${ladderDesc(tier)}</div>
+        <div class="name">${escapeAttr(ladderLabel(tier))}</div>
+        <div class="desc">${escapeAttr(ladderDesc(tier))}</div>
       </div>
-      <div class="approver">${ladderApprover(tier)}</div>
+      <div class="approver">${escapeAttr(ladderApprover(tier))}</div>
     </div>`
     )
     .join("");
@@ -1998,8 +1998,8 @@ function renderTierDropdown() {
     .map((tier) => {
       const reachable = balance >= tier.pointsRequired;
       const label = reachable
-        ? `${fmt(tier.pointsRequired)} — ${ladderLabel(tier)}`
-        : `${fmt(tier.pointsRequired)} — ${ladderLabel(tier)} (${fmt(tier.pointsRequired - balance)} ${t("tierPointsNeededSuffix")})`;
+        ? `${fmt(tier.pointsRequired)} — ${escapeAttr(ladderLabel(tier))}`
+        : `${fmt(tier.pointsRequired)} — ${escapeAttr(ladderLabel(tier))} (${fmt(tier.pointsRequired - balance)} ${t("tierPointsNeededSuffix")})`;
       return `<option value="${tier.tier}"${reachable ? "" : " disabled"}>${label}</option>`;
     })
     .join("");
@@ -2054,6 +2054,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const nickname = document.getElementById("su-nickname").value.trim();
   const familyGroup = document.getElementById("su-family").value.trim();
   const phone = document.getElementById("su-phone").value.trim();
+  const claimCode = document.getElementById("su-claimcode").value.trim();
   const ageGroup = document.getElementById("su-age-group").value;
   const email = document.getElementById("su-email").value.trim();
   const agreeTerms = document.getElementById("su-agree-terms").checked;
@@ -2083,11 +2084,12 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, ageGroup, email, agreeTerms, memberType, relationshipToMain }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, claimCode, ageGroup, email, agreeTerms, memberType, relationshipToMain }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;
     document.getElementById("su-password").value = "";
+    document.getElementById("su-claimcode").value = "";
     // Best-effort - reuses the same unique-nickname endpoint Member Profile
     // uses, so a taken nickname is skipped with a note rather than blocking
     // the account that was just successfully created; they can retry it
@@ -4052,7 +4054,7 @@ function renderMembersInviteEventDropdown() {
   const prevValue = sel.value;
   const upcoming = sortEventsForChooser(EVENTS_DATA.filter(isUpcoming));
   sel.innerHTML = upcoming.length
-    ? upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("")
+    ? upcoming.map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`).join("")
     : `<option value="">${t("noEventsToInvite")}</option>`;
   if (upcoming.some((ev) => String(ev.id) === prevValue)) sel.value = prevValue;
 }
@@ -4067,7 +4069,7 @@ function renderMemberAddEventDropdown() {
   const upcoming = sortEventsForChooser(EVENTS_DATA.filter(isUpcoming));
   const noInviteOption = `<option value="">${t("optionNoInvite")}</option>`;
   sel.innerHTML =
-    noInviteOption + upcoming.map((ev) => `<option value="${ev.id}">${eventLabel(ev)} — ${ev.date}</option>`).join("");
+    noInviteOption + upcoming.map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`).join("");
   if (upcoming.some((ev) => String(ev.id) === prevValue)) sel.value = prevValue;
 }
 
@@ -4089,13 +4091,14 @@ function renderMembersTable() {
       <td>${escapeAttr(m.familyGroup)}</td>
       <td>${escapeAttr(ageGroupLabel(m.ageGroup))}</td>
       <td>${m.hasLoggedInAccount ? t("yesLabel") : t("noLabel")}</td>
+      <td>${m.hasClaimCode ? t("yesLabel") : t("noLabel")}</td>
     </tr>`;
   }).join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
       <th><input type="checkbox" data-select-all-members title="${escapeAttr(t("selectAllLabel"))}" aria-label="${escapeAttr(t("selectAllLabel"))}" /></th>
       <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th>
-      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colAgeGroup")}</th><th>${t("colHasAccount")}</th>
+      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colAgeGroup")}</th><th>${t("colHasAccount")}</th><th>${t("colHasClaimCode")}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -4151,6 +4154,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   const phone = document.getElementById("member-add-phone").value.trim();
   const familyGroup = document.getElementById("member-add-family").value.trim();
   const ageGroup = document.getElementById("member-add-age-group").value;
+  const claimCode = document.getElementById("member-add-claimcode").value.trim();
   const eventId = document.getElementById("member-add-event").value;
   if (!membershipNumber || !name) {
     highlightMissingFields(["member-add-number", "member-add-name"]);
@@ -4159,7 +4163,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   try {
     const result = await api("/api/admin/members", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, phone, familyGroup, ageGroup }),
+      body: JSON.stringify({ membershipNumber, name, phone, familyGroup, ageGroup, claimCode }),
     });
     let text = `${t("memberAddedLabel")} ${escapeAttr(result.member.name)}.`;
     // Registering the brand-new member for an event is a second, independent
@@ -4187,6 +4191,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
     document.getElementById("member-add-phone").value = "";
     document.getElementById("member-add-family").value = "";
     document.getElementById("member-add-age-group").value = "";
+    document.getElementById("member-add-claimcode").value = "";
     document.getElementById("member-add-event").value = "";
     await loadAdminMembers();
     loadAdminDashboard();
@@ -7145,7 +7150,7 @@ async function loadRedemptionsTable() {
         .map(
           (r) => `<tr>
         <td>${escapeAttr(r.member ? r.member.name : r.membershipNumber)}<br/><small style="color:var(--muted);">${t("mpCurrentBalance")}: ${fmt(r.currentBalance)}</small></td>
-        <td>${r.reward ? ladderLabel(r.reward) : r.tier}</td>
+        <td>${r.reward ? escapeAttr(ladderLabel(r.reward)) : escapeAttr(r.tier)}</td>
         <td>${fmt(r.pointsCost)}</td>
         <td>${r.approvalLevel}</td>
         <td><span class="badge ${r.status}">${r.status}</span>${r.approvedBy ? `<br/><small style="color:var(--muted);">${r.approvedBy}</small>` : ""}</td>
@@ -7823,6 +7828,12 @@ async function sendWhatsappConfirm(btn, msgEl, onDone) {
 // click delegation on whatever container it rendered into. eventId is
 // optional context just for the WhatsApp confirmation link's message text
 // (event name/date) - everything else about the row works without it.
+// showCancel (default false) adds a "Cancel registration" button to every
+// row regardless of status - opt-in, and only passed true from the Event
+// Manage hub (see loadHubRoster below), so the Gate Scanner's check-in list
+// is unchanged: cancelling isn't something staff should be able to do from
+// a fast-moving gate queue, only from the hub where the fuller event
+// context (and the reason prompt - see openCancelRegModal) is in view.
 function rosterTableHtml(roster, query, eventId, showCancel) {
   const filtered = roster.filter(
     (r) => !query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)
