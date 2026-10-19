@@ -1987,6 +1987,29 @@ app.post("/api/staff/chats/:membershipNumber", requireStaffRole(["tournament"]),
   res.status(201).json(message);
 });
 
+// Edit a reply a staff member already sent in a member's chat. Only staff
+// messages can be edited (never the member's own); the bubble then shows an
+// "edited" tag on both sides and counts as unread again for the member.
+app.put("/api/staff/chats/:membershipNumber/messages/:messageId", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const message = db.chatMessages.find(
+    (m) => m.id === Number(req.params.messageId) && m.membershipNumber === req.params.membershipNumber
+  );
+  if (!message) return res.status(404).json({ error: "No such message" });
+  if (message.sender !== "staff") return res.status(403).json({ error: "Only staff replies can be edited" });
+  const text = typeof req.body.text === "string" ? req.body.text.trim().slice(0, 2000) : "";
+  if (!text) return res.status(400).json({ error: "Message can't be empty" });
+  if (text !== message.text) {
+    message.text = text;
+    message.editedAt = new Date().toISOString();
+    message.editedBy = req.staff.name;
+    message.readByMember = false;
+    logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "chat_reply_edit", details: `Edited chat reply #${message.id} to member ${message.membershipNumber}` });
+    writeDb(db);
+  }
+  res.json(message);
+});
+
 // -------------------------------------------------------------------------
 // PUBLIC CONTACT FORM (anonymous visitor -> committee)
 // -------------------------------------------------------------------------
@@ -2078,6 +2101,63 @@ app.post("/api/staff/inquiries/:id/resolve", requireStaffRole(["tournament"]), (
   inquiry.resolved = typeof req.body.resolved === "boolean" ? req.body.resolved : !inquiry.resolved;
   if (typeof req.body.staffNote === "string") inquiry.staffNote = req.body.staffNote.trim().slice(0, 500);
   inquiry.read = true;
+  writeDb(db);
+  res.json(inquiry);
+});
+
+// Replies to a public inquiry. The inquirer has no account, so a reply goes out
+// through the channel the staff member picks (WhatsApp click-to-chat or the
+// email app); the server records the reply text, channel, who sent it and when,
+// and keeps it editable (editedAt/editedBy) so a wrong or outdated reply can be
+// corrected and sent again.
+const INQUIRY_REPLY_CHANNELS = ["whatsapp", "email", "note"];
+function cleanReplyText(v) {
+  return typeof v === "string" ? v.trim().slice(0, 2000) : "";
+}
+app.post("/api/staff/inquiries/:id/replies", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const inquiry = db.publicInquiries.find((i) => i.id === Number(req.params.id));
+  if (!inquiry) return res.status(404).json({ error: "No such inquiry" });
+  const text = cleanReplyText(req.body.text);
+  if (!text) return res.status(400).json({ error: "Reply can't be empty" });
+  const channel = req.body.channel === undefined ? "note" : req.body.channel;
+  if (!INQUIRY_REPLY_CHANNELS.includes(channel)) return res.status(400).json({ error: "Unknown reply channel" });
+  if (channel === "whatsapp" && !inquiry.phone) return res.status(400).json({ error: "This inquiry has no phone number" });
+  if (channel === "email" && !inquiry.email) return res.status(400).json({ error: "This inquiry has no email address" });
+  inquiry.replies = inquiry.replies || [];
+  db.nextIds.inquiryReply = db.nextIds.inquiryReply || 1;
+  const reply = {
+    id: db.nextIds.inquiryReply++,
+    text,
+    channel,
+    sentAt: new Date().toISOString(),
+    sentBy: req.staff.name,
+    editedAt: null,
+    editedBy: null,
+  };
+  inquiry.replies.push(reply);
+  inquiry.read = true;
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "inquiry_reply", details: `Replied to inquiry #${inquiry.id} (${channel})` });
+  writeDb(db);
+  res.status(201).json(inquiry);
+});
+
+app.put("/api/staff/inquiries/:id/replies/:replyId", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const inquiry = db.publicInquiries.find((i) => i.id === Number(req.params.id));
+  if (!inquiry) return res.status(404).json({ error: "No such inquiry" });
+  const reply = (inquiry.replies || []).find((r) => r.id === Number(req.params.replyId));
+  if (!reply) return res.status(404).json({ error: "No such reply" });
+  const text = cleanReplyText(req.body.text);
+  if (!text) return res.status(400).json({ error: "Reply can't be empty" });
+  if (text !== reply.text) {
+    reply.text = text;
+    reply.editedAt = new Date().toISOString();
+    reply.editedBy = req.staff.name;
+    logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "inquiry_reply_edit", details: `Edited reply #${reply.id} on inquiry #${inquiry.id}` });
+  }
+  // Re-sending an edited reply through WhatsApp/email is recorded as a new send time.
+  if (req.body.resent === true) reply.lastResentAt = new Date().toISOString();
   writeDb(db);
   res.json(inquiry);
 });
