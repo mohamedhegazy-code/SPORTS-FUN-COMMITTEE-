@@ -1390,3 +1390,20 @@ html[dir="rtl"] .swiss-black { text-align: start; }
 }
 .roster-table a.roster-qr-download:hover { background: #155fc0; }
 .roster-table td:last-child { min-width: 190px; }
+
+/* WhatsApp column: one block per message type (confirmation / reminder / event-day) */
+.roster-table td.wa-cell { min-width: 230px; }
+.wa-row { padding: 6px 0; border-bottom: 1px dashed var(--border); display: flex; flex-direction: column; gap: 4px; }
+.wa-row:last-child { border-bottom: none; }
+.wa-row-head { font-size: 0.75rem; color: var(--ink, #222); }
+.wa-hint { color: var(--muted); font-size: 0.68rem; line-height: 1.3; }
+.roster-table button.roster-btn.wa { margin-top: 0; }
+.roster-table button.roster-btn.wa.reminder { background: #d98200; border-color: #b36b00; }
+.roster-table button.roster-btn.wa.dayof { background: #6f42c1; border-color: #5a32a3; }
+.roster-table button.roster-btn.wa:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; opacity: 1; cursor: not-allowed; }
+
+.wa-bulk-bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.wa-bulk-bar button.roster-btn, #wa-bulk-open { font-size: 0.85rem; font-weight: 700; border-radius: 8px; padding: 9px 14px; border: 1px solid; cursor: pointer; width: auto; margin: 0; background: #128c7e; border-color: #0e7266; color: #fff; }
+.wa-bulk-bar button.roster-btn.reminder, #wa-bulk-open.reminder { background: #d98200; border-color: #b36b00; }
+.wa-bulk-bar button.roster-btn.dayof, #wa-bulk-open.dayof { background: #6f42c1; border-color: #5a32a3; }
+.wa-bulk-bar button.roster-btn:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; cursor: not-allowed; }

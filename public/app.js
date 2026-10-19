@@ -397,7 +397,7 @@ setInterval(() => {
 // member/admin is off doing something else.
 setInterval(() => {
   const isMember = CURRENT_SESSION && CURRENT_SESSION.type === "member";
-  const isAdmin = CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin";
+  const isAdmin = CURRENT_SESSION && CURRENT_SESSION.type === "staff" && ["admin", "tournament"].includes(CURRENT_SESSION.staff.role);
   if (isMember && document.getElementById("view-mypoints").classList.contains("active")) loadMyChat();
   if (isAdmin && document.getElementById("view-admin").classList.contains("active") && ADMIN_CHAT_OPEN_MEMBERSHIP) {
     refreshOpenAdminChatThread();
@@ -1191,6 +1191,12 @@ function updateUIForSession() {
     } else {
       loadAdminDashboard();
     }
+    if (isTournamentRole) {
+      // Tournament Managers handle member chat + public enquiries too.
+      loadChatThreadsList();
+      loadInquiriesList();
+      updateAdminChatBadge();
+    }
     if (isAdmin) {
       loadManagementDashboard();
       loadAdminOverview();
@@ -1199,6 +1205,7 @@ function updateUIForSession() {
       loadAdminDirectory();
       loadRedemptionsTable();
       loadStaffAccountsTable();
+      populateStaffCommitteePicker();
       loadRulesForEdit();
       renderLadderEdit();
       loadChatThreadsList();
@@ -2797,7 +2804,7 @@ let CHAT_THREADS_CACHE = [];
 async function loadChatThreadsList() {
   const wrap = document.getElementById("chat-threads-list");
   if (!wrap) return;
-  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || CURRENT_SESSION.staff.role !== "admin") return;
+  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || !["admin", "tournament"].includes(CURRENT_SESSION.staff.role)) return;
   try {
     CHAT_THREADS_CACHE = await api("/api/staff/chats");
     if (!CHAT_THREADS_CACHE.length) {
@@ -2850,9 +2857,9 @@ async function refreshOpenAdminChatThread() {
 async function updateAdminChatBadge() {
   const badge = document.getElementById("admin-chat-badge");
   const inquiriesBadge = document.getElementById("admin-inquiries-badge");
-  const tabBadge = document.getElementById("admin-tab-badge-content");
+  const tabBadge = document.getElementById("admin-tab-badge-messages");
   if (!badge) return;
-  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || CURRENT_SESSION.staff.role !== "admin") {
+  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || !["admin", "tournament"].includes(CURRENT_SESSION.staff.role)) {
     badge.classList.add("hidden");
     if (inquiriesBadge) inquiriesBadge.classList.add("hidden");
     if (tabBadge) tabBadge.classList.add("hidden");
@@ -2902,7 +2909,7 @@ let INQUIRIES_CACHE = [];
 async function loadInquiriesList() {
   const wrap = document.getElementById("inquiries-list");
   if (!wrap) return;
-  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || CURRENT_SESSION.staff.role !== "admin") return;
+  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || !["admin", "tournament"].includes(CURRENT_SESSION.staff.role)) return;
   try {
     INQUIRIES_CACHE = await api("/api/staff/inquiries");
     if (!INQUIRIES_CACHE.length) {
@@ -3107,6 +3114,10 @@ function switchAdminTab(tabKey) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
   if (tabKey === "reports") loadReports();
+  if (tabKey === "messages") {
+    loadChatThreadsList();
+    loadInquiriesList();
+  }
 }
 
 // ------------------------------------------------------ admin: reports tab --
@@ -3152,7 +3163,7 @@ function renderReports() {
         <div class="reports-btns">
           ${link(`${eventBase}?view=registrations&${lang}`, t("reportsRegistrations"))}
           ${link(`${eventBase}?view=attendance&${lang}`, t("reportsAttendance"))}
-          ${link(`${eventBase}?view=points&${lang}`, t("reportsPoints"))}
+          ${isAdmin ? link(`${eventBase}?view=points&${lang}`, t("reportsPoints")) : ""}
           ${isAdmin ? link(`/api/admin/management/events/${ev.eventId}/report.docx?${lang}`, t("reportsEventDoc")) : ""}
         </div>
       </div>`;
@@ -8048,6 +8059,34 @@ async function removeStaffAccount(username) {
     alert(e.message);
   }
 }
+// "Pick from committee members": fills the full name (and a suggested
+// username) from a committee member and selects the Tournament Manager role.
+// Any number of Tournament Managers can be created - one account each.
+async function populateStaffCommitteePicker() {
+  const sel = document.getElementById("sa-committee");
+  if (!sel) return;
+  try {
+    const list = await api("/api/committee");
+    const keep = sel.value;
+    sel.innerHTML =
+      `<option value="">${escapeAttr(t("optPickCommittee"))}</option>` +
+      list
+        .map((m) => `<option value="${m.id}">${escapeAttr(currentLang === "ar" ? m.nameAr || m.nameEn : m.nameEn || m.nameAr)}</option>`)
+        .join("");
+    sel.value = keep;
+    sel._committee = list;
+  } catch (e) {
+    /* non-fatal: the form still works by typing the name */
+  }
+}
+document.getElementById("sa-committee").addEventListener("change", (e) => {
+  const m = (e.target._committee || []).find((x) => String(x.id) === e.target.value);
+  if (!m) return;
+  document.getElementById("sa-name").value = currentLang === "ar" ? m.nameAr || m.nameEn : m.nameEn || m.nameAr;
+  const base = (m.nameEn || "").toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+  if (base && !document.getElementById("sa-username").value) document.getElementById("sa-username").value = base;
+  document.getElementById("sa-role").value = "tournament";
+});
 document.getElementById("sa-submit").addEventListener("click", async () => {
   const username = document.getElementById("sa-username").value.trim();
   const name = document.getElementById("sa-name").value.trim();
@@ -8072,6 +8111,7 @@ document.getElementById("sa-submit").addEventListener("click", async () => {
     document.getElementById("sa-username").value = "";
     document.getElementById("sa-name").value = "";
     document.getElementById("sa-password").value = "";
+    document.getElementById("sa-committee").value = "";
     loadStaffAccountsTable();
     loadAdminOverview();
   } catch (e) {
@@ -8643,20 +8683,65 @@ function waConfirmMessage(attendeeName, eventName, eventDate) {
 // sendWhatsappConfirm() below) so the status persists for whoever looks at
 // this roster next, THEN open the pre-filled wa.me chat. No phone on file
 // shows a plain note instead of a dead button.
-function waStatusCellHtml(r, eventName, eventDate) {
-  const href = waLink(r.phone, waConfirmMessage(r.attendeeName, eventName || "", eventDate || ""));
-  if (!href) {
+// Reminder / event-day messages (follow-up and attendance check). Reminder is
+// available from 3 days before the event until the day before; the event-day
+// message from the event date (to the end date for multi-day events).
+function waReminderMessage(attendeeName, eventName, eventDate) {
+  const ar = `مرحبًا ${attendeeName}، تذكير بموعد "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. من فضلك أكّد حضورك بالرد على هذه الرسالة. - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
+  const en = `Hi ${attendeeName}, a reminder about "${eventName}"${eventDate ? ` on ${eventDate}` : ""}. Please reply to confirm that you will attend. - Recreational Sports Committee — New Cairo Branch`;
+  return `${ar}\n\n${en}`;
+}
+function waDayOfMessage(attendeeName, eventName, eventDate) {
+  const ar = `مرحبًا ${attendeeName}، اليوم هو موعد "${eventName}"${eventDate ? ` (${eventDate})` : ""}. نتطلع لرؤيتك! من فضلك أكّد لنا حضورك بالرد على هذه الرسالة. - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
+  const en = `Hi ${attendeeName}, today is the day for "${eventName}"${eventDate ? ` (${eventDate})` : ""}. We look forward to seeing you! Please reply to confirm your attendance. - Recreational Sports Committee — New Cairo Branch`;
+  return `${ar}\n\n${en}`;
+}
+function eventDaysUntil(ev) {
+  if (!ev || !ev.date) return null;
+  const [y, m, d] = ev.date.split("-").map(Number);
+  const start = new Date(y, m - 1, d);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((start - today) / 86400000);
+}
+function eventReminderOpen(ev) {
+  const n = eventDaysUntil(ev);
+  return n === null ? true : n >= 1 && n <= 3;
+}
+function waStatusCellHtml(r, eventName, eventDate, ev) {
+  const hasPhoneNow = !!r.phone;
+  // Tournament Manager: the list carries no phone numbers (hasPhone only);
+  // the number is fetched from the server at the moment of sending.
+  if (!hasPhoneNow && !r.hasPhone) {
     return `<small style="color:var(--muted);">${escapeAttr(t("waNoPhoneNote"))}</small>`;
   }
-  const pill = r.whatsappConfirmedAt
-    ? `<span class="wa-status-pill sent">${escapeAttr(t("waStatusSent"))}</span><br/><small style="color:var(--muted);">${escapeAttr(new Date(r.whatsappConfirmedAt).toLocaleString())}</small>`
-    : `<span class="wa-status-pill not-sent">${escapeAttr(t("waStatusNotSent"))}</span>`;
-  const btnLabel = r.whatsappConfirmedAt ? t("btnResendWhatsappConfirm") : t("btnSendWhatsappConfirm");
-  const btn = `<button class="roster-btn wa" data-wa-confirm="${r.registrationId}" data-wa-href="${escapeAttr(href)}">${escapeAttr(btnLabel)}</button>`;
-  const hint = r.qrDataUrl
-    ? `<br/><small style="color:var(--muted);">${escapeAttr(t("waConfirmQrHint"))}</small>`
-    : "";
-  return `${pill}<br/>${btn}${hint}`;
+  const attending = !r.waitlisted && !r.checkedIn;
+  const types = [
+    { key: "confirm", field: "whatsappConfirmedAt", label: "waTypeConfirm", build: waConfirmMessage, open: true, cls: "wa" },
+  ];
+  if (attending) {
+    types.push({ key: "reminder", field: "whatsappReminderAt", label: "waTypeReminder", build: waReminderMessage, open: eventReminderOpen(ev), cls: "wa reminder", tip: "waOnlyBeforeEvent" });
+    types.push({ key: "dayof", field: "whatsappDayOfAt", label: "waTypeDayOf", build: waDayOfMessage, open: eventCheckInOpen(ev), cls: "wa dayof", tip: "checkinOnlyOnEventDate" });
+  }
+  return types
+    .map((ty) => {
+      const sentAt = r[ty.field];
+      const message = ty.build(r.attendeeName, eventName || "", eventDate || "");
+      const href = hasPhoneNow ? waLink(r.phone, message) : "";
+      const pill = sentAt
+        ? `<span class="wa-status-pill sent">${escapeAttr(t("waStatusSent"))}</span> <small style="color:var(--muted);">${escapeAttr(new Date(sentAt).toLocaleString())}</small>`
+        : `<span class="wa-status-pill not-sent">${escapeAttr(t("waStatusNotSent"))}</span>`;
+      const btnLabel = sentAt ? t("btnResendWhatsappConfirm") : ty.key === "confirm" ? t("btnSendWhatsappConfirm") : t("btnSendWhatsappMsg");
+      const dataAttrs = `data-wa-confirm="${r.registrationId}" data-wa-type="${ty.key}" ${href ? `data-wa-href="${escapeAttr(href)}"` : `data-wa-msg="${escapeAttr(message)}"`}`;
+      const btn = ty.open
+        ? `<button class="roster-btn ${ty.cls}" ${dataAttrs}>${escapeAttr(btnLabel)}</button>`
+        : `<button class="roster-btn ${ty.cls}" disabled title="${escapeAttr(t(ty.tip))}">${escapeAttr(btnLabel)}</button>`;
+      const hint =
+        ty.key === "confirm" && r.qrDataUrl ? `<small class="wa-hint">${escapeAttr(t("waConfirmQrHint"))}</small>` : "";
+      const note = !ty.open ? `<small class="wa-hint">${escapeAttr(t(ty.tip))}</small>` : "";
+      return `<div class="wa-row"><div class="wa-row-head"><b>${escapeAttr(t(ty.label))}</b></div><div>${pill}</div>${btn}${note}${hint}</div>`;
+    })
+    .join("");
 }
 // Shared by the Gate Scanner's and the Event hub's WhatsApp confirm/resend
 // buttons (data-wa-confirm, built above). Records the send via the server
@@ -8667,8 +8752,13 @@ function waStatusCellHtml(r, eventName, eventDate) {
 async function sendWhatsappConfirm(btn, msgEl, onDone) {
   btn.disabled = true;
   try {
-    await api(`/api/staff/registrations/${btn.dataset.waConfirm}/whatsapp-confirmed`, { method: "POST" });
-    window.open(btn.dataset.waHref, "_blank", "noopener");
+    const sent = await api(`/api/staff/registrations/${btn.dataset.waConfirm}/whatsapp-confirmed`, {
+      method: "POST",
+      body: JSON.stringify({ type: btn.dataset.waType || "confirm" }),
+    });
+    const href = btn.dataset.waHref || waLink(sent.phone, btn.dataset.waMsg || "");
+    if (!href) throw new Error(t("waNoPhoneNote"));
+    window.open(href, "_blank", "noopener");
     if (onDone) await onDone();
   } catch (e) {
     if (msgEl) showMsg(msgEl, e.message, false);
@@ -8788,7 +8878,7 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         <td>${status}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
         <td><div class="roster-actions">${action}${cancelBtn}${!checkInOpen && action ? `<small class="roster-date-note">${escapeAttr(t("checkinOnlyOnEventDate"))}</small>` : ""}</div></td>
-        <td>${waStatusCellHtml(r, eventName, eventDate)}</td>
+        <td class="wa-cell">${waStatusCellHtml(r, eventName, eventDate, ev)}</td>
       </tr>`;
     })
     .join("");
@@ -8797,7 +8887,7 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
     const arrow = active ? (ROSTER_SORT.dir === 1 ? " ▲" : " ▼") : " ↕";
     return `<th aria-sort="${active ? (ROSTER_SORT.dir === 1 ? "ascending" : "descending") : "none"}"><button type="button" class="roster-sort${active ? " active" : ""}" data-roster-sort="${key}">${t(label)}<span class="roster-sort-arrow">${arrow}</span></button></th>`;
   }).join("");
-  return `<div class="dashboard-table-wrap"><table class="dashboard-table roster-table">
+  return `${waBulkBarHtml(roster, ev)}<div class="dashboard-table-wrap"><table class="dashboard-table roster-table">
     <thead><tr>${headCells}</tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
@@ -8838,6 +8928,118 @@ document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => 
   if (!waBtn) return;
   sendWhatsappConfirm(waBtn, document.getElementById("checkin-roster-msg"), () => loadCheckinRoster(true));
 });
+
+
+// ---- Bulk WhatsApp: one button per message type for the whole event --------
+// Eligible = attending (not waitlisted, not checked in), has a number on file,
+// and not already marked Sent for that message type.
+const WA_BULK_TYPES = {
+  reminder: { field: "whatsappReminderAt", label: "waBulkReminder", title: "waTypeReminder", build: waReminderMessage, open: (ev) => eventReminderOpen(ev), tip: "waOnlyBeforeEvent", cls: "reminder" },
+  dayof: { field: "whatsappDayOfAt", label: "waBulkDayOf", title: "waTypeDayOf", build: waDayOfMessage, open: (ev) => eventCheckInOpen(ev), tip: "checkinOnlyOnEventDate", cls: "dayof" },
+};
+function waBulkPendingRows(roster, type) {
+  const def = WA_BULK_TYPES[type];
+  return (roster || []).filter((r) => !r.waitlisted && !r.checkedIn && (r.phone || r.hasPhone) && !r[def.field]);
+}
+function waBulkBarHtml(roster, ev) {
+  if (!ev) return "";
+  const buttons = Object.keys(WA_BULK_TYPES)
+    .map((type) => {
+      const def = WA_BULK_TYPES[type];
+      const n = waBulkPendingRows(roster, type).length;
+      const label = `${t(def.label)} (${fmt(n)} ${t("waBulkPending")})`;
+      return def.open(ev) && n > 0
+        ? `<button type="button" class="roster-btn wa ${def.cls}" data-wa-bulk="${type}">${escapeAttr(label)}</button>`
+        : `<button type="button" class="roster-btn wa ${def.cls}" disabled title="${escapeAttr(def.open(ev) ? t("waBulkNone") : t(def.tip))}">${escapeAttr(label)}</button>`;
+    })
+    .join("");
+  return `<div class="wa-bulk-bar">${buttons}</div>`;
+}
+let WA_BULK = null;
+function waBulkRender() {
+  const b = WA_BULK;
+  const def = WA_BULK_TYPES[b.type];
+  document.getElementById("wa-bulk-title").textContent = t(def.title);
+  document.getElementById("wa-bulk-hint").textContent = t("waBulkHint");
+  const msg = document.getElementById("wa-bulk-msg");
+  const openBtn = document.getElementById("wa-bulk-open");
+  const skipBtn = document.getElementById("wa-bulk-skip");
+  openBtn.className = "roster-btn wa " + def.cls;
+  openBtn.textContent = t("waBulkOpen");
+  if (b.idx >= b.queue.length) {
+    document.getElementById("wa-bulk-progress").textContent = t("waBulkDone");
+    document.getElementById("wa-bulk-name").textContent = `${fmt(b.sent)} ${t("waBulkSentWord")} · ${fmt(b.skipped)} ${t("waBulkSkippedWord")}`;
+    openBtn.classList.add("hidden");
+    skipBtn.textContent = t("waBulkClose");
+    return;
+  }
+  const r = b.queue[b.idx];
+  document.getElementById("wa-bulk-progress").textContent = `${t("waBulkProgress")} ${fmt(b.idx + 1)} ${t("waBulkOf")} ${fmt(b.queue.length)}`;
+  document.getElementById("wa-bulk-name").textContent = `${r.attendeeName} (${r.membershipNumber})`;
+  openBtn.classList.remove("hidden");
+  openBtn.disabled = false;
+  skipBtn.textContent = t("waBulkSkip");
+  if (msg) msg.textContent = "";
+}
+function waBulkStart(type, roster, ev, onDone) {
+  const queue = waBulkPendingRows(roster, type);
+  if (!queue.length) return;
+  WA_BULK = { type, queue, idx: 0, sent: 0, skipped: 0, ev, onDone };
+  document.getElementById("wa-bulk-modal").classList.remove("hidden");
+  waBulkRender();
+}
+function waBulkClose() {
+  document.getElementById("wa-bulk-modal").classList.add("hidden");
+  const done = WA_BULK && WA_BULK.onDone;
+  WA_BULK = null;
+  if (done) done();
+}
+document.getElementById("wa-bulk-close").addEventListener("click", waBulkClose);
+document.getElementById("wa-bulk-skip").addEventListener("click", () => {
+  if (!WA_BULK) return;
+  if (WA_BULK.idx >= WA_BULK.queue.length) return waBulkClose();
+  WA_BULK.skipped++;
+  WA_BULK.idx++;
+  waBulkRender();
+});
+document.getElementById("wa-bulk-open").addEventListener("click", async () => {
+  const b = WA_BULK;
+  if (!b || b.idx >= b.queue.length) return;
+  const r = b.queue[b.idx];
+  const def = WA_BULK_TYPES[b.type];
+  const btn = document.getElementById("wa-bulk-open");
+  const msg = document.getElementById("wa-bulk-msg");
+  btn.disabled = true;
+  try {
+    const sent = await api(`/api/staff/registrations/${r.registrationId}/whatsapp-confirmed`, {
+      method: "POST",
+      body: JSON.stringify({ type: b.type }),
+    });
+    const evName = bilingual(b.ev.nameEn, b.ev.nameAr);
+    const href = waLink(r.phone || sent.phone, def.build(r.attendeeName, evName, b.ev.date));
+    if (!href) throw new Error(t("waNoPhoneNote"));
+    r[def.field] = sent[def.field] || new Date().toISOString();
+    window.open(href, "_blank", "noopener");
+    b.sent++;
+    b.idx++;
+    waBulkRender();
+  } catch (e) {
+    if (msg) showMsg(msg, e.message, false);
+    btn.disabled = false;
+  }
+});
+for (const [wrapId, getCtx] of [
+  ["checkin-roster-wrap", () => ({ roster: CHECKIN_ROSTER, eventId: document.getElementById("checkin-event-select").value, reload: () => loadCheckinRoster(true) })],
+  ["hub-checkin-wrap", () => ({ roster: HUB_ROSTER, eventId: HUB_EVENT_ID, reload: () => loadHubRoster(true) })],
+]) {
+  document.getElementById(wrapId).addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-wa-bulk]");
+    if (!btn || btn.disabled) return;
+    const ctx = getCtx();
+    const ev = EVENTS_DATA.find((x) => x.id === Number(ctx.eventId));
+    if (ev) waBulkStart(btn.dataset.waBulk, ctx.roster, ev, ctx.reload);
+  });
+}
 
 // ------------------------------------------------------------------- init --
 (async function init() {
