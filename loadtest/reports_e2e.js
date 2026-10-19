@@ -121,6 +121,109 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
     ok(l.status === 200, `${role} login`, l.json);
     roles[role] = jar;
   }
+  // ---------------------------------------------------- event managers scope
+  section("Event managers: a Tournament Manager only sees assigned events (7-day window)");
+  {
+    const tm = roles.tournament;
+    const tmUser = "rp_tournament";
+    const unassigned = [
+      ["GET", `/api/staff/events/${evChess}/roster`],
+      ["GET", `/admin/print/event/${evChess}?view=registrations`],
+      ["GET", `/api/admin/tournaments/${evChess}`],
+      ["GET", `/api/admin/events/${evChess}/waitlist`],
+    ];
+    for (const [m, p] of unassigned) {
+      const rr = await api(p, { method: m, jar: tm, raw: !p.startsWith("/api") });
+      ok(rr.status === 403, `unassigned manager blocked: ${p}`, rr.status);
+    }
+    const listBefore = await api("/api/admin/reports/events", { jar: tm });
+    ok(listBefore.status === 200 && listBefore.json.length === 0, "unassigned manager: reports list empty", listBefore.json);
+    const dashBefore = await api("/api/admin/dashboard", { jar: tm });
+    ok(dashBefore.status === 200 && dashBefore.json.length === 0, "unassigned manager: dashboard empty", dashBefore.json);
+    // assign (garbage + non-manager usernames are ignored)
+    const asg = await A(`/api/admin/events/${evChess}/managers`, "PUT", { managerUsernames: [tmUser, "rp_staff", "nobody", tmUser] });
+    ok(asg.status === 200 && asg.json.managerUsernames.length === 1 && asg.json.managerUsernames[0] === tmUser, "only real Tournament Manager accounts are kept", asg.json);
+    const asgTm = await api(`/api/admin/events/${evChess}/managers`, { method: "PUT", jar: tm, body: { managerUsernames: [tmUser] } });
+    ok(asgTm.status === 403, "a Tournament Manager cannot assign managers", asgTm.status);
+    const rosterOk = await api(`/api/staff/events/${evChess}/roster`, { jar: tm });
+    ok(rosterOk.status === 200 && rosterOk.json.length > 0, "assigned manager can open the roster", rosterOk.status);
+    const regId = rosterOk.json[0].registrationId;
+    const waOk = await api(`/api/staff/registrations/${regId}/whatsapp-confirmed`, { method: "POST", jar: tm, body: { type: "reminder" } });
+    ok(waOk.status === 200, "assigned manager can send WhatsApp", waOk.status);
+    const printOk = await api(`/admin/print/event/${evChess}?view=registrations`, { jar: tm, raw: true });
+    ok(printOk.status === 200, "assigned manager can print the sheet", printOk.status);
+    const listAfter = await api("/api/admin/reports/events", { jar: tm });
+    ok(listAfter.json.length === 1 && listAfter.json[0].eventId === evChess, "reports list shows only the assigned event", listAfter.json.map((e) => e.eventId));
+    // another event stays closed
+    const other = await api(`/api/staff/events/${evEmpty}/roster`, { jar: tm });
+    ok(other.status === 403, "other events stay blocked", other.status);
+    const manualOther = await api(`/api/checkin/manual`, { method: "POST", jar: tm, body: { registrationId: 999999 } });
+    ok(manualOther.status === 404, "unknown registration still 404", manualOther.status);
+    // public list hides managers, admin sees them, manager sees the flag
+    const pub = await api("/api/events", { jar: await prime(newJar()) });
+    ok(pub.json.every((e) => e.managerUsernames === undefined && e.managedByMe === undefined), "public events list exposes no manager data");
+    const adm = await api("/api/events", { jar: admin });
+    ok(adm.json.find((e) => e.id === evChess).managerUsernames.includes(tmUser), "admin sees the managers of an event");
+    const tmEv = await api("/api/events", { jar: tm });
+    ok(tmEv.json.find((e) => e.id === evChess).managedByMe === true && tmEv.json.find((e) => e.id === evEmpty).managedByMe === false && tmEv.json.every((e) => e.managerUsernames === undefined), "manager sees managedByMe only", tmEv.json.map((e) => e.managedByMe));
+    // gate staff are not event-scoped
+    const gate = await api(`/api/staff/events/${evEmpty}/roster`, { jar: roles.staff });
+    ok(gate.status === 200, "gate staff are not event-scoped", gate.status);
+    // 7-day window: events that ended 8 days ago close, 6 days ago stay open
+    const dayStr = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const mk = async (name, date, extra = {}) => {
+      const fd = new FormData();
+      fd.set("nameEn", name); fd.set("nameAr", name); fd.set("sport", "Chess"); fd.set("date", date);
+      for (const [k, v] of Object.entries(extra)) fd.set(k, v);
+      const r = await api("/api/events", { method: "POST", jar: admin, body: fd, isForm: true });
+      return r.json;
+    };
+    const evOld = await mk("Window closed", dayStr(-8), { managerUsernames: JSON.stringify([tmUser]) });
+    const evRecent = await mk("Window open", dayStr(-6), { managerUsernames: JSON.stringify([tmUser]) });
+    const evMulti = await mk("Multi-day ends recently", dayStr(-20), { endDate: dayStr(-7), managerUsernames: JSON.stringify([tmUser]) });
+    const evMultiOld = await mk("Multi-day closed", dayStr(-20), { endDate: dayStr(-8), managerUsernames: JSON.stringify([tmUser]) });
+    const wOld = await api(`/api/staff/events/${evOld.id}/roster`, { jar: tm });
+    ok(wOld.status === 403 && /7 days/.test(wOld.json.error || ""), "access closes 8 days after the event", wOld);
+    const wRecent = await api(`/api/staff/events/${evRecent.id}/roster`, { jar: tm });
+    ok(wRecent.status === 200, "access still open 6 days after the event", wRecent.status);
+    const wMulti = await api(`/api/staff/events/${evMulti.id}/roster`, { jar: tm });
+    ok(wMulti.status === 200, "multi-day event: window counts from the END date (open)", wMulti.status);
+    const wMultiOld = await api(`/api/staff/events/${evMultiOld.id}/roster`, { jar: tm });
+    ok(wMultiOld.status === 403, "multi-day event: closed 8 days after the END date", wMultiOld.status);
+    const wOldAdmin = await api(`/api/staff/events/${evOld.id}/roster`, { jar: admin });
+    ok(wOldAdmin.status === 200, "admin keeps access to old events", wOldAdmin.status);
+    const listWin = await api("/api/admin/reports/events", { jar: tm });
+    const ids = listWin.json.map((e) => e.eventId);
+    ok(ids.includes(evRecent.id) && !ids.includes(evOld.id), "reports list drops the event after the window", ids);
+    // a manager creating an event becomes its manager; cannot reassign; cannot edit others'
+    const fdNew = new FormData();
+    fdNew.set("nameEn", "Made by TM"); fdNew.set("nameAr", "x"); fdNew.set("sport", "Chess"); fdNew.set("date", dayStr(10)); fdNew.set("managerUsernames", JSON.stringify([]));
+    const made = await api("/api/events", { method: "POST", jar: tm, body: fdNew, isForm: true });
+    ok(made.status === 201 && made.json.managerUsernames.length === 1 && made.json.managerUsernames[0] === tmUser, "TM-created event is auto-assigned to its creator", made.json);
+    const fdEdit = new FormData();
+    fdEdit.set("nameEn", "Made by TM v2"); fdEdit.set("nameAr", "x"); fdEdit.set("sport", "Chess"); fdEdit.set("date", dayStr(10)); fdEdit.set("managerUsernames", JSON.stringify([]));
+    const edited = await api(`/api/events/${made.json.id}`, { method: "PUT", jar: tm, body: fdEdit, isForm: true });
+    const admView = await api("/api/events", { jar: admin });
+    ok(edited.status === 200 && admView.json.find((e) => e.id === made.json.id).managerUsernames.includes(tmUser), "TM cannot clear managers through the edit form", edited.status);
+    const fdForeign = new FormData();
+    fdForeign.set("nameEn", "Hijack"); fdForeign.set("nameAr", "x"); fdForeign.set("sport", "Chess"); fdForeign.set("date", dayStr(10));
+    const foreign = await api(`/api/events/${evEmpty}`, { method: "PUT", jar: tm, body: fdForeign, isForm: true });
+    ok(foreign.status === 403, "TM cannot edit an event they do not manage", foreign.status);
+    // admin edit form sets managers; omitting the field keeps them
+    const fdA = new FormData();
+    fdA.set("nameEn", "Made by TM v3"); fdA.set("nameAr", "x"); fdA.set("sport", "Chess"); fdA.set("date", dayStr(10));
+    const keep = await api(`/api/events/${made.json.id}`, { method: "PUT", jar: admin, body: fdA, isForm: true });
+    ok(keep.status === 200 && keep.json.managerUsernames.includes(tmUser), "admin edit without the field keeps managers", keep.json);
+    fdA.set("managerUsernames", JSON.stringify([]));
+    const clear = await api(`/api/events/${made.json.id}`, { method: "PUT", jar: admin, body: fdA, isForm: true });
+    ok(clear.status === 200 && clear.json.managerUsernames.length === 0, "admin can clear managers", clear.json);
+    // parent manager also covers the activities under it
+    const parent = await mk("Parent day", dayStr(5), { managerUsernames: JSON.stringify([tmUser]) });
+    const child = await mk("Child activity", dayStr(5), { parentEventId: String(parent.id) });
+    const wChild = await api(`/api/staff/events/${child.id}/roster`, { jar: tm });
+    ok(wChild.status === 200, "manager of the parent event also covers its activities", wChild.status);
+  }
+
   const anon = await prime(newJar());
   const memberJar = members[0].jar;
   const paths = ["/api/admin/reports/events", `/admin/print/event/${evChess}?view=registrations`, `/admin/print/event/${evChess}?view=attendance`, `/admin/print/event/${evChess}?view=points`];
@@ -135,10 +238,56 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
       ok(rr.status === 403, `${role} blocked ${p}`, rr.status);
     }
     const rT = await api(p, { jar: roles.tournament, raw: !isApi });
-    ok(rT.status === 200, `tournament role allowed ${p}`, rT.status);
+    const isPoints = p.includes("view=points");
+    ok(rT.status === (isPoints ? 403 : 200), isPoints ? `tournament role blocked from the Points sheet ${p}` : `tournament role allowed ${p}`, rT.status);
     const rAd = await api(p, { jar: admin, raw: !isApi });
     ok(rAd.status === 200, `admin allowed ${p}`, rAd.status);
   }
+
+  // ---------------------------------------------- tournament manager privacy
+  section("Tournament Manager: no points sheet, no mobile numbers");
+  const phoneOf = members[0].num.replace("RP", "");
+  const myPhone = `0106${String(Number(phoneOf)).padStart(7, "0")}`;
+  for (const lang of ["en", "ar"]) {
+    for (const view of ["registrations", "attendance"]) {
+      const tH = (await api(`/admin/print/event/${evChess}?view=${view}&lang=${lang}`, { jar: roles.tournament, raw: true })).text;
+      const aH = (await api(`/admin/print/event/${evChess}?view=${view}&lang=${lang}`, { jar: admin, raw: true })).text;
+      ok(!tH.includes(myPhone) && !/0106\d{7}/.test(tH), `tournament ${view}/${lang}: no mobile numbers`);
+      ok(!tH.includes(lang === "ar" ? "الهاتف" : ">Phone<"), `tournament ${view}/${lang}: no phone column header`);
+      ok(aH.includes(myPhone) && aH.includes(lang === "ar" ? "الهاتف" : ">Phone<"), `admin ${view}/${lang}: phone column still shown`);
+      ok(tH.includes("Amr Hassan") || tH.includes("عمرو"), `tournament ${view}/${lang}: names still listed`);
+    }
+  }
+  const tPts = await api(`/admin/print/event/${evChess}?view=points&lang=en`, { jar: roles.tournament, raw: true });
+  ok(tPts.status === 403 && !/Total points/.test(tPts.text), "tournament role: points sheet refused", tPts.status);
+  const aPts = await api(`/admin/print/event/${evChess}?view=points&lang=en`, { jar: admin, raw: true });
+  ok(aPts.status === 200 && /Total points awarded/.test(aPts.text), "admin: points sheet still works", aPts.status);
+  const rosterT = await api(`/api/staff/events/${evChess}/roster`, { jar: roles.tournament });
+  ok(rosterT.status === 200 && rosterT.json.length > 0 && rosterT.json.every((x) => x.phone === ""), "tournament role: roster API sends no phone numbers", rosterT.json && rosterT.json.slice(0, 2));
+  const rosterA = await api(`/api/staff/events/${evChess}/roster`, { jar: admin });
+  ok(rosterA.status === 200 && rosterA.json.some((x) => x.phone), "admin: roster API still has phone numbers");
+  const rosterS = await api(`/api/staff/events/${evChess}/roster`, { jar: roles.staff });
+  ok(rosterS.status === 200 && rosterS.json.some((x) => x.phone), "gate staff: roster API still has phone numbers");
+  ok(rosterT.json.every((x) => x.hasPhone === true), "tournament role: roster says a number exists (hasPhone) without sending it");
+  const waT = await api(`/api/staff/registrations/${rosterA.json[0].registrationId}/whatsapp-confirmed`, { method: "POST", jar: roles.tournament });
+  ok(waT.status === 200 && /^0106\d{7}$/.test(waT.json.phone || ""), "tournament role: can send WhatsApp (number returned only at send time)", waT.json);
+  const rosterT2 = await api(`/api/staff/events/${evChess}/roster`, { jar: roles.tournament });
+  ok(rosterT2.json.find((x) => x.registrationId === rosterA.json[0].registrationId).whatsappConfirmedAt, "WhatsApp-sent status recorded for the Tournament Manager");
+  // Separate message types: confirmation / 3-day reminder / event-day attendance check, each with its own sent status
+  const rid0 = rosterA.json[0].registrationId;
+  const waRem = await api(`/api/staff/registrations/${rid0}/whatsapp-confirmed`, { method: "POST", jar: roles.tournament, body: { type: "reminder" } });
+  ok(waRem.status === 200 && waRem.json.whatsappReminderAt && /^0106\d{7}$/.test(waRem.json.phone || ""), "WhatsApp type=reminder recorded (TM gets number only at send time)", waRem.json);
+  const waDay = await api(`/api/staff/registrations/${rid0}/whatsapp-confirmed`, { method: "POST", jar: admin, body: { type: "dayof" } });
+  ok(waDay.status === 200 && waDay.json.whatsappDayOfAt, "WhatsApp type=dayof recorded", waDay.json);
+  const waBad = await api(`/api/staff/registrations/${rid0}/whatsapp-confirmed`, { method: "POST", jar: admin, body: { type: "spam" } });
+  ok(waBad.status === 400, "WhatsApp unknown type rejected (400)", waBad.status);
+  const rosterT3 = await api(`/api/staff/events/${evChess}/roster`, { jar: roles.tournament });
+  const row0 = rosterT3.json.find((x) => x.registrationId === rid0);
+  ok(row0.whatsappConfirmedAt && row0.whatsappReminderAt && row0.whatsappDayOfAt, "roster returns all three WhatsApp sent timestamps", row0);
+  const row1 = rosterT3.json.find((x) => x.registrationId !== rid0);
+  ok(!row1 || (!row1.whatsappReminderAt && !row1.whatsappDayOfAt), "other registrations untouched by reminder/dayof", row1);
+  const waS = await api(`/api/staff/registrations/${rosterA.json[0].registrationId}/whatsapp-confirmed`, { method: "POST", jar: roles.staff });
+  ok(waS.status === 200 && waS.json.phone === undefined, "gate staff: send works and no phone echoed back", waS.json);
 
   // ------------------------------------------------------------ print sheets
   section("Printable sheets");
@@ -203,7 +352,7 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   const ageHtml = (await getHtml(`/admin/print/event/${evAge}?view=registrations&lang=en`)).text;
   const bar = (ageHtml.match(/<div class="agebar">.*?<\/div>/s) || [""])[0];
   const cnt = (label) => Number((bar.match(new RegExp(label.replace(/[()+]/g, "\\$&") + " <b>(\\d+)</b>")) || [])[1]);
-  ok(cnt("Kids (under 12)") === 2 && cnt("Teens (12–17)") === 1 && cnt("Adults (18–45)") === 1 && cnt("Seniors (46+)") === 1, "age breakdown counts (dependent counted in its OWN band)", bar);
+  ok(cnt("Kids (under 12)") === 2 && cnt("Youth (12–17)") === 1 && cnt("Adults (18–45)") === 1 && cnt("Seniors (46+)") === 1, "age breakdown counts (dependent counted in its OWN band)", bar);
   ok(cnt("Not set") === 0, "nobody is 'not set' now that age group is mandatory", bar);
   const depRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Dependent Child(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
   ok(depRow && !/Seniors/.test(depRow) && /Kids \(under 12\)/.test(depRow), "dependent shows its own age group, not the parent's", depRow.slice(0, 300));
