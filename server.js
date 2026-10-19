@@ -4659,6 +4659,57 @@ function computeFinalStandings(t) {
   t.status = "completed";
 }
 
+// Group-stage -> knockout seeding: the plain seed order can put a group's
+// winner against that same group's runner-up in round 1 (e.g. 2 groups,
+// 2 advance: seeds 1 and 4 are A1 and A2). Rematching a group so soon is
+// pointless, so this swaps players WITHIN the same finishing tier (winners
+// stay winners, runners-up stay runners-up, so seeding quality is kept)
+// until no first-round match is between two players of the same group,
+// whenever that is possible. `order` is index 0 = top seed.
+function separateSameGroupFirstRound(order, groupOf, tierOf) {
+  const out = [...order];
+  const n = out.length;
+  if (n < 4) return out;
+  const size = nextPowerOfTwo(n);
+  const slots = bracketSeedSlots(size);
+  const partner = {};
+  for (let i = 0; i < size; i += 2) {
+    partner[slots[i]] = slots[i + 1];
+    partner[slots[i + 1]] = slots[i];
+  }
+  const g = (seedNo) => groupOf[out[seedNo - 1]];
+  const clash = (a, b) => b <= n && a <= n && g(a) === g(b);
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    for (let s = 1; s <= n; s++) {
+      const p = partner[s];
+      if (!clash(s, p)) continue;
+      // Move the player at seed p (the lower-ranked of the pair keeps tier) to
+      // a same-tier seed q so that neither affected match is a clash.
+      const tier = tierOf[out[p - 1]];
+      for (let q = 1; q <= n; q++) {
+        if (q === p || q === s || tierOf[out[q - 1]] !== tier) continue;
+        const r = partner[q];
+        const X = out[q - 1];
+        const Y = out[p - 1];
+        // after the swap: seed p holds X, seed q holds Y
+        const gX = groupOf[X], gY = groupOf[Y];
+        const okP = gX !== g(s);
+        const okQ = r > n || r === p ? true : gY !== g(r);
+        const okQr = r === p ? gY !== gX : true;
+        if (okP && okQ && okQr) {
+          out[p - 1] = X;
+          out[q - 1] = Y;
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  return out;
+}
+
 // Builds a fresh knockout bracket from an ordered entrant-id list (index 0
 // = the top seed). Entrant counts that aren't a power of two get byes,
 // placed per the standard seeding above; byes are resolved immediately.
@@ -5398,7 +5449,7 @@ app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole(["tournam
   const entrants = reconcileSeedOrder(db, t);
   const validIds = new Set(entrants.map((e) => e.id));
   const order = Array.isArray(req.body.seedOrder) ? req.body.seedOrder : null;
-  if (!order || order.length !== entrants.length || !order.every((id) => validIds.has(id))) {
+  if (!order || order.length !== entrants.length || !order.every((id) => validIds.has(id)) || new Set(order).size !== order.length) {
     return res.status(400).json({ error: "seedOrder must contain exactly the current entrant ids, each once" });
   }
   t.seedOrder = order;
@@ -5548,6 +5599,26 @@ app.put("/api/admin/tournaments/:eventId/casual-status", requireStaffRole(["tour
   res.json({ tournament: serializeTournament(db, t) });
 });
 
+// Ordered knockout qualifiers (index 0 = top seed) from the current group
+// standings: group winners first, then runners-up (snake order), and so on,
+// then adjusted so nobody meets a player from their own group in round 1.
+function qualifiersFromGroups(t, standingsPerGroup) {
+  const qualifiers = [];
+  const groupOf = {};
+  const tierOf = {};
+  for (let rank = 0; rank < t.advancePerGroup; rank++) {
+    const tierGroups = rank % 2 === 0 ? standingsPerGroup : [...standingsPerGroup].reverse();
+    for (const standing of tierGroups) {
+      if (standing[rank]) {
+        qualifiers.push(standing[rank].entrantId);
+        tierOf[standing[rank].entrantId] = rank;
+      }
+    }
+  }
+  t.groups.forEach((grp, gi) => grp.entrantIds.forEach((id) => (groupOf[id] = gi)));
+  return separateSameGroupFirstRound(qualifiers, groupOf, tierOf);
+}
+
 app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
@@ -5565,7 +5636,21 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tourn
     return res.status(400).json({ error: "scoreA and scoreB must both be whole numbers of 0 or more" });
   }
   const winnerId = sa === sb ? null : sa > sb ? match.a : match.b;
+  const previous = match.result;
   match.result = { scoreA: sa, scoreB: sb, winnerId };
+  // Once the knockout stage has been drawn from these groups, a correction is
+  // only allowed if the same players still qualify - otherwise the bracket
+  // would silently disagree with the group tables.
+  if (t.knockout) {
+    const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)));
+    const nowQualified = new Set(qualifiersFromGroups(t, standingsPerGroup));
+    const inBracket = new Set(t.knockout.rounds[0].flatMap((m) => [m.a, m.b]).filter(Boolean));
+    const same = nowQualified.size === inBracket.size && [...nowQualified].every((id) => inBracket.has(id));
+    if (!same) {
+      match.result = previous;
+      return res.status(400).json({ error: "The knockout stage was already drawn from these group tables - this correction would change who qualifies. Delete and recreate the tournament if the result really has to change." });
+    }
+  }
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
@@ -5605,13 +5690,7 @@ app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole([
     return res.status(400).json({ error: `${undecided} group-stage match(es) still need a result before the knockout stage can be generated` });
   }
   const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)));
-  const qualifiers = [];
-  for (let rank = 0; rank < t.advancePerGroup; rank++) {
-    const tierGroups = rank % 2 === 0 ? standingsPerGroup : [...standingsPerGroup].reverse();
-    for (const standing of tierGroups) {
-      if (standing[rank]) qualifiers.push(standing[rank].entrantId);
-    }
-  }
+  const qualifiers = qualifiersFromGroups(t, standingsPerGroup);
   if (qualifiers.length < 2) return res.status(400).json({ error: "Not enough qualifiers to build a knockout stage" });
   buildKnockoutRounds(t, qualifiers);
   writeDb(db);
