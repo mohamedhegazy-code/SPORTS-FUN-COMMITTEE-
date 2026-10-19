@@ -4375,7 +4375,7 @@ const AGE_GROUP_EXPORT_LABELS = {
   under12: "Kids (Under 12)",
   "12to17": "Youth (12-17)",
   "18to45": "Adults (18-45)",
-  "46plus": "Seniors (46+)",
+  "46plus": "Masters (46+)",
 };
 const AGE_GROUP_IMPORT_LOOKUP = {
   "kids (under 12)": "under12",
@@ -4389,7 +4389,9 @@ const AGE_GROUP_IMPORT_LOOKUP = {
   "adults (18-45)": "18to45",
   "18-45": "18to45",
   adults: "18to45",
+  "masters (46+)": "46plus",
   "seniors (46+)": "46plus",
+  masters: "46plus",
   "46+": "46plus",
   seniors: "46plus",
 };
