@@ -1465,3 +1465,6 @@ html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
 .howto-item video { width: 100%; display: block; border-radius: 10px; background: #1b0707; aspect-ratio: 1280 / 900; }
 .howto-item figcaption { margin-top: 8px; font-weight: 600; font-size: 0.92rem; text-align: center; }
 .howto-item.howto-flash video { outline: 3px solid var(--gold, #c9a227); outline-offset: 3px; }
+
+.roster-table button.roster-btn.undo { background: #fff; border-color: #b36b00; color: #8a5200; }
+.roster-table button.roster-btn.undo:hover:not(:disabled) { background: #fff4e0; }

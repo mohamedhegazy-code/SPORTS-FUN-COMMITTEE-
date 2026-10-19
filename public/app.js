@@ -1067,6 +1067,11 @@ async function checkSession() {
 // Event assignments (managedByMe / managerUsernames) depend on who is signed in,
 // so the event list is fetched again once a staff session is known.
 async function refreshStaffEventScope() {
+  // Gate staff and Tournament Managers mostly need the people still to arrive:
+  // open their rosters on "Not checked in" (the chips switch it back).
+  if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && ["staff", "tournament"].includes(CURRENT_SESSION.staff.role)) {
+    ROSTER_FILTER = "pending";
+  }
   if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && ["admin", "tournament"].includes(CURRENT_SESSION.staff.role)) {
     try {
       await loadEvents();
@@ -9051,6 +9056,35 @@ function localTodayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+function canUndoCheckIn(ev) {
+  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff" || !["admin", "staff", "tournament"].includes(CURRENT_SESSION.staff.role)) return false;
+  if (!ev || !ev.date) return true;
+  const end = ev.endDate && ev.endDate > ev.date ? ev.endDate : ev.date;
+  return localTodayStr() <= end;
+}
+// Undo a mistaken check-in from either roster (Gate Scanner list or Event hub).
+async function undoCheckInClick(btn, msgId, reload) {
+  const name = btn.dataset.undoName || "";
+  if (!window.confirm(`${name}\n${t("confirmUndoCheckIn")}`)) return;
+  btn.disabled = true;
+  const msg = document.getElementById(msgId);
+  try {
+    await api("/api/checkin/undo", { method: "POST", body: JSON.stringify({ registrationId: Number(btn.dataset.undoReg) }) });
+    showMsg(msg, `${name} — ${t("undoCheckInDone")}`, true);
+    await reload();
+  } catch (err) {
+    showMsg(msg, err.message, false);
+    btn.disabled = false;
+  }
+}
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-undo-reg]");
+  if (btn) undoCheckInClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
+});
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-undo-reg]");
+  if (btn) undoCheckInClick(btn, "checkin-roster-msg", () => loadCheckinRoster(true));
+});
 function eventCheckInOpen(ev) {
   if (!ev || !ev.date) return true;
   const today = localTodayStr();
@@ -9127,7 +9161,11 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
       } else if (r.checkedIn) {
         const time = r.checkInAt ? new Date(r.checkInAt).toLocaleString() : "";
         status = `<span class="badge Approved">${t("scanSuccess")}</span><br/><small style="color:var(--muted);">${escapeAttr(time)}</small>`;
-        action = "";
+        // A wrong tap at the gate can be undone (gate staff, Tournament
+        // Managers, admins) until the event is over.
+        action = canUndoCheckIn(ev)
+          ? `<button class="roster-btn undo" data-undo-reg="${r.registrationId}" data-undo-name="${escapeAttr(r.attendeeName)}">${t("btnUndoCheckIn")}</button>`
+          : "";
       } else {
         status = "";
         action = checkInOpen
