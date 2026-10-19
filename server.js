@@ -3733,6 +3733,56 @@ app.post("/api/checkin/manual", requireStaffRole("staff"), requireRegistrationAc
   res.status(result.status).json(result.body);
 });
 
+// Staff: undo a mistaken check-in (e.g. the wrong row was tapped in the manual
+// list). Gate staff, Tournament Managers (for their own events) and admins may
+// do it; the Management role may not. The registration goes back to "not
+// checked in", its points disappear (points are always derived from
+// checkedIn - see registrationPoints), and the QR becomes valid again. Not
+// allowed once the event is over, and refused if reversing it would push the
+// member's pooled balance below zero (the points were already redeemed).
+app.post("/api/checkin/undo", requireStaffRole("staff"), requireRegistrationAccess, (req, res) => {
+  const db = req.db;
+  if (req.staff.role === "management") return res.status(403).json({ error: "Not allowed for this account" });
+  const registrationId = Number(req.body.registrationId);
+  const reg = db.registrations.find((r) => r.id === registrationId);
+  if (!reg) return res.status(404).json({ error: "Registration not found" });
+  if (!reg.checkedIn) return res.status(409).json({ error: "This person is not checked in" });
+  const event = db.events.find((e) => e.id === reg.eventId);
+  if (!event || eventEndDate(event) < todayStr()) {
+    return res.status(400).json({ error: "The event is over - a check-in can no longer be undone" });
+  }
+  const prevInAt = reg.checkInAt;
+  const pointsBefore = registrationPoints(db, reg);
+  reg.checkedIn = false;
+  delete reg.checkInAt;
+  const snap = balanceSnapshot(db, reg.membershipNumber);
+  if (snap) {
+    // Refuse if these points were already spent (Approved/Fulfilled), or are
+    // what makes a still-pending reward request affordable.
+    const pool = new Set(membersInPool(db, snap.poolingKey).map((m) => m.membershipNumber));
+    const pendingCosts = db.redemptions
+      .filter((r) => pool.has(r.membershipNumber) && r.status === "Pending")
+      .map((r) => (ladderTier(db, r.tier) || { pointsRequired: 0 }).pointsRequired);
+    const pendingNeed = pendingCosts.length ? Math.max(...pendingCosts) : 0;
+    const wasCovered = snap.balance + pointsBefore >= pendingNeed;
+    if (snap.balance < 0 || (pendingNeed > 0 && wasCovered && snap.balance < pendingNeed)) {
+      reg.checkedIn = true;
+      reg.checkInAt = prevInAt;
+      return res.status(409).json({ error: "Can't undo - these points were already redeemed, or a pending reward request depends on them" });
+    }
+  }
+  const attendeeName = reg.dependentName || (db.members[reg.membershipNumber] ? db.members[reg.membershipNumber].name : String(reg.membershipNumber));
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "checkin_undo",
+    details: `${attendeeName} — ${event.nameEn}`,
+  });
+  writeDb(db);
+  res.json({ success: true, attendeeName, registrationId: reg.id });
+});
+
 // admin: enter finishing positions after an event, and optionally attach the
 // after-event recap (a short write-up + extra photos) at the same time -
 // this is what makes the event show up with full details on the Annual
