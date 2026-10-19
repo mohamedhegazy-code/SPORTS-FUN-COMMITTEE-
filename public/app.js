@@ -6449,7 +6449,9 @@ function swissCreatePreviewHtml() {
   const minutes = Number(byIdVal("tourn-match-minutes")) || 0;
   const brk = Number(byIdVal("tourn-break-minutes")) || 0;
   const start = byIdVal("tourn-start-time");
-  const needed = Math.ceil(players / 2);
+  // With an odd number of players one sits out each round (bye) - that is
+  // not a game, so games per round = floor(players / 2).
+  const needed = Math.floor(players / 2);
   const waves = boards ? Math.max(1, Math.ceil(needed / boards)) : 1;
   const total = minutes ? rounds * waves * minutes + (rounds - 1) * brk : 0;
   let finish = "—";
@@ -6470,7 +6472,7 @@ function swissCreatePreviewHtml() {
       <div class="stat"><div class="n">${players}</div><div class="l">${activeLabel}</div></div>
       <div class="stat"><div class="n">${rounds}</div><div class="l">${t("swissStatRounds")}</div></div>
       <div class="stat"><div class="n">${needed}</div><div class="l">${t("swissStatBoardsNeeded")}</div></div>
-      <div class="stat"><div class="n">${players ? players * rounds / 2 : 0}</div><div class="l">${t("statTotalMatches")}</div></div>
+      <div class="stat"><div class="n">${needed * rounds}</div><div class="l">${t("statTotalMatches")}</div></div>
     </div>
     <div class="stat-row" style="margin-top:10px;">
       <div class="stat"><div class="n">${total ? tournMinutesLabel(total) : "—"}</div><div class="l">${t("statEstDuration")}</div></div>
