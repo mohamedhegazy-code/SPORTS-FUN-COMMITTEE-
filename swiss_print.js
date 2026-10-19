@@ -55,6 +55,7 @@ const CSS = `
   .hero .crest { width: 34mm; background: none; display: flex; align-items: center; justify-content: center; padding: 3mm; flex: none; }
   .hero .crest img { max-width: 100%; max-height: 32mm; object-fit: contain; }
   .hero .titles { flex: 1; text-align: center; padding: 4mm 5mm; display: flex; flex-direction: column; justify-content: center; gap: 1.5mm; }
+  .org { font-size: 9.5pt; font-weight: 700; color: #f3dfa0; letter-spacing: 0.02em; }
   .hero h1 { margin: 0; font-size: 24pt; line-height: 1.15; font-weight: 800; }
   .hero h2 { margin: 0; font-size: 13pt; font-weight: 700; color: var(--gold); letter-spacing: 0.04em; font-family: Anton, "Segoe UI", Arial, sans-serif; text-transform: uppercase; }
   .hero .organizer { margin-top: 1.5mm; font-size: 11pt; opacity: 0.95; }
@@ -134,7 +135,8 @@ function renderSwissPrint({ event, tn, view, roundNumber, lang, labels }) {
   const title = ar ? event.nameAr || event.nameEn : event.nameEn || event.nameAr;
   const subtitle = ar ? event.nameEn : event.nameAr;
   const firstTime = sw.rounds && sw.rounds[0] && sw.rounds[0].time ? sw.rounds[0].time : tn.schedule ? tn.schedule.startTime : event.startTime || "";
-  const crest = `<img src="/ahly-crest-clear.png" alt="" />`;
+  const crest = `<img src="/ahly-crest-logo.png" alt="" />`;
+  const orgLine = `<div class="org">${esc(L("النادي الأهلي · لجنة الرياضة الترفيهية – التجمع الخامس، القاهرة الجديدة", "Al Ahly Club · Recreational Sports Committee — Fifth Settlement, New Cairo"))}</div>`;
 
   const toolbar = `<div class="toolbar"><button id="print-btn" type="button">${esc(L("طباعة / حفظ PDF", "Print / Save as PDF"))}</button><span class="hint">${esc(L("اختر «حفظ كـ PDF» من نافذة الطباعة لحفظ نسخة", "Choose “Save as PDF” in the print dialog to keep a copy"))}</span></div>`;
   const checker = '<div class="checker"></div>';
@@ -185,6 +187,7 @@ function renderSwissPrint({ event, tn, view, roundNumber, lang, labels }) {
       <header class="hero">
         <div class="crest">${crest}</div>
         <div class="titles">
+          ${orgLine}
           <h1>${esc(title)}</h1>
           ${subtitle && subtitle !== title ? `<h2>${esc(subtitle)}</h2>` : ""}
           ${organizer ? `<div class="organizer">${esc(organizer)}</div>` : ""}
@@ -231,7 +234,7 @@ function renderSwissPrint({ event, tn, view, roundNumber, lang, labels }) {
     return `
     <section class="sheet" dir="${dir}">
       ${checker}
-      <div class="page-head">${crest}<div class="t"><h1>${esc(title)}</h1>
+      <div class="page-head">${crest}<div class="t">${orgLine}<h1>${esc(title)}</h1>
         <p>${esc(L("مواجهات الجولة", "Round pairings"))} ${round.number} / ${sw.totalRounds}${round.time ? " — " + esc(timeText(round.time, lang)) : ""}</p></div></div>
       <table class="grid boards"><thead><tr>
         <th class="c">${esc(L("اللوحة", "Board"))}</th>${waves ? `<th class="c">${esc(L("الطاولة والوقت", "Table & time"))}</th>` : ""}
@@ -262,7 +265,7 @@ function renderSwissPrint({ event, tn, view, roundNumber, lang, labels }) {
     return `
     <section class="sheet" dir="${dir}">
       ${checker}
-      <div class="page-head">${crest}<div class="t"><h1>${esc(title)}</h1>
+      <div class="page-head">${crest}<div class="t">${orgLine}<h1>${esc(title)}</h1>
         <p>${esc(sw.final ? L("النتائج النهائية والجوائز", "Final results & prizes") : L(`الترتيب بعد الجولة ${sw.generatedRounds} من ${sw.totalRounds}`, `Standings after round ${sw.generatedRounds} of ${sw.totalRounds}`))}</p></div></div>
       <div class="sec-title">${esc(sw.hasPrizes ? L("الجوائز", "Prizes") : L("المراكز الأولى", "Top finishers"))}<small>${esc(sw.hasPrizes ? sub("الجوائز", "PRIZES") : sub("المراكز الأولى", "TOP FINISHERS"))}</small></div>
       <div class="prizes">

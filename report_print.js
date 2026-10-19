@@ -34,6 +34,7 @@ const CSS = `
   .head { display: flex; align-items: center; gap: 5mm; padding: 4mm; color: #fff; background: linear-gradient(135deg, var(--red), var(--red-dark)); border-bottom: 1.2mm solid var(--gold); }
   .head img { height: 22mm; width: auto; background: none; padding: 0; flex: none; }
   .head .t { flex: 1; }
+  .head .org { font-size: 9pt; font-weight: 700; color: #f3dfa0; letter-spacing: 0.02em; margin-bottom: 1.5mm; opacity: 0.95; }
   .head h1 { margin: 0; font-size: 16pt; line-height: 1.2; }
   .head p { margin: 1mm 0 0; font-size: 10.5pt; color: #f3dfa0; font-weight: 700; }
   .strip { display: grid; grid-template-columns: repeat(4, 1fr); background: #f3ecd2; text-align: center; border-bottom: 0.4mm solid var(--border); }
@@ -147,7 +148,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
   }
 
   const body = `<section class="sheet" dir="${dir}">
-    <div class="head"><img src="/ahly-crest-clear.png" alt="" /><div class="t"><h1>${esc(title)}</h1><p>${esc(subtitle)} — ${esc(eventDate)}</p></div></div>
+    <div class="head"><img src="/ahly-crest-logo.png" alt="" /><div class="t"><div class="org">${esc(L("النادي الأهلي · لجنة الرياضة الترفيهية – التجمع الخامس، القاهرة الجديدة","Al Ahly Club · Recreational Sports Committee — Fifth Settlement, New Cairo"))}</div><h1>${esc(title)}</h1><p>${esc(subtitle)} — ${esc(eventDate)}</p></div></div>
     ${strip}
     ${table}
     <div class="sign"><div>${esc(L("المسؤول", "Prepared by"))}</div><div>${esc(L("ختم اللجنة", "Committee stamp"))}</div></div>
