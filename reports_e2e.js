@@ -49,9 +49,9 @@ async function mkEvent(nameEn, nameAr, { date = "2026-12-15", max } = {}) {
   return r.json.id;
 }
 const members = [];
-async function member(i, name) {
+async function member(i, name, ageGroup) {
   const jar = await prime(newJar());
-  const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `RP${i}`, name, password: "abc12345", phone: `0106${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main" } });
+  const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `RP${i}`, name, password: "abc12345", phone: `0106${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: ageGroup || "18to45" } });
   if (r.status !== 200 && r.status !== 201) throw new Error("signup failed " + JSON.stringify(r.json));
   const m = { jar, num: `RP${i}`, name, regs: {} };
   members.push(m);
@@ -172,12 +172,45 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   // points: checked-in only, total = sum of rows
   res = await getHtml(`/admin/print/event/${evChess}?view=points&lang=en`);
   const cells = [...res.text.matchAll(/<td class="num"><b>(\d+)<\/b><\/td>/g)].map((m) => Number(m[1]));
-  const total = Number((res.text.match(/class="total"><td colspan="5">[^<]*<\/td><td class="num">(\d+)<\/td>/) || [])[1]);
+  const total = Number((res.text.match(/class="total"><td colspan="6">[^<]*<\/td><td class="num">(\d+)<\/td>/) || [])[1]);
   ok(cells.length === 6, "points: 6 rows (checked-in only)", cells);
   ok(cells.every((n) => n >= 100), "points: each at least the participation award", cells);
   ok(total === cells.reduce((a, b) => a + b, 0) && total > 0, "points: total equals the sum of the rows", [total, cells]);
   res = await getHtml(`/admin/print/event/${evEmpty}?view=points&lang=en`);
   ok(/Nobody has been checked in/.test(res.text), "points: empty message");
+
+  // ---------------------------------------------------------------- age group
+  section("Age group column + breakdown");
+  const evAge = await mkEvent("Reports Age Groups", "فئات عمرية", { date: "2026-12-20" });
+  const aKids = await member(21, "Kid Player", "under12");
+  const aTeen = await member(22, "Teen Player", "12to17");
+  const aAdult = await member(23, "Adult Player", "18to45");
+  const aSenior = await member(24, "Senior Player", "46plus");
+  for (const m of [aKids, aTeen, aAdult, aSenior]) await register(m, evAge);
+  const dep = await api("/api/me/dependents", { method: "POST", jar: aSenior.jar, body: { name: "Dependent Child", relationship: "Son", ageGroup: "under12" } });
+  ok(dep.status === 201, "add dependent", dep.json);
+  const depId = dep.json && dep.json.dependents && dep.json.dependents[0] && dep.json.dependents[0].id;
+  const dr = await api("/api/register", { method: "POST", jar: aSenior.jar, body: { eventId: evAge, dependentId: depId } });
+  ok(dr.status === 200 || dr.status === 201, "register the dependent", dr.json);
+  for (const m of [aKids, aTeen, aAdult, aSenior]) await checkin(m, evAge);
+  for (const lang of ["en", "ar"]) {
+    for (const view of ["registrations", "attendance", "points"]) {
+      const h = (await getHtml(`/admin/print/event/${evAge}?view=${view}&lang=${lang}`)).text;
+      ok(h.includes(lang === "ar" ? "الفئة العمرية" : "Age group"), `age group header ${view}/${lang}`);
+      ok(h.includes(lang === "ar" ? "أطفال (أقل من 12)" : "Kids (under 12)") && h.includes(lang === "ar" ? "كبار السن (+46)" : "Seniors (46+)"), `age labels shown ${view}/${lang}`);
+    }
+  }
+  const ageHtml = (await getHtml(`/admin/print/event/${evAge}?view=registrations&lang=en`)).text;
+  const bar = (ageHtml.match(/<div class="agebar">.*?<\/div>/s) || [""])[0];
+  const cnt = (label) => Number((bar.match(new RegExp(label.replace(/[()+]/g, "\\$&") + " <b>(\\d+)</b>")) || [])[1]);
+  ok(cnt("Kids (under 12)") === 2 && cnt("Teens (12–17)") === 1 && cnt("Adults (18–45)") === 1 && cnt("Seniors (46+)") === 1, "age breakdown counts (dependent counted in its OWN band)", bar);
+  ok(cnt("Not set") === 0, "nobody is 'not set' now that age group is mandatory", bar);
+  const depRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Dependent Child(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
+  ok(depRow && !/Seniors/.test(depRow) && /Kids \(under 12\)/.test(depRow), "dependent shows its own age group, not the parent's", depRow.slice(0, 300));
+  const adultRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Adult Player(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
+  ok(/Adults \(18–45\)/.test(adultRow), "own registration shows own age group", adultRow.slice(0, 200));
+  const ptsHtml = (await getHtml(`/admin/print/event/${evAge}?view=points&lang=en`)).text;
+  ok(/class="total"><td colspan="6">/.test(ptsHtml), "points total row spans the new column");
   for (const v of ["registrations", "attendance"]) {
     res = await getHtml(`/admin/print/event/${evEmpty}?view=${v}&lang=ar`);
     ok(res.status === 200 && /لا يوجد مسجّلون بعد/.test(res.text), `${v}: empty event message (ar)`);
@@ -207,7 +240,7 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   ok(res.status === 404, "event without a Swiss tournament -> 404", res.status);
 
   // static assets the sheets rely on
-  for (const asset of ["/print.js", "/ahly-crest.png"]) {
+  for (const asset of ["/print.js", "/ahly-crest-logo.png"]) {
     const a = await api(asset, { jar: anon, raw: true });
     ok(a.status === 200, `asset ${asset}`, a.status);
   }

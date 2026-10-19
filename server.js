@@ -207,6 +207,14 @@ app.use((req, res, next) => {
 // never actually reaches this server can all still serve the old file
 // under "no-cache". no-store forbids caching the response at all, so
 // there's nothing left to revalidate or serve stale.
+// Server-side source files must never be downloadable, even if one is
+// uploaded into public/ by mistake (it happened once with server.js).
+app.use((req, res, next) => {
+  if (/^\/(server|swiss|swiss_print|report_print)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+    return res.status(404).end();
+  }
+  next();
+});
 app.use(
   express.static(path.join(__dirname, "public"), {
     setHeaders: (res) => res.setHeader("Cache-Control", "no-store"),
@@ -619,6 +627,9 @@ function readDb() {
       // just stored for reference.
       if (typeof dep.phone !== "string") dep.phone = "";
       if (typeof dep.email !== "string") dep.email = "";
+      // Age group is mandatory for new family members; ones added earlier
+      // simply have none yet ("") and get a non-blocking reminder.
+      if (typeof dep.ageGroup !== "string") dep.ageGroup = "";
     }
     // Terms & Conditions acceptance: a member who signed up before this
     // feature existed has never accepted anything, so they default to
@@ -1328,6 +1339,13 @@ app.post("/api/auth/signup", async (req, res) => {
   if (memberType === "follower" && !trimmedRelationship) {
     return res.status(400).json({ error: "Please choose your relationship to the main member" });
   }
+  // Age group is mandatory for every new registration (also drives the
+  // age-group breakdown on the printable event/tournament reports). Existing
+  // accounts created before this rule are NOT blocked - they just get a
+  // reminder in the app until they (or an admin) fill it in.
+  if (!sanitizeAgeGroup(ageGroup)) {
+    return res.status(400).json({ error: "Please select your age group" });
+  }
   // Optional - only a light shape check (not full RFC validation) so a
   // genuine typo like "ahmed@gmail" is caught without rejecting anything
   // unusual that's still a real address.
@@ -1402,7 +1420,7 @@ app.post("/api/auth/signup", async (req, res) => {
     relationshipToMain: memberType === "follower" ? trimmedRelationship : "",
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
     phone: trimmedPhone,
-    ageGroup: sanitizeAgeGroup(ageGroup) || (claiming ? claiming.ageGroup : "") || "",
+    ageGroup: sanitizeAgeGroup(ageGroup),
     email: trimmedEmail || (claiming ? claiming.email : "") || "",
     passwordHash,
     dependents: (claiming && claiming.dependents) || [],
@@ -2897,7 +2915,13 @@ app.patch("/api/me/profile", requireMember, (req, res) => {
   if (name) member.name = name;
   if (familyGroup !== undefined) member.familyGroup = familyGroup;
   if (phone !== undefined) member.phone = phone;
-  if (ageGroup !== undefined) member.ageGroup = sanitizeAgeGroup(ageGroup);
+  if (ageGroup !== undefined) {
+    // Age group is mandatory - it can be changed to another valid value but
+    // never cleared or set to something unknown.
+    const ag = sanitizeAgeGroup(ageGroup);
+    if (!ag) return res.status(400).json({ error: "Please select a valid age group" });
+    member.ageGroup = ag;
+  }
   writeDb(db);
   res.json({ member: publicMember(member) });
 });
@@ -2927,9 +2951,13 @@ app.post("/api/me/dependents", requireMember, (req, res) => {
   // format validation" handling as the member's own phone/email above.
   const phone = (req.body.phone || "").trim();
   const email = (req.body.email || "").trim();
+  // Mandatory: every family member needs an age group (used for the
+  // age-group breakdown on printed reports and age-based tournaments).
+  const depAgeGroup = sanitizeAgeGroup(req.body.ageGroup);
+  if (!depAgeGroup) return res.status(400).json({ error: "Please select an age group for this family member" });
   const member = db.members[req.member.membershipNumber];
   member.dependents = member.dependents || [];
-  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email };
+  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email, ageGroup: depAgeGroup };
   member.dependents.push(dependent);
   writeDb(db);
   res.status(201).json({ dependents: member.dependents });
@@ -2949,6 +2977,11 @@ app.put("/api/me/dependents/:id", requireMember, (req, res) => {
   if (typeof req.body.relationship === "string") dependent.relationship = req.body.relationship.trim();
   if (typeof req.body.phone === "string") dependent.phone = req.body.phone.trim();
   if (typeof req.body.email === "string") dependent.email = req.body.email.trim();
+  if (req.body.ageGroup !== undefined) {
+    const ag = sanitizeAgeGroup(req.body.ageGroup);
+    if (!ag) return res.status(400).json({ error: "Please select a valid age group for this family member" });
+    dependent.ageGroup = ag;
+  }
   writeDb(db);
   res.json({ dependents: member.dependents });
 });
@@ -3993,6 +4026,35 @@ app.post("/api/admin/members", requireStaffRole("admin"), async (req, res) => {
 // for events themselves) but should still share the family's points - link
 // them here once, or call this again with a third/fourth account to grow
 // the same group.
+// Lets an admin set/fix the age group of a member or one of their family
+// members (dependents) - used to fill in accounts created before age group
+// became mandatory. Body: { ageGroup, dependentId? }. Cannot be cleared.
+app.put("/api/admin/members/:membershipNumber/age-group", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const member = db.members[String(req.params.membershipNumber)];
+  if (!member) return res.status(404).json({ error: "Member not found" });
+  const ag = sanitizeAgeGroup(req.body.ageGroup);
+  if (!ag) return res.status(400).json({ error: "Please select a valid age group" });
+  let targetName = member.name;
+  if (req.body.dependentId !== undefined && req.body.dependentId !== null && req.body.dependentId !== "") {
+    const dep = (member.dependents || []).find((d) => d.id === Number(req.body.dependentId));
+    if (!dep) return res.status(404).json({ error: "Family member not found" });
+    dep.ageGroup = ag;
+    targetName = dep.name;
+  } else {
+    member.ageGroup = ag;
+  }
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.id,
+    actorName: req.staff.name,
+    action: "member.age_group_set",
+    details: `${targetName} (${member.membershipNumber}) -> ${ag}`,
+  });
+  writeDb(db);
+  res.json({ ok: true, ageGroup: ag });
+});
+
 app.post("/api/admin/members/:membershipNumber/family/link", requireStaffRole("admin"), (req, res) => {
   const db = req.db;
   const me = db.members[req.params.membershipNumber];
@@ -4254,7 +4316,7 @@ app.post(
           dependentsSkipped.push({ membershipNumber, name: row.name, reason: "Already a dependent on this account" });
           return;
         }
-        const dependent = { id: db.nextIds.dependent++, name: row.name, relationship: "" };
+        const dependent = { id: db.nextIds.dependent++, name: row.name, relationship: "", ageGroup: row.ageGroup || "" };
         member.dependents.push(dependent);
         dependentsAdded.push({ membershipNumber, name: row.name, primaryName: member.name });
       });
@@ -4404,6 +4466,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
           relationship: d.relationship || "",
           phone: d.phone || "",
           email: d.email || "",
+          ageGroup: d.ageGroup || "",
         })),
         registrations,
         registeredCount: registrations.filter((r) => !r.waitlisted).length,
@@ -6051,11 +6114,13 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), (req, r
         name: r.dependentName || (m ? m.name : "Member"),
         membershipNumber: r.membershipNumber,
         phone: m ? m.phone || "" : "",
-        // Age group is self-reported by the account holder, so it is only
-        // meaningful for their own registration - a dependent's registration
-        // (e.g. a child signed up by a parent) would otherwise inherit the
-        // parent's band, which is wrong. Leave it blank there.
-        ageGroup: !r.dependentName && m ? m.ageGroup || "" : "",
+        // A dependent's registration uses that family member's own age group
+        // (each dependent has one); otherwise the account holder's.
+        ageGroup: m
+          ? r.dependentName
+            ? ((m.dependents || []).find((d) => d.id === r.dependentId) || {}).ageGroup || ""
+            : m.ageGroup || ""
+          : "",
         registeredAt: r.registeredAt,
         waitlisted: !!r.waitlisted,
         checkedIn: !!r.checkedIn,
