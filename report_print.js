@@ -85,7 +85,7 @@ const CSS = `
 
 // rows: [{ name, membershipNumber, phone, registeredAt, waitlisted, checkedIn,
 //          earlyRegistration, position, points }]
-function renderEventSheet({ event, rows, view, lang, generatedAt }) {
+function renderEventSheet({ event, rows, view, lang, generatedAt, showPhone = true }) {
   const ar = lang === "ar";
   const dir = ar ? "rtl" : "ltr";
   const L = (a, e) => (ar ? a : e);
@@ -125,11 +125,11 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          <th class="c">${esc(L("الهاتف", "Phone"))}</th><th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("الحضور", "Present"))}</th><th>${esc(L("التوقيع", "Signature"))}</th></tr></thead><tbody>
+          ${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("الحضور", "Present"))}</th><th>${esc(L("التوقيع", "Signature"))}</th></tr></thead><tbody>
           ${list
             .map(
               (r, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              <td class="num">${esc(r.phone || "")}</td><td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="c">${r.checkedIn ? "✓" : ""}</td><td class="sig"></td></tr>`
+              ${showPhone ? `<td class="num">${esc(r.phone || "")}</td>` : ""}<td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="c">${r.checkedIn ? "✓" : ""}</td><td class="sig"></td></tr>`
             )
             .join("")}</tbody></table>`
       : `<p class="empty">${esc(L("لا يوجد مسجّلون بعد.", "No registrations yet."))}</p>`;
@@ -153,7 +153,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          <th class="c">${esc(L("الهاتف", "Phone"))}</th><th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("تاريخ التسجيل", "Registered"))}</th><th class="c">${esc(L("الحالة", "Status"))}</th></tr></thead><tbody>
+          ${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("تاريخ التسجيل", "Registered"))}</th><th class="c">${esc(L("الحالة", "Status"))}</th></tr></thead><tbody>
           ${list
             .map((r, i) => {
               const status = r.waitlisted
@@ -162,7 +162,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
                 ? `<span class="tag ok">${esc(L("حضر", "Checked in"))}</span>`
                 : `<span class="tag">${esc(L("مؤكد", "Confirmed"))}</span>`;
               return `<tr class="${r.waitlisted ? "wait" : ""}"><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              <td class="num">${esc(r.phone || "")}</td><td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${esc(shortDate(r.registeredAt))}</td><td class="c">${status}</td></tr>`;
+              ${showPhone ? `<td class="num">${esc(r.phone || "")}</td>` : ""}<td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${esc(shortDate(r.registeredAt))}</td><td class="c">${status}</td></tr>`;
             })
             .join("")}</tbody></table>`
       : `<p class="empty">${esc(L("لا يوجد مسجّلون بعد.", "No registrations yet."))}</p>`;

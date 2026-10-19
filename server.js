@@ -1916,7 +1916,7 @@ app.post("/api/me/chat/messages", requireMember, (req, res) => {
 // Admin side: an inbox listing every member with an active thread, plus
 // per-thread read/reply. Gated to admins (not plain staff) to match the
 // existing role split, where "Staff" is scoped to the Gate Scanner only.
-app.get("/api/staff/chats", requireStaffRole("admin"), (req, res) => {
+app.get("/api/staff/chats", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const latestByMember = new Map();
   for (const m of db.chatMessages) {
@@ -1941,13 +1941,13 @@ app.get("/api/staff/chats", requireStaffRole("admin"), (req, res) => {
   res.json(threads);
 });
 
-app.get("/api/staff/chats/unread-count", requireStaffRole("admin"), (req, res) => {
+app.get("/api/staff/chats/unread-count", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const count = db.chatMessages.filter((m) => m.sender === "member" && !m.readByStaff).length;
   res.json({ count });
 });
 
-app.get("/api/staff/chats/:membershipNumber", requireStaffRole("admin"), (req, res) => {
+app.get("/api/staff/chats/:membershipNumber", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const { membershipNumber } = req.params;
   if (!db.members[membershipNumber]) {
@@ -1964,7 +1964,7 @@ app.get("/api/staff/chats/:membershipNumber", requireStaffRole("admin"), (req, r
   res.json(chatThread(db, membershipNumber));
 });
 
-app.post("/api/staff/chats/:membershipNumber", requireStaffRole("admin"), (req, res) => {
+app.post("/api/staff/chats/:membershipNumber", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const { membershipNumber } = req.params;
   const { text } = req.body;
@@ -2046,19 +2046,19 @@ app.post("/api/public/inquiries", (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-app.get("/api/staff/inquiries", requireStaffRole("admin"), (req, res) => {
+app.get("/api/staff/inquiries", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const list = db.publicInquiries.slice().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
   res.json(list);
 });
 
-app.get("/api/staff/inquiries/unread-count", requireStaffRole("admin"), (req, res) => {
+app.get("/api/staff/inquiries/unread-count", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const count = db.publicInquiries.filter((i) => !i.read).length;
   res.json({ count });
 });
 
-app.post("/api/staff/inquiries/:id/read", requireStaffRole("admin"), (req, res) => {
+app.post("/api/staff/inquiries/:id/read", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const id = Number(req.params.id);
   const inquiry = db.publicInquiries.find((i) => i.id === id);
@@ -2070,7 +2070,7 @@ app.post("/api/staff/inquiries/:id/read", requireStaffRole("admin"), (req, res) 
   res.json(inquiry);
 });
 
-app.post("/api/staff/inquiries/:id/resolve", requireStaffRole("admin"), (req, res) => {
+app.post("/api/staff/inquiries/:id/resolve", requireStaffRole(["tournament"]), (req, res) => {
   const db = req.db;
   const id = Number(req.params.id);
   const inquiry = db.publicInquiries.find((i) => i.id === id);
@@ -3486,12 +3486,16 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), async (r
           registrationId: r.id,
           attendeeName: r.dependentName || (member ? member.name : r.membershipNumber),
           membershipNumber: r.membershipNumber,
-          phone: (dependent && dependent.phone) || (member ? member.phone : "") || "",
+          // The Tournament Manager never receives mobile numbers.
+          phone: req.staff.role === "tournament" ? "" : (dependent && dependent.phone) || (member ? member.phone : "") || "",
+          hasPhone: !!((dependent && dependent.phone) || (member && member.phone)),
           checkedIn: !!r.checkedIn,
           checkInAt: r.checkInAt,
           waitlisted: !!r.waitlisted,
           registeredAt: r.registeredAt || null,
           whatsappConfirmedAt: r.whatsappConfirmedAt || null,
+          whatsappReminderAt: r.whatsappReminderAt || null,
+          whatsappDayOfAt: r.whatsappDayOfAt || null,
           qrDataUrl: canShowQr ? await qrDataUrl(r) : null,
         };
       })
@@ -3511,9 +3515,24 @@ app.post("/api/staff/registrations/:id/whatsapp-confirmed", requireStaffRole("st
   const db = req.db;
   const reg = db.registrations.find((r) => r.id === Number(req.params.id));
   if (!reg) return res.status(404).json({ error: "Registration not found" });
-  reg.whatsappConfirmedAt = new Date().toISOString();
+  // Three kinds of WhatsApp message, each tracked separately: the booking
+  // confirmation, a reminder before the event, and an event-day attendance
+  // check. (The date windows for reminder / event day are enforced in the UI.)
+  const WA_FIELDS = { confirm: "whatsappConfirmedAt", reminder: "whatsappReminderAt", dayof: "whatsappDayOfAt" };
+  const waType = req.body && req.body.type !== undefined ? String(req.body.type) : "confirm";
+  if (!WA_FIELDS[waType]) return res.status(400).json({ error: "Unknown message type" });
+  reg[WA_FIELDS[waType]] = new Date().toISOString();
   writeDb(db);
-  res.json({ whatsappConfirmedAt: reg.whatsappConfirmedAt });
+  const out = { whatsappConfirmedAt: reg.whatsappConfirmedAt || null, whatsappReminderAt: reg.whatsappReminderAt || null, whatsappDayOfAt: reg.whatsappDayOfAt || null };
+  // The Tournament Manager never receives phone numbers in lists or sheets,
+  // but can still send the WhatsApp confirmation: the number is handed back
+  // here only at the moment of sending, just to open the chat link.
+  if (req.staff.role === "tournament") {
+    const member = db.members[reg.membershipNumber];
+    const dependent = reg.dependentId && member ? (member.dependents || []).find((d) => d.id === reg.dependentId) : null;
+    out.phone = (dependent && dependent.phone) || (member ? member.phone : "") || "";
+  }
+  res.json(out);
 });
 
 // Staff-only: manual check-in by picking a row on that roster, for a member
@@ -6105,6 +6124,12 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), (req, r
   const event = db.events.find((e) => e.id === eventId);
   if (!event) return res.status(404).type("text/plain").send("No such event");
   const view = ["registrations", "attendance", "points"].includes(req.query.view) ? req.query.view : "registrations";
+  // Tournament Manager restrictions: no Points sheet and no mobile numbers
+  // on the printed sheets. Admin sees everything.
+  const isAdminViewer = req.staff.role === "admin";
+  if (view === "points" && !isAdminViewer) {
+    return res.status(403).type("text/plain").send("The Points sheet is available to the admin only");
+  }
   const lang = req.query.lang === "en" ? "en" : "ar";
   const rows = db.registrations
     .filter((r) => r.eventId === eventId)
@@ -6113,7 +6138,7 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), (req, r
       return {
         name: r.dependentName || (m ? m.name : "Member"),
         membershipNumber: r.membershipNumber,
-        phone: m ? m.phone || "" : "",
+        phone: isAdminViewer && m ? m.phone || "" : "",
         // A dependent's registration uses that family member's own age group
         // (each dependent has one); otherwise the account holder's.
         ageGroup: m
@@ -6130,7 +6155,7 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), (req, r
       };
     });
   res.set("Cache-Control", "no-store");
-  res.type("html").send(renderEventSheet({ event, rows, view, lang, generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC" }));
+  res.type("html").send(renderEventSheet({ event, rows, view, lang, showPhone: isAdminViewer, generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC" }));
 });
 
 // Staff correction of a player's Women / Juniors ranking categories (e.g.
