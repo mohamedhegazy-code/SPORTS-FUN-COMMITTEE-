@@ -1407,3 +1407,48 @@ html[dir="rtl"] .swiss-black { text-align: start; }
 .wa-bulk-bar button.roster-btn.reminder, #wa-bulk-open.reminder { background: #d98200; border-color: #b36b00; }
 .wa-bulk-bar button.roster-btn.dayof, #wa-bulk-open.dayof { background: #6f42c1; border-color: #5a32a3; }
 .wa-bulk-bar button.roster-btn:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; cursor: not-allowed; }
+
+.chat-bubble .edited-tag { font-style: italic; margin-inline-start: 4px; }
+.chat-bubble .chat-edit-link { background: none; border: 0; padding: 0; margin: 0 0 0 8px; color: inherit; opacity: 0.85; text-decoration: underline; font-size: 0.7rem; cursor: pointer; width: auto; }
+html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
+.chat-edit-box textarea { width: 100%; min-height: 60px; }
+.chat-edit-box .chat-edit-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.inq-reply { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: #fff; }
+.inq-reply .meta { font-size: 0.75rem; color: var(--muted); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.inq-reply .text { white-space: pre-wrap; }
+.inq-reply .ch { font-size: 0.68rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #e8f4f1; color: #0e7266; }
+.inq-reply .ch.email { background: #e8eefb; color: #1a4aa0; }
+.inq-reply .ch.note { background: #eee; color: #555; }
+.inq-reply .inq-reply-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.inq-reply .inq-reply-actions button, .inquiry-reply-btn { margin: 0; width: auto; }
+#inquiry-reply-wa-btn, .inq-reply button.roster-btn.wa { background: #128c7e; border: 1px solid #0e7266; color: #fff; border-radius: 8px; font-weight: 700; padding: 9px 14px; cursor: pointer; }
+
+/* ---- Compact roster (100+ members): one short row each, filters, sticky header ---- */
+.roster-toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin: 0 0 8px; }
+.roster-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.roster-filter { margin: 0; width: auto; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: #fff; color: var(--ink, #222); font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+.roster-filter b { margin-inline-start: 4px; color: var(--muted); }
+.roster-filter.active { background: var(--red); border-color: var(--red); color: #fff; }
+.roster-filter.active b { color: #fff; }
+.roster-toolbar .wa-bulk-bar { margin: 0; }
+.roster-date-banner { margin: 0 0 6px; font-size: 0.8rem; color: #8a5a00; background: #fff6e0; border: 1px solid #f0d9a0; border-radius: 8px; padding: 5px 10px; }
+.roster-qr-note { margin: 0 0 6px; }
+.roster-scroll { max-height: 72vh; overflow: auto; }
+.roster-table thead th { position: sticky; top: 0; z-index: 2; background: #faf8f3; box-shadow: 0 1px 0 var(--border); }
+.roster-table td { padding-top: 6px; padding-bottom: 6px; }
+.roster-table .roster-actions { flex-direction: row; flex-wrap: nowrap; min-width: 0; gap: 6px; }
+.roster-table td:last-child { min-width: 0; }
+.roster-table td.wa-cell { min-width: 0; }
+.roster-table button.roster-btn { white-space: nowrap; padding: 5px 10px; }
+.roster-table .roster-qr.compact { flex-direction: row; gap: 6px; min-width: 0; width: auto; }
+.roster-table .roster-qr.compact .roster-qr-thumb { width: 38px; height: 38px; padding: 1px; }
+.roster-table .roster-qr.compact a.roster-qr-download { width: auto; display: inline-block; padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; }
+.wa-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.roster-table button.roster-btn.wa.wa-chip { width: auto; margin: 0; padding: 5px 9px; font-size: 0.74rem; }
+.roster-table button.roster-btn.wa.wa-chip.sent { background: #fff; color: #0e7266; border-color: #0e7266; }
+.roster-table button.roster-btn.wa.wa-chip.reminder.sent { color: #b36b00; border-color: #b36b00; }
+.roster-table button.roster-btn.wa.wa-chip.dayof.sent { color: #5a32a3; border-color: #5a32a3; }
+.roster-table button.roster-btn.wa.wa-chip:disabled { background: #eceeec; color: #8b918b; border-color: #d4d8d4; }
+.roster-table button.roster-btn.wa.wa-chip.sent:disabled { background: #fff; }
+.inquiry-reply-btn { white-space: nowrap; }
+#inquiry-reply-wa-btn { font-size: 0.95rem; }

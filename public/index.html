@@ -1025,6 +1025,14 @@
             <h3 id="inquiry-detail-name" style="margin-bottom:4px;"></h3>
             <p id="inquiry-detail-contact" style="color:var(--muted);font-size:0.85rem;margin-bottom:8px;"></p>
             <p id="inquiry-detail-message" style="white-space:pre-wrap;margin-bottom:10px;"></p>
+            <div id="inquiry-replies" style="margin-bottom:10px;"></div>
+            <label for="inquiry-reply-input" data-i18n="inquiryReplyLabel">Your reply</label>
+            <textarea id="inquiry-reply-input" rows="3"></textarea>
+            <div style="margin:8px 0 14px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="roster-btn wa inquiry-reply-btn" id="inquiry-reply-wa-btn" data-i18n="btnReplyWhatsapp">Reply via WhatsApp</button>
+              <button class="primary inquiry-reply-btn" id="inquiry-reply-email-btn" data-i18n="btnReplyEmail">Reply via email</button>
+              <button class="secondary inquiry-reply-btn" id="inquiry-reply-save-btn" data-i18n="btnReplySaveOnly">Save reply only</button>
+            </div>
             <label data-i18n="fieldStaffNote">Internal note (optional)</label>
             <textarea id="inquiry-note-input" rows="2"></textarea>
             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">

@@ -469,6 +469,13 @@ function setLang(lang) {
   renderPublicCommittee(COMMITTEE_PUBLIC_DATA);
   renderCommitteeAdminList();
   renderReports();
+  // Rosters are built with t() at render time - redraw them in the new language
+  try {
+    if (CHECKIN_ROSTER && CHECKIN_ROSTER.length) renderCheckinRoster();
+    if (HUB_ROSTER && HUB_ROSTER.length && HUB_EVENT_ID) document.getElementById("hub-checkin-search").dispatchEvent(new Event("input"));
+  } catch (e) {
+    /* roster not mounted yet */
+  }
   {
     const committeeTierSel = document.getElementById("committee-tier");
     if (committeeTierSel) committeeTierSel.innerHTML = committeeTierSelectHtml(committeeTierSel.value || COMMITTEE_TIERS[0]);
@@ -2724,9 +2731,11 @@ async function cancelMyRegistration(regId) {
 // their thread, or "staff" when rendering an admin's view of a member's
 // thread - whichever sender value counts as "my" message gets the "mine"
 // bubble style.
-function renderChatBubbles(containerId, messages, mineSender) {
+function renderChatBubbles(containerId, messages, mineSender, opts) {
   const wrap = document.getElementById(containerId);
   if (!wrap) return;
+  const editable = !!(opts && opts.editable);
+  const editingId = opts && opts.editingId;
   if (!messages.length) {
     wrap.innerHTML = `<div class="chat-empty">${escapeAttr(t("chatEmpty"))}</div>`;
     return;
@@ -2735,9 +2744,20 @@ function renderChatBubbles(containerId, messages, mineSender) {
     .map((m) => {
       const mine = m.sender === mineSender;
       const time = new Date(m.sentAt).toLocaleString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US");
+      const editedTag = m.editedAt ? `<span class="edited-tag">(${escapeAttr(t("editedTag"))})</span>` : "";
+      if (editable && mine && m.id === editingId) {
+        return `<div class="chat-bubble mine chat-edit-box" style="width:78%;">
+          <textarea id="chat-edit-input" rows="2">${escapeAttr(m.text)}</textarea>
+          <div class="chat-edit-actions">
+            <button type="button" class="secondary" data-chat-edit-save="${m.id}">${escapeAttr(t("btnSaveEdit"))}</button>
+            <button type="button" class="secondary" data-chat-edit-cancel="1">${escapeAttr(t("btnCancel"))}</button>
+          </div>
+        </div>`;
+      }
+      const editLink = editable && mine ? `<button type="button" class="chat-edit-link" data-chat-edit="${m.id}">${escapeAttr(t("btnEdit"))}</button>` : "";
       return `<div class="chat-bubble ${mine ? "mine" : "theirs"}">
         <div class="text">${escapeAttr(m.text)}</div>
-        <div class="meta">${escapeAttr(m.senderName)} · ${escapeAttr(time)}</div>
+        <div class="meta">${escapeAttr(m.senderName)} · ${escapeAttr(time)}${editedTag}${editLink}</div>
       </div>`;
     })
     .join("");
@@ -2832,6 +2852,7 @@ async function loadChatThreadsList() {
 }
 async function openChatThread(membershipNumber) {
   ADMIN_CHAT_OPEN_MEMBERSHIP = membershipNumber;
+  ADMIN_CHAT_EDIT_ID = null;
   document.getElementById("chat-thread-panel").classList.remove("hidden");
   const thread = CHAT_THREADS_CACHE.find((th) => th.membershipNumber === membershipNumber);
   document.getElementById("chat-thread-panel-title").textContent = thread
@@ -2840,11 +2861,49 @@ async function openChatThread(membershipNumber) {
   await refreshOpenAdminChatThread();
   loadChatThreadsList();
 }
+let ADMIN_CHAT_MESSAGES = [];
+let ADMIN_CHAT_EDIT_ID = null;
+document.getElementById("admin-chat-thread").addEventListener("click", async (e) => {
+  const rerender = () => renderChatBubbles("admin-chat-thread", ADMIN_CHAT_MESSAGES, "staff", { editable: true, editingId: ADMIN_CHAT_EDIT_ID });
+  const editBtn = e.target.closest("[data-chat-edit]");
+  if (editBtn) {
+    ADMIN_CHAT_EDIT_ID = Number(editBtn.dataset.chatEdit);
+    rerender();
+    const inp = document.getElementById("chat-edit-input");
+    if (inp) inp.focus();
+    return;
+  }
+  if (e.target.closest("[data-chat-edit-cancel]")) {
+    ADMIN_CHAT_EDIT_ID = null;
+    rerender();
+    return;
+  }
+  const saveBtn = e.target.closest("[data-chat-edit-save]");
+  if (saveBtn) {
+    const text = document.getElementById("chat-edit-input").value.trim();
+    const msg = document.getElementById("admin-chat-msg");
+    if (!text) return showMsg(msg, t("errReplyEmpty"), false);
+    saveBtn.disabled = true;
+    try {
+      await api(`/api/staff/chats/${encodeURIComponent(ADMIN_CHAT_OPEN_MEMBERSHIP)}/messages/${saveBtn.dataset.chatEditSave}`, {
+        method: "PUT",
+        body: JSON.stringify({ text }),
+      });
+      ADMIN_CHAT_EDIT_ID = null;
+      await refreshOpenAdminChatThread();
+    } catch (err) {
+      showMsg(msg, err.message, false);
+      saveBtn.disabled = false;
+    }
+  }
+});
 async function refreshOpenAdminChatThread() {
   if (!ADMIN_CHAT_OPEN_MEMBERSHIP) return;
   try {
     const messages = await api("/api/staff/chats/" + encodeURIComponent(ADMIN_CHAT_OPEN_MEMBERSHIP));
-    renderChatBubbles("admin-chat-thread", messages, "staff");
+    ADMIN_CHAT_MESSAGES = messages;
+    // Don't wipe a reply that is being edited when the poll refreshes the thread.
+    if (!ADMIN_CHAT_EDIT_ID) renderChatBubbles("admin-chat-thread", messages, "staff", { editable: true });
   } catch (e) {
     /* ignore - next poll will retry */
   }
@@ -2919,7 +2978,7 @@ async function loadInquiriesList() {
         .map(
           (inq) => `<div class="chat-thread-item ${inq.id === ADMIN_INQUIRY_OPEN_ID ? "active" : ""}" data-id="${inq.id}">
         <div>
-          <div class="name">${escapeAttr(inq.name)}${inq.resolved ? ` <span style="color:var(--muted);font-weight:400;">(${escapeAttr(t("inquiryResolvedLabel"))})</span>` : ""}</div>
+          <div class="name">${escapeAttr(inq.name)}${inq.resolved ? ` <span style="color:var(--muted);font-weight:400;">(${escapeAttr(t("inquiryResolvedLabel"))})</span>` : ""}${inq.replies && inq.replies.length ? ` <span style="color:#0e7266;font-weight:400;">&#8617; ${escapeAttr(t("inquiryRepliedLabel"))}</span>` : ""}</div>
           <div class="snippet">${escapeAttr(inq.message)}</div>
         </div>
         ${!inq.read ? `<div class="unread-dot">&bull;</div>` : ""}
@@ -2947,6 +3006,9 @@ async function openInquiryDetail(id) {
     contactBits + " · " + new Date(inquiry.submittedAt).toLocaleString();
   document.getElementById("inquiry-detail-message").textContent = inquiry.message;
   document.getElementById("inquiry-note-input").value = inquiry.staffNote || "";
+  document.getElementById("inquiry-reply-input").value = "";
+  INQUIRY_EDIT_REPLY_ID = null;
+  renderInquiryReplies(inquiry);
   const toggleBtn = document.getElementById("inquiry-toggle-resolved-btn");
   toggleBtn.textContent = inquiry.resolved ? t("btnMarkUnresolved") : t("btnMarkResolved");
   document.getElementById("inquiry-detail-msg").textContent = "";
@@ -2960,6 +3022,118 @@ async function openInquiryDetail(id) {
     }
   }
 }
+// ---- inquiry replies: send (WhatsApp / email / save only) and edit ----
+let INQUIRY_EDIT_REPLY_ID = null;
+function inquiryChannelLabel(ch) {
+  return ch === "whatsapp" ? t("chReplyWhatsapp") : ch === "email" ? t("chReplyEmail") : t("chReplyNote");
+}
+function inquiryMailtoHref(inquiry, text) {
+  return `mailto:${encodeURIComponent(inquiry.email)}?subject=${encodeURIComponent(t("replyEmailSubject"))}&body=${encodeURIComponent(text)}`;
+}
+function openReplyChannel(inquiry, channel, text) {
+  if (channel === "whatsapp") window.open(waLink(inquiry.phone, text), "_blank", "noopener");
+  else if (channel === "email") {
+    const a = document.createElement("a");
+    a.href = inquiryMailtoHref(inquiry, text);
+    a.click();
+  }
+}
+function renderInquiryReplies(inquiry) {
+  const wrap = document.getElementById("inquiry-replies");
+  const replies = inquiry.replies || [];
+  document.getElementById("inquiry-reply-wa-btn").classList.toggle("hidden", !inquiry.phone);
+  document.getElementById("inquiry-reply-email-btn").classList.toggle("hidden", !inquiry.email);
+  if (!replies.length) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const loc = currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US";
+  wrap.innerHTML =
+    `<h4 style="margin:0 0 6px;">${escapeAttr(t("inquiryRepliesTitle"))}</h4>` +
+    replies
+      .map((r) => {
+        const editedTag = r.editedAt ? `<span><i>(${escapeAttr(t("editedTag"))} ${escapeAttr(new Date(r.editedAt).toLocaleString(loc))})</i></span>` : "";
+        const meta = `<span class="ch ${r.channel}">${escapeAttr(inquiryChannelLabel(r.channel))}</span><span>${escapeAttr(r.sentBy || "")} · ${escapeAttr(new Date(r.sentAt).toLocaleString(loc))}</span>${editedTag}`;
+        if (r.id === INQUIRY_EDIT_REPLY_ID) {
+          return `<div class="inq-reply">
+            <textarea id="inquiry-reply-edit-input" rows="3">${escapeAttr(r.text)}</textarea>
+            <div class="inq-reply-actions">
+              <button type="button" class="primary" data-reply-save="${r.id}">${escapeAttr(t("btnSaveEdit"))}</button>
+              ${inquiry.phone ? `<button type="button" class="roster-btn wa" data-reply-save="${r.id}" data-resend="whatsapp">${escapeAttr(t("btnSaveResendWa"))}</button>` : ""}
+              ${inquiry.email ? `<button type="button" class="secondary" data-reply-save="${r.id}" data-resend="email">${escapeAttr(t("btnSaveResendEmail"))}</button>` : ""}
+              <button type="button" class="secondary" data-reply-cancel="1">${escapeAttr(t("btnCancel"))}</button>
+            </div>
+          </div>`;
+        }
+        return `<div class="inq-reply"><div class="text">${escapeAttr(r.text)}</div>
+          <div class="meta">${meta}</div>
+          <div class="inq-reply-actions"><button type="button" class="secondary" data-reply-edit="${r.id}">${escapeAttr(t("btnEdit"))}</button></div>
+        </div>`;
+      })
+      .join("");
+}
+async function sendInquiryReply(channel) {
+  if (!ADMIN_INQUIRY_OPEN_ID) return;
+  const inquiry = INQUIRIES_CACHE.find((i) => i.id === ADMIN_INQUIRY_OPEN_ID);
+  if (!inquiry) return;
+  const msg = document.getElementById("inquiry-detail-msg");
+  const input = document.getElementById("inquiry-reply-input");
+  const text = input.value.trim();
+  if (!text) return showMsg(msg, t("errReplyEmpty"), false);
+  try {
+    // Record first, so the reply is kept even if the WhatsApp/email window is closed unsent.
+    const result = await api(`/api/staff/inquiries/${inquiry.id}/replies`, { method: "POST", body: JSON.stringify({ text, channel }) });
+    Object.assign(inquiry, result);
+    input.value = "";
+    renderInquiryReplies(inquiry);
+    openReplyChannel(inquiry, channel, text);
+    showMsg(msg, t("replySavedMsg"), true);
+    loadInquiriesList();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+document.getElementById("inquiry-reply-wa-btn").addEventListener("click", () => sendInquiryReply("whatsapp"));
+document.getElementById("inquiry-reply-email-btn").addEventListener("click", () => sendInquiryReply("email"));
+document.getElementById("inquiry-reply-save-btn").addEventListener("click", () => sendInquiryReply("note"));
+document.getElementById("inquiry-replies").addEventListener("click", async (e) => {
+  const inquiry = INQUIRIES_CACHE.find((i) => i.id === ADMIN_INQUIRY_OPEN_ID);
+  if (!inquiry) return;
+  const edit = e.target.closest("[data-reply-edit]");
+  if (edit) {
+    INQUIRY_EDIT_REPLY_ID = Number(edit.dataset.replyEdit);
+    renderInquiryReplies(inquiry);
+    return;
+  }
+  if (e.target.closest("[data-reply-cancel]")) {
+    INQUIRY_EDIT_REPLY_ID = null;
+    renderInquiryReplies(inquiry);
+    return;
+  }
+  const save = e.target.closest("[data-reply-save]");
+  if (save) {
+    const msg = document.getElementById("inquiry-detail-msg");
+    const text = document.getElementById("inquiry-reply-edit-input").value.trim();
+    if (!text) return showMsg(msg, t("errReplyEmpty"), false);
+    const resend = save.dataset.resend || "";
+    save.disabled = true;
+    try {
+      const result = await api(`/api/staff/inquiries/${inquiry.id}/replies/${save.dataset.replySave}`, {
+        method: "PUT",
+        body: JSON.stringify({ text, resent: !!resend }),
+      });
+      Object.assign(inquiry, result);
+      INQUIRY_EDIT_REPLY_ID = null;
+      renderInquiryReplies(inquiry);
+      if (resend) openReplyChannel(inquiry, resend, text);
+      showMsg(msg, t("replySavedMsg"), true);
+    } catch (err) {
+      showMsg(msg, err.message, false);
+      save.disabled = false;
+    }
+  }
+});
+
 document.getElementById("inquiry-save-note-btn").addEventListener("click", async () => {
   if (!ADMIN_INQUIRY_OPEN_ID) return;
   const inquiry = INQUIRIES_CACHE.find((i) => i.id === ADMIN_INQUIRY_OPEN_ID);
@@ -8717,31 +8891,30 @@ function waStatusCellHtml(r, eventName, eventDate, ev) {
   }
   const attending = !r.waitlisted && !r.checkedIn;
   const types = [
-    { key: "confirm", field: "whatsappConfirmedAt", label: "waTypeConfirm", build: waConfirmMessage, open: true, cls: "wa" },
+    { key: "confirm", field: "whatsappConfirmedAt", label: "waTypeConfirm", short: "waShortConfirm", build: waConfirmMessage, open: true, cls: "wa" },
   ];
   if (attending) {
-    types.push({ key: "reminder", field: "whatsappReminderAt", label: "waTypeReminder", build: waReminderMessage, open: eventReminderOpen(ev), cls: "wa reminder", tip: "waOnlyBeforeEvent" });
-    types.push({ key: "dayof", field: "whatsappDayOfAt", label: "waTypeDayOf", build: waDayOfMessage, open: eventCheckInOpen(ev), cls: "wa dayof", tip: "checkinOnlyOnEventDate" });
+    types.push({ key: "reminder", field: "whatsappReminderAt", label: "waTypeReminder", short: "waShortReminder", build: waReminderMessage, open: eventReminderOpen(ev), cls: "wa reminder", tip: "waOnlyBeforeEvent" });
+    types.push({ key: "dayof", field: "whatsappDayOfAt", label: "waTypeDayOf", short: "waShortDayOf", build: waDayOfMessage, open: eventCheckInOpen(ev), cls: "wa dayof", tip: "checkinOnlyOnEventDate" });
   }
-  return types
+  const chips = types
     .map((ty) => {
       const sentAt = r[ty.field];
       const message = ty.build(r.attendeeName, eventName || "", eventDate || "");
       const href = hasPhoneNow ? waLink(r.phone, message) : "";
-      const pill = sentAt
-        ? `<span class="wa-status-pill sent">${escapeAttr(t("waStatusSent"))}</span> <small style="color:var(--muted);">${escapeAttr(new Date(sentAt).toLocaleString())}</small>`
-        : `<span class="wa-status-pill not-sent">${escapeAttr(t("waStatusNotSent"))}</span>`;
-      const btnLabel = sentAt ? t("btnResendWhatsappConfirm") : ty.key === "confirm" ? t("btnSendWhatsappConfirm") : t("btnSendWhatsappMsg");
+      const label = (sentAt ? "\u2713 " : "") + t(ty.short);
+      const cls = `roster-btn wa-chip ${ty.cls}${sentAt ? " sent" : ""}`;
       const dataAttrs = `data-wa-confirm="${r.registrationId}" data-wa-type="${ty.key}" ${href ? `data-wa-href="${escapeAttr(href)}"` : `data-wa-msg="${escapeAttr(message)}"`}`;
-      const btn = ty.open
-        ? `<button class="roster-btn ${ty.cls}" ${dataAttrs}>${escapeAttr(btnLabel)}</button>`
-        : `<button class="roster-btn ${ty.cls}" disabled title="${escapeAttr(t(ty.tip))}">${escapeAttr(btnLabel)}</button>`;
-      const hint =
-        ty.key === "confirm" && r.qrDataUrl ? `<small class="wa-hint">${escapeAttr(t("waConfirmQrHint"))}</small>` : "";
-      const note = !ty.open ? `<small class="wa-hint">${escapeAttr(t(ty.tip))}</small>` : "";
-      return `<div class="wa-row"><div class="wa-row-head"><b>${escapeAttr(t(ty.label))}</b></div><div>${pill}</div>${btn}${note}${hint}</div>`;
+      if (!ty.open) {
+        return `<button class="${cls}" disabled title="${escapeAttr(t(ty.label) + " - " + t(ty.tip))}">${escapeAttr(label)}</button>`;
+      }
+      const title = sentAt
+        ? `${t(ty.label)} - ${t("waStatusSent")} ${new Date(sentAt).toLocaleString()} (${t("btnResendWhatsappConfirm")})`
+        : `${t(ty.label)} - ${t("waStatusNotSent")}`;
+      return `<button class="${cls}" ${dataAttrs} title="${escapeAttr(title)}">${escapeAttr(label)}</button>`;
     })
     .join("");
+  return `<div class="wa-chips">${chips}</div>`;
 }
 // Shared by the Gate Scanner's and the Event hub's WhatsApp confirm/resend
 // buttons (data-wa-confirm, built above). Records the send via the server
@@ -8821,6 +8994,13 @@ function eventCheckInOpen(ev) {
   return today >= ev.date && today <= end;
 }
 document.addEventListener("click", (e) => {
+  const fbtn = e.target.closest("[data-roster-filter]");
+  if (fbtn) {
+    ROSTER_FILTER = fbtn.dataset.rosterFilter;
+    if (fbtn.closest("#hub-checkin-wrap")) document.getElementById("hub-checkin-search").dispatchEvent(new Event("input"));
+    else renderCheckinRoster();
+    return;
+  }
   const th = e.target.closest("[data-roster-sort]");
   if (!th) return;
   const key = th.dataset.rosterSort;
@@ -8831,12 +9011,34 @@ document.addEventListener("click", (e) => {
     renderCheckinRoster();
   }
 });
+// Quick filter chips above the roster (shared by the Gate Scanner and the Event hub).
+let ROSTER_FILTER = "all";
+function rosterFilterMatch(r, f) {
+  if (f === "pending") return !r.waitlisted && !r.checkedIn;
+  if (f === "in") return !!r.checkedIn;
+  if (f === "wait") return !!r.waitlisted;
+  return true;
+}
+function rosterToolbarHtml(roster, ev) {
+  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
+  const chips = defs
+    .map(([key, label]) => {
+      const n = roster.filter((r) => rosterFilterMatch(r, key)).length;
+      if (key === "wait" && !n) return "";
+      return `<button type="button" class="roster-filter${ROSTER_FILTER === key ? " active" : ""}" data-roster-filter="${key}">${escapeAttr(t(label))} <b>${fmt(n)}</b></button>`;
+    })
+    .join("");
+  return `<div class="roster-toolbar"><div class="roster-filters">${chips}</div>${waBulkBarHtml(roster, ev)}</div>`;
+}
 function rosterTableHtml(roster, query, eventId, showCancel) {
   let filtered = roster.filter(
-    (r) => !query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)
+    (r) =>
+      rosterFilterMatch(r, ROSTER_FILTER) &&
+      (!query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query))
   );
+  const evForBar = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
   if (!filtered.length) {
-    return `<p style="color:var(--muted);">${escapeAttr(t("checkinNoMatches"))}</p>`;
+    return `${rosterToolbarHtml(roster, evForBar)}<p style="color:var(--muted);">${escapeAttr(t("checkinNoMatches"))}</p>`;
   }
   if (ROSTER_SORT.key) {
     const { key, dir } = ROSTER_SORT;
@@ -8876,8 +9078,8 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
-        <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
-        <td><div class="roster-actions">${action}${cancelBtn}${!checkInOpen && action ? `<small class="roster-date-note">${escapeAttr(t("checkinOnlyOnEventDate"))}</small>` : ""}</div></td>
+        <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId, true)}</td>
+        <td><div class="roster-actions">${action}${cancelBtn}</div></td>
         <td class="wa-cell">${waStatusCellHtml(r, eventName, eventDate, ev)}</td>
       </tr>`;
     })
@@ -8887,7 +9089,12 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
     const arrow = active ? (ROSTER_SORT.dir === 1 ? " ▲" : " ▼") : " ↕";
     return `<th aria-sort="${active ? (ROSTER_SORT.dir === 1 ? "ascending" : "descending") : "none"}"><button type="button" class="roster-sort${active ? " active" : ""}" data-roster-sort="${key}">${t(label)}<span class="roster-sort-arrow">${arrow}</span></button></th>`;
   }).join("");
-  return `${waBulkBarHtml(roster, ev)}<div class="dashboard-table-wrap"><table class="dashboard-table roster-table">
+  const dateNote =
+    !checkInOpen && filtered.some((r) => !r.waitlisted && !r.checkedIn)
+      ? `<p class="roster-date-banner">${escapeAttr(t("checkinOnlyOnEventDate"))}${eventDate ? " (" + escapeAttr(eventDate) + ")" : ""}</p>`
+      : "";
+  const qrNote = filtered.some((r) => r.qrDataUrl) ? `<p class="wa-hint roster-qr-note">${escapeAttr(t("waConfirmQrHint"))}</p>` : "";
+  return `${rosterToolbarHtml(roster, ev)}${dateNote}${qrNote}<div class="dashboard-table-wrap roster-scroll"><table class="dashboard-table roster-table">
     <thead><tr>${headCells}</tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
@@ -8899,11 +9106,11 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
 // missed it at the gate without needing a real "send" mechanism this app
 // doesn't have (no email/SMS infra) - they download the image here and
 // share it however they normally would.
-function rosterQrCellHtml(qrDataUrl, downloadKey) {
+function rosterQrCellHtml(qrDataUrl, downloadKey, compact) {
   if (!qrDataUrl) return "";
-  return `<div class="roster-qr">
+  return `<div class="roster-qr${compact ? " compact" : ""}">
     <img src="${qrDataUrl}" alt="QR" class="roster-qr-thumb" />
-    <a class="roster-qr-download" href="${qrDataUrl}" download="qr-${escapeAttr(String(downloadKey))}.png">${t("btnDownloadQr")}</a>
+    <a class="roster-qr-download" href="${qrDataUrl}" download="qr-${escapeAttr(String(downloadKey))}.png" title="${escapeAttr(t("btnDownloadQr"))}">${compact ? "\u2B07 QR" : t("btnDownloadQr")}</a>
   </div>`;
 }
 document.getElementById("checkin-roster-wrap").addEventListener("click", async (e) => {
