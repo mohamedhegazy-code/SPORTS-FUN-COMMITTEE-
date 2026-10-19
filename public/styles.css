@@ -1282,3 +1282,56 @@ h2 .lang-ar, h3 .lang-ar { font-weight: inherit; }
 }
 .content-admin-item .title { font-weight: 600; font-size: 0.88rem; }
 .content-admin-item .sub { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+/* ---- Swiss (chess) tournaments ------------------------------------- */
+.swiss-print-row { margin: 8px 0; gap: 8px; flex-wrap: wrap; }
+.swiss-print-row a { text-decoration: none; display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red); padding: 7px 14px; border-radius: 7px; font-size: 0.85rem; font-weight: 600; }
+.swiss-print-row a:hover { background: #fdf0f0; }
+.swiss-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.swiss-table th, .swiss-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: start; vertical-align: middle; }
+.swiss-table th { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); white-space: nowrap; }
+.swiss-table tr.decided td { background: rgba(201, 162, 39, 0.07); }
+.swiss-table tr.swiss-hit td { background: rgba(201, 162, 39, 0.25); }
+.swiss-table tr.swiss-prize-row td { font-weight: 600; background: rgba(201, 162, 39, 0.12); }
+.swiss-table tr.swiss-out td { opacity: 0.55; }
+.swiss-white { font-weight: 600; }
+.swiss-black { font-weight: 600; text-align: end; }
+html[dir="rtl"] .swiss-black { text-align: start; }
+.swiss-res-cell { white-space: nowrap; text-align: center; }
+.swiss-res-cell button.small, .swiss-att-cell button.small, .swiss-round-tab { padding: 4px 9px; font-size: 0.8rem; }
+.swiss-res-cell { display: table-cell; }
+.swiss-res.active, .swiss-round-tab.active, .swiss-att-cell button.active {
+  background: var(--red); color: #fff; border-color: var(--red);
+}
+.swiss-ff-select { font-size: 0.78rem; padding: 4px 6px; max-width: 130px; margin-inline-start: 4px; width: auto; }
+.swiss-ff-select.active { border-color: var(--red); color: var(--red); font-weight: 600; }
+.swiss-att-cell { white-space: nowrap; }
+.swiss-players-scroll { max-height: 460px; overflow: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.swiss-round-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.swiss-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+.swiss-draw-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.swiss-swap { margin-top: 12px; }
+.swiss-swap summary { cursor: pointer; font-size: 0.85rem; color: var(--muted); }
+.swiss-swap-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.swiss-swap-row select { width: auto; max-width: 260px; }
+.swiss-tag {
+  display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 99px;
+  background: var(--border); color: var(--text); vertical-align: middle; margin-inline-start: 4px;
+}
+.swiss-tag.women { background: #f6dce6; color: #8a1c4a; }
+.swiss-tag.junior { background: #dbe8f6; color: #1c4c73; }
+.swiss-tag.out { background: #e8e8e8; color: #555; }
+.swiss-tag.warn { background: #fff0cc; color: #8a5a00; }
+.swiss-prize-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.swiss-prize-col { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--card); }
+.swiss-prize-col h5 { margin: 0; padding: 8px 12px; background: linear-gradient(120deg, var(--red), var(--red-dark)); color: #fff; font-size: 0.9rem; }
+.swiss-prize-line { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 0.88rem; }
+.swiss-place { width: 22px; height: 22px; border-radius: 50%; background: var(--gold); color: #fff; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; flex: none; }
+.swiss-pname { flex: 1; font-weight: 600; }
+.swiss-pamt { color: var(--red); font-weight: 700; white-space: nowrap; }
+.reg-cat-wrap { display: inline-flex; flex-wrap: wrap; gap: 12px; margin-inline-start: 12px; }
+.reg-cat { display: inline-flex; align-items: center; gap: 5px; font-size: 0.82rem; color: var(--muted); cursor: pointer; }
+.reg-cat input { width: auto; margin: 0; }
+.my-reg-cats { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.82rem; margin: -4px 0 10px; padding: 6px 12px; background: rgba(201, 162, 39, 0.1); border-radius: 8px; }
+.swiss-info-details { margin: 12px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.swiss-info-details summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }

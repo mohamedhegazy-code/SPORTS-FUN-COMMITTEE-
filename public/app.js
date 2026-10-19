@@ -1537,6 +1537,7 @@ function updateRegSelectedEventLabel() {
 document.getElementById("reg-event").addEventListener("change", () => {
   updateRegCapacityNote();
   updateRegSelectedEventLabel();
+  updateRegCategoryVisibility();
 });
 
 // ------------------------------------------------------ events landing page --
@@ -2170,15 +2171,18 @@ function renderAttendeesChecklist() {
     `<div class="attendee-row">
       <input type="checkbox" id="att-self" checked />
       <label for="att-self">${escapeAttr(member.name)} <span style="color:var(--muted);font-size:0.8rem;">(${t("attendeeSelfLabel")})</span></label>
+      ${swissCatBoxesHtml("self", false, false, 'data-att="self"')}
     </div>`,
     ...deps.map(
       (d) => `<div class="attendee-row">
       <input type="checkbox" class="att-dep" id="att-dep-${d.id}" data-dep-id="${d.id}" data-dep-name="${escapeAttr(d.name)}" />
       <label for="att-dep-${d.id}">${escapeAttr(d.name)}</label>
+      ${swissCatBoxesHtml("dep", false, false, `data-att="${d.id}"`)}
     </div>`
     ),
   ];
-  wrap.innerHTML = rows.join("");
+  wrap.innerHTML = rows.join("") + `<p class="hint-note hidden" id="reg-cat-note">${escapeAttr(t("regCatNote"))}</p>`;
+  updateRegCategoryVisibility();
 }
 
 // Points might be hidden from members right now (admin toggle) - when so,
@@ -2260,9 +2264,13 @@ document.getElementById("reg-submit").addEventListener("click", async () => {
     return;
   }
 
+  const catFor = (key) => ({
+    women: !!document.querySelector(`#reg-attendees-list .att-cat[data-att="${key}"][data-cat="women"]:checked`),
+    junior: !!document.querySelector(`#reg-attendees-list .att-cat[data-att="${key}"][data-cat="junior"]:checked`),
+  });
   const attendees = [];
-  if (selfChecked) attendees.push({ dependentId: null, label: member.name });
-  depChecked.forEach((d) => attendees.push({ dependentId: d.id, label: d.name }));
+  if (selfChecked) attendees.push({ dependentId: null, label: member.name, cats: catFor("self") });
+  depChecked.forEach((d) => attendees.push({ dependentId: d.id, label: d.name, cats: catFor(String(d.id)) }));
 
   await submitRegistrations(eventId, attendees, false);
 });
@@ -2281,6 +2289,7 @@ async function submitRegistrations(eventId, attendees, joinWaitlist) {
   for (const att of attendees) {
     try {
       const body = { eventId, dependentId: att.dependentId };
+      if (att.cats) { body.women = att.cats.women; body.junior = att.cats.junior; }
       if (joinWaitlist) body.joinWaitlist = true;
       const result = await api("/api/register", { method: "POST", body: JSON.stringify(body) });
       if (result.needsWaitlistConfirmation) {
@@ -2632,11 +2641,32 @@ async function loadMyRegistrations() {
           </div>
           <button type="button" class="danger small myreg-cancel-btn" data-reg-id="${r.id}">${escapeAttr(t("btnCancelRegistration"))}</button>
         </div>
+        ${r.rankingCategories && !r.waitlisted ? `<div class="my-reg-cats" data-reg-id="${r.id}">
+          <strong>${escapeAttr(t("regCatTitle"))}:</strong>
+          <label class="reg-cat"><input type="checkbox" class="myreg-cat" data-reg-id="${r.id}" data-cat="women" ${r.catWomen ? "checked" : ""} ${r.categoriesLocked ? "disabled" : ""} /> ${escapeAttr(t("regCatWomen"))}</label>
+          <label class="reg-cat"><input type="checkbox" class="myreg-cat" data-reg-id="${r.id}" data-cat="junior" ${r.catJunior ? "checked" : ""} ${r.categoriesLocked ? "disabled" : ""} /> ${escapeAttr(t("regCatJunior"))}</label>
+          <span class="myreg-cat-msg hint-note" style="margin:0;">${r.categoriesLocked ? escapeAttr(t("myregCatLocked")) : ""}</span>
+        </div>` : ""}
         ${canViewQr ? `<div class="qr-entry" id="myreg-qr-${r.id}"><h4>${escapeAttr(t("qrTitle"))}</h4><img src="${r.qrDataUrl}" alt="QR code" /><p class="note">${escapeAttr(t("qrReminderNote"))}</p></div>` : ""}`;
       })
       .join("");
     wrap.querySelectorAll(".myreg-cancel-btn").forEach((btn) => {
       btn.addEventListener("click", () => cancelMyRegistration(Number(btn.dataset.regId)));
+    });
+    wrap.querySelectorAll(".myreg-cat").forEach((box) => {
+      box.addEventListener("change", async () => {
+        const regId = box.dataset.regId;
+        const row = box.closest(".my-reg-cats");
+        const women = row.querySelector('[data-cat="women"]').checked;
+        const junior = row.querySelector('[data-cat="junior"]').checked;
+        const msgEl = row.querySelector(".myreg-cat-msg");
+        try {
+          await api("/api/me/registrations/" + regId + "/categories", { method: "PUT", body: JSON.stringify({ women, junior }) });
+          msgEl.textContent = t("myregCatSaved");
+        } catch (e) {
+          msgEl.textContent = e.message;
+        }
+      });
     });
   } catch (e) {
     wrap.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;">${t("errGeneric")}</p>`;
@@ -5731,18 +5761,42 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "award-points") awardTournamentPoints();
   else if (action === "set-attendance") setTournamentAttendance(Number(btn.dataset.registrationId), btn.dataset.status);
   else if (action === "update-schedule") updateTournamentSchedule();
+  else if (action === "swiss-view-round") { SWISS_VIEW_ROUND = Number(btn.dataset.round); swissKeepScroll(() => renderTournamentBody()); }
+  else if (action === "swiss-standings-tab") { SWISS_STANDINGS_TAB = btn.dataset.tab; swissKeepScroll(() => renderTournamentBody()); }
+  else if (action === "swiss-result") swissSetResult(Number(btn.dataset.round), Number(btn.dataset.pairing), btn.dataset.result);
+  else if (action === "swiss-next-round") swissNextRound();
+  else if (action === "swiss-save-info") swissSaveInfo();
+  else if (action === "swiss-save-settings") swissSaveSettings();
+  else if (action === "swiss-undo") swissUndoDraw();
+  else if (action === "swiss-swap") swissSwap();
+  else if (action === "swiss-withdraw") swissWithdraw(btn.dataset.entrantId, btn.dataset.withdrawn === "1");
   else if (action === "end-casual-session") setCasualSessionStatus("completed");
   else if (action === "reopen-casual-session") setCasualSessionStatus("casual");
 });
 document.getElementById("tourn-body").addEventListener("change", (e) => {
   if (e.target.id === "tourn-format") toggleTournamentGroupFields();
+  if (e.target.classList && e.target.classList.contains("swiss-cat-box")) {
+    swissSetCategory(Number(e.target.dataset.regId), e.target.dataset.cat, e.target.checked);
+  }
+  if (e.target.classList && e.target.classList.contains("swiss-ff-select")) {
+    swissSetResult(Number(e.target.dataset.round), Number(e.target.dataset.pairing), e.target.value);
+  }
+});
+document.getElementById("tourn-body").addEventListener("input", (e) => {
+  if (e.target.id !== "swiss-player-filter") return;
+  SWISS_PLAYER_FILTER = e.target.value;
+  const q = SWISS_PLAYER_FILTER.trim().toLowerCase();
+  document.querySelectorAll("#tourn-body .swiss-player-row").forEach((row) => {
+    const name = row.children[1] ? row.children[1].textContent.toLowerCase() : "";
+    row.style.display = q && !name.includes(q) ? "none" : "";
+  });
 });
 // Live-recomputes the setup dashboard preview (see computeTournamentSetupPreview
 // above) on every keystroke/change to any field that feeds it, in either the
 // creation form or the post-creation schedule editor.
 const TOURN_CREATE_PREVIEW_FIELDS = new Set([
   "tourn-mode", "tourn-format", "tourn-num-groups", "tourn-advance-per-group",
-  "tourn-win-points", "tourn-draw-points", "tourn-loss-points", "tourn-planning-count",
+  "tourn-win-points", "tourn-draw-points", "tourn-loss-points", "tourn-planning-count", "tourn-swiss-rounds",
   "tourn-courts", "tourn-match-minutes", "tourn-start-time", "tourn-break-minutes", "tourn-available-hours",
 ]);
 const TOURN_EDIT_PREVIEW_FIELDS = new Set([
@@ -5793,6 +5847,7 @@ const TOURN_ICON = {
 function tournamentFormatLabel(format) {
   if (format === "groups") return t("tournamentFormatGroups");
   if (format === "casual") return t("tournamentFormatCasual");
+  if (format === "swiss") return t("tournamentFormatSwiss");
   return t("tournamentFormatKnockout");
 }
 // Deliberately NOT named tournamentStatusLabel - that name is already taken
@@ -5847,6 +5902,10 @@ function renderTournamentBody() {
   }
   if (TOURNAMENT_DATA.format === "casual") {
     renderCasualTournamentBody(body);
+    return;
+  }
+  if (TOURNAMENT_DATA.format === "swiss") {
+    renderSwissTournamentBody(body);
     return;
   }
   // Operational order, not build order: logistics (Setup & Schedule) are
@@ -5950,6 +6009,576 @@ async function setCasualSessionStatus(status) {
   } catch (e) {
     showMsg(msg, e.message, false);
   }
+}
+
+// =====================================================================
+// SWISS (CHESS) TOURNAMENTS - admin panel. Its own render path (like the
+// casual format above) because nothing here resembles a bracket or group
+// stage: players are re-paired every round by score, results are entered
+// board by board, and the standings (Open / Women / Juniors) are computed
+// server-side with FIDE tie-breaks (see swiss.js).
+// =====================================================================
+let SWISS_VIEW_ROUND = null; // round tab being looked at; null = newest
+let SWISS_STANDINGS_TAB = "open"; // "open" | "women" | "junior"
+let SWISS_PLAYER_FILTER = "";
+
+function swissFmtPts(n) {
+  const whole = Math.floor(n);
+  return n - whole === 0.5 ? (whole ? `${whole}½` : "½") : String(n);
+}
+function swissFmtTb(n) {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100).replace(/\.5$/, "½");
+}
+function swissCatTagsHtml(women, junior) {
+  return (women ? `<span class="swiss-tag women">${escapeAttr(t("swissTagWomen"))}</span>` : "") +
+    (junior ? `<span class="swiss-tag junior">${escapeAttr(t("swissTagJunior"))}</span>` : "");
+}
+function swissEgp(n) {
+  return t("swissPrizeEgp").replace("{n}", Number(n).toLocaleString("en-US"));
+}
+function swissKeepScroll(fn) {
+  const y = window.scrollY;
+  fn();
+  window.scrollTo(0, y);
+}
+
+function renderSwissTournamentBody(body) {
+  const tn = TOURNAMENT_DATA;
+  const sw = tn.swiss;
+  const generated = sw.generatedRounds > 0;
+  const statusLabel = tn.status === "completed"
+    ? t("tournStatusCompleted")
+    : generated
+    ? t("swissRoundOf").replace("{n}", sw.generatedRounds).replace("{total}", sw.totalRounds)
+    : t("swissNotDrawn");
+  const steps = [
+    { label: t("swissStepPlayers"), state: generated ? "done" : "active" },
+    { label: t("swissStepRounds"), state: tn.status === "completed" ? "done" : generated ? "active" : "upcoming" },
+    { label: t("swissStepFinal"), state: tn.status === "completed" ? "active" : "upcoming" },
+  ];
+  const stepper = `<div class="tourn-stepper">${steps
+    .map((s, i) => `<div class="tourn-step ${s.state}"><span class="tourn-step-dot">${s.state === "done" ? "✓" : i + 1}</span><span class="tourn-step-label">${escapeAttr(s.label)}</span></div>`)
+    .join('<div class="tourn-step-line"></div>')}</div>`;
+  const printBase = `/admin/print/tournament/${TOURNAMENT_EVENT_ID}`;
+  const printLinks = `
+    <a class="secondary small" href="${printBase}?view=regulation&lang=${currentLang}" target="_blank" rel="noopener">${t("btnPrintRegulation")}</a>
+    ${generated ? `<a class="secondary small" href="${printBase}?view=pairings&round=${swissViewRound()}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnPrintPairings")}</a>` : ""}
+    ${generated ? `<a class="secondary small" href="${printBase}?view=standings&lang=${currentLang}" target="_blank" rel="noopener">${t("btnPrintStandings")}</a>` : ""}`;
+  const roundsCard = generated
+    ? tournCardHtml(TOURN_ICON.live, t("swissRoundsTitle"), renderSwissRounds(), "tourn-card-live")
+    : "";
+  const standingsCard = generated
+    ? tournCardHtml(TOURN_ICON.standings, t("swissStandingsTitle"), renderSwissStandings(), "tourn-card-standings")
+    : "";
+  const prizesCard = tn.status === "completed"
+    ? tournCardHtml(TOURN_ICON.standings, t("swissPrizesTitle"), renderSwissPrizes(), "tourn-card-standings")
+    : "";
+  const playersCard = tournCardHtml(
+    TOURN_ICON.teams,
+    `${t("swissPlayersTitle")} <span class="tourn-card-count">${tn.entrants.length}</span>`,
+    renderSwissPlayers(),
+    "tourn-card-teams"
+  );
+  body.innerHTML = `
+    <div class="tourn-summary tourn-hero">
+      <span class="tourn-summary-badge">${escapeAttr(t("tournamentModeIndividual"))}</span>
+      <span class="tourn-summary-badge">${escapeAttr(tournamentFormatLabel("swiss"))}</span>
+      <span class="tourn-summary-badge">${escapeAttr(statusLabel)}</span>
+      <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
+    </div>
+    <div class="tourn-summary swiss-print-row">${printLinks}</div>
+    ${stepper}
+    ${generated ? roundsCard + standingsCard + prizesCard + playersCard : playersCard}
+    ${renderSwissSettingsCard()}
+    ${renderSwissInfoCard()}
+  `;
+}
+
+// Board number, plus table + start time when the round runs in waves
+// (fewer boards than games).
+function swissBoardCell(p, round) {
+  if (round.waves > 1 && p.time) return `${p.board}<div class="hint-note" style="margin:0;white-space:nowrap;">${escapeAttr(t("swissTableAt").replace("{table}", p.table).replace("{time}", formatTimeOfDay(p.time)))}</div>`;
+  return String(p.board);
+}
+// Venue / organizer / time-control text for the printable regulation sheet.
+function renderSwissInfoCard() {
+  const info = TOURNAMENT_DATA.swiss.info || {};
+  const field = (id, key, label, extra) =>
+    `<div><label>${escapeAttr(label)}</label><input id="swiss-info-${id}" type="${extra === "time" ? "time" : "text"}" maxlength="120" value="${escapeAttr(info[key] || "")}" /></div>`;
+  const body = `
+    <p class="hint-note">${t("swissInfoHint")}</p>
+    <div class="grid-2">
+      ${field("venueAr", "venueAr", t("swissInfoVenueAr"))}
+      ${field("venueEn", "venueEn", t("swissInfoVenueEn"))}
+      ${field("organizerAr", "organizerAr", t("swissInfoOrganizerAr"))}
+      ${field("organizerEn", "organizerEn", t("swissInfoOrganizerEn"))}
+      ${field("timeControlAr", "timeControlAr", t("swissInfoTimeAr"))}
+      ${field("timeControlEn", "timeControlEn", t("swissInfoTimeEn"))}
+      ${field("ceremonyTime", "ceremonyTime", t("swissInfoCeremony"), "time")}
+    </div>
+    <button class="secondary" style="margin-top:10px;" data-tourn-action="swiss-save-info">${t("swissInfoSave")}</button>`;
+  return `<details class="swiss-info-details"><summary>${escapeAttr(t("swissInfoTitle"))}</summary>${body}</details>`;
+}
+// Number of rounds + optional prizes, both editable per tournament.
+function renderSwissSettingsCard() {
+  const sw = TOURNAMENT_DATA.swiss;
+  const list = (k) => escapeAttr((sw.prizes[k] || []).join(" "));
+  const minRounds = Math.max(1, sw.generatedRounds);
+  const sch = TOURNAMENT_DATA.schedule;
+  const body = `
+    <div class="grid-2">
+      <div><label>${t("fieldSwissRounds")}</label><input id="swiss-set-rounds" type="number" min="${minRounds}" max="${sw.maxRounds}" value="${sw.totalRounds}" />
+        <p class="hint-note">${escapeAttr(t("swissRoundsEditHint").replace("{drawn}", sw.generatedRounds).replace("{max}", sw.maxRounds))}</p></div>
+    </div>
+    <h5 style="margin:12px 0 4px;">${t("swissTimingEditTitle")}</h5>
+    <p class="hint-note">${t("swissTimingEditHint")}</p>
+    <div class="grid-2">
+      <div><label>${t("fieldStartTime")}</label><input id="swiss-set-start" type="time" value="${sch ? escapeAttr(sch.startTime) : ""}" /></div>
+      <div><label>${t("fieldMatchMinutes")}</label><input id="swiss-set-minutes" type="number" min="1" value="${sch ? sch.matchMinutes : ""}" /></div>
+      <div><label>${t("fieldCourts")}</label><input id="swiss-set-courts" type="number" min="1" value="${sch ? sch.courts : ""}" /></div>
+      <div><label>${t("fieldBreakMinutes")}</label><input id="swiss-set-break" type="number" min="0" value="${sch ? sch.breakMinutes : 0}" /></div>
+    </div>
+    <h5 style="margin:12px 0 4px;">${t("swissPrizesEditTitle")}</h5>
+    <p class="hint-note">${t("swissPrizesEditHint")}</p>
+    <div class="grid-2">
+      <div><label>${t("swissCatOpen")}</label><input id="swiss-prize-open" type="text" inputmode="decimal" placeholder="2500 1500 1000" value="${list("open")}" /></div>
+      <div><label>${t("swissCatWomen")}</label><input id="swiss-prize-women" type="text" inputmode="decimal" placeholder="1000 600 400" value="${list("women")}" /></div>
+      <div><label>${t("swissCatJunior")}</label><input id="swiss-prize-junior" type="text" inputmode="decimal" placeholder="800 600 400" value="${list("junior")}" /></div>
+    </div>
+    <p class="hint-note">${sw.hasPrizes ? escapeAttr(t("swissPrizeNote").replace("{total}", Number(sw.prizeTotal).toLocaleString("en-US"))) : t("swissNoPrizesSet")}</p>
+    <div class="grid-2" style="margin-top:6px;">
+      <div><label>${t("swissInfoPrizeNoteAr")}</label><input id="swiss-prize-noteAr" type="text" maxlength="120" value="${escapeAttr((sw.info || {}).prizeNoteAr || "")}" /></div>
+      <div><label>${t("swissInfoPrizeNoteEn")}</label><input id="swiss-prize-noteEn" type="text" maxlength="120" value="${escapeAttr((sw.info || {}).prizeNoteEn || "")}" /></div>
+    </div>
+    <button class="secondary" style="margin-top:10px;" data-tourn-action="swiss-save-settings">${t("swissSettingsSave")}</button>`;
+  return `<details class="swiss-info-details" ${sw.generatedRounds === 0 ? "open" : ""}><summary>${escapeAttr(t("swissSettingsTitle"))}</summary>${body}</details>`;
+}
+function swissParsePrizes(text) {
+  const norm = String(text || "")
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776));
+  const tokens = norm.split(/[\s,;،]+/).filter(Boolean);
+  const nums = tokens.map((x) => Number(x));
+  if (nums.some((n) => !Number.isFinite(n) || n < 0)) return null;
+  return nums;
+}
+async function swissSaveSettings() {
+  const msg = document.getElementById("tourn-msg");
+  const prizes = {};
+  for (const k of ["open", "women", "junior"]) {
+    const parsed = swissParsePrizes(document.getElementById("swiss-prize-" + k).value);
+    if (!parsed) return showMsg(msg, t("swissPrizesBadInput"), false);
+    prizes[k] = parsed;
+  }
+  const rounds = Number(document.getElementById("swiss-set-rounds").value);
+  const noteAr = document.getElementById("swiss-prize-noteAr").value;
+  const noteEn = document.getElementById("swiss-prize-noteEn").value;
+  const val = (id) => document.getElementById(id).value.trim();
+  const timing = { startTime: val("swiss-set-start"), matchMinutes: val("swiss-set-minutes"), courts: val("swiss-set-courts"), breakMinutes: val("swiss-set-break") };
+  const timingAny = timing.startTime || timing.matchMinutes || timing.courts;
+  if (timingAny && (!timing.startTime || !timing.matchMinutes || !timing.courts)) return showMsg(msg, t("scheduleFieldsRequired"), false);
+  const data = await swissCall("/swiss/settings", "PUT", { totalRounds: rounds, prizes });
+  if (!data) return;
+  if (timingAny) {
+    const sched = await swissCall("/schedule", "PUT", { courts: Number(timing.courts), matchMinutes: Number(timing.matchMinutes), startTime: timing.startTime, breakMinutes: timing.breakMinutes === "" ? 0 : Number(timing.breakMinutes) });
+    if (!sched) return;
+  }
+  const info = await swissCall("/swiss/info", "PUT", { prizeNoteAr: noteAr, prizeNoteEn: noteEn });
+  if (info) showMsg(document.getElementById("tourn-msg"), t("swissSettingsSaved"), true);
+}
+async function swissSaveInfo() {
+  const get = (id) => document.getElementById("swiss-info-" + id).value;
+  const data = await swissCall("/swiss/info", "PUT", {
+    venueAr: get("venueAr"), venueEn: get("venueEn"), organizerAr: get("organizerAr"), organizerEn: get("organizerEn"),
+    timeControlAr: get("timeControlAr"), timeControlEn: get("timeControlEn"), ceremonyTime: get("ceremonyTime"),
+  });
+  if (data) showMsg(document.getElementById("tourn-msg"), t("swissInfoSaved"), true);
+}
+function swissViewRound() {
+  const sw = TOURNAMENT_DATA.swiss;
+  if (SWISS_VIEW_ROUND && SWISS_VIEW_ROUND <= sw.generatedRounds) return SWISS_VIEW_ROUND;
+  return sw.generatedRounds;
+}
+
+// Players: category tick-boxes (Women / Juniors), attendance and - once
+// the draw has started - withdrawal. Filterable since fields run to 100+.
+function renderSwissPlayers() {
+  const tn = TOURNAMENT_DATA;
+  const sw = tn.swiss;
+  const generated = sw.generatedRounds > 0;
+  const regById = new Map(TOURNAMENT_REGISTRATIONS.map((r) => [r.id, r]));
+  const attByReg = new Map((tn.attendance || []).map((a) => [a.registrationId, a.status]));
+  const withdrawn = new Set(sw.withdrawn.map((w) => w.entrantId));
+  const q = SWISS_PLAYER_FILTER.trim().toLowerCase();
+  const order = tn.seedOrder.map((id) => tn.entrants.find((e) => e.id === id)).filter(Boolean);
+  const rows = order
+    .map((e, i) => {
+      const regId = e.registrationIds[0];
+      const reg = regById.get(regId) || {};
+      const status = attByReg.get(regId) || "not_yet";
+      const hidden = q && !e.label.toLowerCase().includes(q) ? ' style="display:none;"' : "";
+      const attBtn = (st, label) =>
+        `<button class="secondary small ${status === st ? "active" : ""}" data-tourn-action="set-attendance" data-registration-id="${regId}" data-status="${st}">${label}</button>`;
+      const wBtn = generated
+        ? `<button class="secondary small ${withdrawn.has(e.id) ? "active" : ""}" data-tourn-action="swiss-withdraw" data-entrant-id="${escapeAttr(e.id)}" data-withdrawn="${withdrawn.has(e.id) ? "0" : "1"}">${withdrawn.has(e.id) ? t("swissReinstate") : t("swissWithdraw")}</button>`
+        : "";
+      return `<tr class="swiss-player-row"${hidden}>
+        <td>${i + 1}</td>
+        <td>${escapeAttr(e.label)}${withdrawn.has(e.id) ? ` <span class="swiss-tag out">${escapeAttr(t("swissWithdrawn"))}</span>` : ""}</td>
+        <td><input type="checkbox" class="swiss-cat-box" data-reg-id="${regId}" data-cat="women" ${reg.women ? "checked" : ""} aria-label="${escapeAttr(t("colWomen"))}" /></td>
+        <td><input type="checkbox" class="swiss-cat-box" data-reg-id="${regId}" data-cat="junior" ${reg.junior ? "checked" : ""} aria-label="${escapeAttr(t("colJunior"))}" /></td>
+        <td class="swiss-att-cell">${attBtn("present", t("attStatusPresent"))}${attBtn("absent", t("attStatusAbsent"))}${attBtn("not_yet", "–")}${wBtn}</td>
+      </tr>`;
+    })
+    .join("");
+  const drawBlock = generated
+    ? ""
+    : `<div class="swiss-draw-row">
+        <button class="secondary" data-tourn-action="randomize-seed">${t("btnRandomize")}</button>
+        <button class="primary" data-tourn-action="generate-tournament">${t("btnDrawRound1")}</button>
+      </div>
+      <p class="hint-note">${t("swissDrawHint")}</p>`;
+  return `
+    <p class="hint-note">${t("swissCatHint")}</p>
+    <input type="search" id="swiss-player-filter" placeholder="${escapeAttr(t("swissSearchPlaceholder"))}" value="${escapeAttr(SWISS_PLAYER_FILTER)}" style="max-width:280px;" />
+    <div class="tourn-table-scroll swiss-players-scroll">
+      <table class="swiss-table"><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colWomen")}</th><th>${t("colJunior")}</th><th>${t("swissAttendanceCol")}</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>
+    ${drawBlock}
+  `;
+}
+
+function swissResultButtons(round, p, latest) {
+  const btn = (res, label) =>
+    `<button class="secondary small swiss-res ${p.result === res ? "active" : ""}" data-tourn-action="swiss-result" data-round="${round.number}" data-pairing="${p.id}" data-result="${res}">${label}</button>`;
+  const ffValue = ["1-0f", "0-1f", "0-0f"].includes(p.result) ? p.result : "";
+  const ff = `<select class="swiss-ff-select ${ffValue ? "active" : ""}" data-round="${round.number}" data-pairing="${p.id}" aria-label="${escapeAttr(t("swissForfeit"))}">
+      <option value="">${escapeAttr(t("swissForfeit"))}</option>
+      <option value="1-0f" ${ffValue === "1-0f" ? "selected" : ""}>${escapeAttr(t("swissFfWhite"))}</option>
+      <option value="0-1f" ${ffValue === "0-1f" ? "selected" : ""}>${escapeAttr(t("swissFfBlack"))}</option>
+      <option value="0-0f" ${ffValue === "0-0f" ? "selected" : ""}>${escapeAttr(t("swissFfBoth"))}</option>
+    </select>`;
+  const clear = latest && p.result ? `<button class="secondary small" data-tourn-action="swiss-result" data-round="${round.number}" data-pairing="${p.id}" data-result="">✕</button>` : "";
+  return `${btn("1-0", "1–0")}${btn("1/2-1/2", "½–½")}${btn("0-1", "0–1")}${ff}${clear}`;
+}
+
+function renderSwissRounds() {
+  const tn = TOURNAMENT_DATA;
+  const sw = tn.swiss;
+  const cur = swissViewRound();
+  const latest = cur === sw.generatedRounds;
+  const round = sw.rounds[cur - 1];
+  const tabs = sw.rounds
+    .map((r) => `<button class="secondary small swiss-round-tab ${r.number === cur ? "active" : ""}" data-tourn-action="swiss-view-round" data-round="${r.number}">${r.number}${r.complete ? " ✓" : ""}</button>`)
+    .join("");
+  const boards = round.pairings
+    .filter((p) => p.b != null)
+    .map(
+      (p) => `<tr class="${p.result ? "decided" : ""}">
+        <td>${swissBoardCell(p, round)}</td>
+        <td class="swiss-white">${escapeAttr(p.aLabel)}</td>
+        <td class="swiss-res-cell">${swissResultButtons(round, p, latest)}</td>
+        <td class="swiss-black">${escapeAttr(p.bLabel)}</td>
+      </tr>`
+    )
+    .join("");
+  const bye = round.pairings.find((p) => p.b == null);
+  const byeRow = bye ? `<p class="hint-note">${escapeAttr(t("swissByeLine").replace("{name}", bye.aLabel))}</p>` : "";
+  const warn = round.warnings.length
+    ? `<p class="msg err show">${round.warnings.map((w) => escapeAttr(t("swissRematchWarn").replace("{a}", w.aLabel).replace("{b}", w.bLabel))).join("<br>")}</p>`
+    : "";
+  const missing = round.pairings.filter((p) => p.b != null && p.result == null).length;
+  const hasResults = round.pairings.some((p) => p.b != null && p.result != null);
+  let controls = "";
+  if (latest) {
+    const nextBtn = sw.nextRound
+      ? `<button class="primary" ${sw.canGenerateNext ? "" : "disabled"} data-tourn-action="swiss-next-round">${escapeAttr(t("btnDrawNextRound").replace("{n}", sw.nextRound))}</button>`
+      : "";
+    const undoBtn = !hasResults ? `<button class="secondary" data-tourn-action="swiss-undo">${t("btnUndoDraw")}</button>` : "";
+    const missingNote = missing ? `<span class="hint-note" style="margin:0;">${escapeAttr(t("swissMissing").replace("{n}", missing))}</span>` : "";
+    const timeNote = sw.nextRound && sw.nextRoundTime && !missing ? `<span class="hint-note" style="margin:0;">${escapeAttr(t("swissNextRoundTime").replace("{time}", formatTimeOfDay(sw.nextRoundTime)))}</span>` : "";
+    controls = `<div class="swiss-controls">${nextBtn}${undoBtn}${missingNote}${timeNote}</div>`;
+    if (!hasResults || missing) {
+      const opts = round.pairings
+        .flatMap((p) => [
+          { id: p.a, label: p.aLabel, board: p.board },
+          ...(p.b != null ? [{ id: p.b, label: p.bLabel, board: p.board }] : []),
+        ])
+        .map((o) => `<option value="${escapeAttr(o.id)}">${o.board ? `#${o.board} ` : ""}${escapeAttr(o.label)}</option>`)
+        .join("");
+      controls += `<details class="swiss-swap"><summary>${t("swissSwapTitle")}</summary>
+        <p class="hint-note">${t("swissSwapHint")}</p>
+        <div class="swiss-swap-row"><select id="swiss-swap-a">${opts}</select><select id="swiss-swap-b">${opts}</select>
+        <button class="secondary small" data-tourn-action="swiss-swap">${t("swissSwapBtn")}</button></div></details>`;
+    }
+  }
+  return `
+    <div class="swiss-round-tabs">${tabs}</div>
+    <p class="hint-note">${escapeAttr(t("swissRoundOf").replace("{n}", cur).replace("{total}", sw.totalRounds))}${round.time ? " · " + escapeAttr(t("swissStarts").replace("{time}", formatTimeOfDay(round.time))) : ""}</p>
+    ${warn}
+    <div class="tourn-table-scroll"><table class="swiss-table swiss-boards"><thead><tr><th>${t("swissBoard")}</th><th>${t("swissWhite")}</th><th>${t("colResult")}</th><th>${t("swissBlack")}</th></tr></thead><tbody>${boards}</tbody></table></div>
+    ${byeRow}
+    ${controls}
+  `;
+}
+
+// Standings with the three prize rankings as tabs. Everything shown is
+// computed server-side; this only filters and formats.
+function renderSwissStandings() {
+  return swissStandingsHtml(TOURNAMENT_DATA.swiss, SWISS_STANDINGS_TAB, false);
+}
+function swissStandingsHtml(sw, tab, isPublic) {
+  const rows = sw.standings.filter((r) => tab === "open" || (tab === "women" ? r.women : r.junior));
+  const placeOf = (r, i) => (tab === "open" ? r.rank : tab === "women" ? r.rankWomen : r.rankJunior);
+  const prizes = sw.prizes[tab];
+  const body = rows
+    .map((r, i) => {
+      const place = placeOf(r, i);
+      const prize = sw.hasPrizes && place && place <= prizes.length ? swissEgp(prizes[place - 1]) : "";
+      return `<tr class="${prize ? "swiss-prize-row" : ""}${r.withdrawn ? " swiss-out" : ""}">
+        <td>${place != null ? place : "–"}</td>
+        <td>${escapeAttr(r.label)} ${swissCatTagsHtml(r.women, r.junior)}${r.tiedOnAll ? ` <span class="swiss-tag warn" title="${escapeAttr(t("swissTiedWarn"))}">⚠</span>` : ""}</td>
+        <td><strong>${swissFmtPts(r.points)}</strong></td>
+        <td>${swissFmtTb(r.buchholzCut1)}</td><td>${swissFmtTb(r.buchholz)}</td><td>${swissFmtTb(r.sonnebornBerger)}</td><td>${r.wins}</td>
+        ${sw.hasPrizes ? `<td>${escapeAttr(prize)}</td>` : ""}
+      </tr>`;
+    })
+    .join("");
+  const tabAttr = isPublic ? "data-swiss-pub-tab" : 'data-tourn-action="swiss-standings-tab" data-tab';
+  const tabBtn = (key, label) => `<button class="secondary small swiss-round-tab ${tab === key ? "active" : ""}" ${tabAttr}="${key}">${label}</button>`;
+  const anyTie = sw.standings.some((r) => r.tiedOnAll);
+  return `
+    <div class="swiss-round-tabs">${tabBtn("open", t("swissCatOpen"))}${tabBtn("women", t("swissCatWomen"))}${tabBtn("junior", t("swissCatJunior"))}</div>
+    <div class="tourn-table-scroll"><table class="swiss-table"><thead><tr><th>#</th><th>${t("colName")}</th><th>${t("swissColPts")}</th><th>${t("swissColBch1")}</th><th>${t("swissColBch")}</th><th>${t("swissColSB")}</th><th>${t("colWins")}</th>${sw.hasPrizes ? `<th>${t("swissColPrize")}</th>` : ""}</tr></thead><tbody>${body || `<tr><td colspan="8">${t("swissNoPlayersInCat")}</td></tr>`}</tbody></table></div>
+    <p class="hint-note">${t("swissTieBreakNote")}</p>
+    ${anyTie ? `<p class="hint-note">⚠ ${t("swissTiedWarn")}</p>` : ""}
+  `;
+}
+
+function renderSwissPrizes() {
+  const sw = TOURNAMENT_DATA.swiss;
+  const awarded = TOURNAMENT_DATA.pointsAwardedAt
+    ? `<p class="hint-note">${t("pointsAwardedOn")} ${escapeAttr(new Date(TOURNAMENT_DATA.pointsAwardedAt).toLocaleString())}</p>`
+    : "";
+  return `
+    ${swissPrizeColsHtml(sw)}
+    ${awarded}
+    <button class="primary" style="margin-top:10px;" data-tourn-action="award-points">${TOURNAMENT_DATA.pointsAwardedAt ? t("btnReAwardPoints") : t("btnAwardPoints")}</button>
+  `;
+}
+function swissPrizeColsHtml(sw) {
+  const col = (title, list) => `<div class="swiss-prize-col"><h5>${escapeAttr(title)}</h5>
+      ${list.length ? list.map((x) => `<div class="swiss-prize-line"><span class="swiss-place">${x.place}</span><span class="swiss-pname">${escapeAttr(x.label)}${x.tiedOnAll ? " ⚠" : ""}</span>${x.prize != null ? `<span class="swiss-pamt">${escapeAttr(swissEgp(x.prize))}</span>` : ""}</div>`).join("") : `<p class="hint-note">–</p>`}
+    </div>`;
+  return `
+    <div class="swiss-prize-grid">${col(t("swissCatOpen"), sw.rankings.open)}${col(t("swissCatWomen"), sw.rankings.women)}${col(t("swissCatJunior"), sw.rankings.junior)}</div>
+    ${sw.hasPrizes ? `<p class="hint-note">${t("swissPrizeNote").replace("{total}", Number(sw.prizeTotal).toLocaleString("en-US"))}</p>` : ""}
+  `;
+}
+
+async function swissCall(path, method, body) {
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (data.tournament) TOURNAMENT_DATA = data.tournament;
+    swissKeepScroll(() => renderTournamentBody());
+    return data;
+  } catch (e) {
+    showMsg(msg, e.message, false);
+    return null;
+  }
+}
+async function swissSetResult(roundNumber, pairingId, result) {
+  await swissCall("/swiss/result", "PUT", { roundNumber, pairingId, result: result === "" ? null : result });
+}
+async function swissNextRound() {
+  const data = await swissCall("/swiss/next-round", "POST");
+  if (data) {
+    SWISS_VIEW_ROUND = null;
+    renderTournamentBody();
+    const msg = document.getElementById("tourn-msg");
+    if (data.warnings && data.warnings.length) showMsg(msg, t("swissRematchNotice"), false);
+    else showMsg(msg, t("swissRoundDrawn"), true);
+  }
+}
+async function swissUndoDraw() {
+  if (!confirm(t("swissConfirmUndo"))) return;
+  await swissCall("/swiss/undo-round", "POST");
+  SWISS_VIEW_ROUND = null;
+  renderTournamentBody();
+}
+async function swissSwap() {
+  const a = document.getElementById("swiss-swap-a").value;
+  const b = document.getElementById("swiss-swap-b").value;
+  const data = await swissCall("/swiss/swap", "PUT", { a, b });
+  if (data && data.warnings && data.warnings.length) showMsg(document.getElementById("tourn-msg"), t("swissRematchNotice"), false);
+}
+async function swissWithdraw(entrantId, withdrawn) {
+  await swissCall("/swiss/withdraw", "PUT", { entrantId, withdrawn });
+}
+async function swissSetCategory(regId, cat, checked) {
+  const reg = TOURNAMENT_REGISTRATIONS.find((r) => r.id === regId);
+  if (!reg) return;
+  const next = { women: !!reg.women, junior: !!reg.junior };
+  next[cat] = checked;
+  const msg = document.getElementById("tourn-msg");
+  try {
+    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/categories", {
+      method: "PUT",
+      body: JSON.stringify({ registrationId: regId, women: next.women, junior: next.junior }),
+    });
+    reg.women = next.women;
+    reg.junior = next.junior;
+    if (data.tournament) TOURNAMENT_DATA = data.tournament;
+    swissKeepScroll(() => renderTournamentBody());
+  } catch (e) {
+    showMsg(msg, e.message, false);
+    swissKeepScroll(() => renderTournamentBody());
+  }
+}
+
+// Setup preview for the creation form: boards needed vs available, how
+// long all rounds take and the expected finish - the same "will this fit?"
+// guidance the other formats get.
+function swissCreatePreviewHtml() {
+  const planningRaw = byIdVal("tourn-planning-count").trim();
+  const isPlanning = planningRaw !== "";
+  const players = isPlanning ? Number(planningRaw) : TOURNAMENT_REGISTRATIONS.length;
+  const rounds = Number(byIdVal("tourn-swiss-rounds")) || 7;
+  const boards = Number(byIdVal("tourn-courts")) || 0;
+  const minutes = Number(byIdVal("tourn-match-minutes")) || 0;
+  const brk = Number(byIdVal("tourn-break-minutes")) || 0;
+  const start = byIdVal("tourn-start-time");
+  const needed = Math.ceil(players / 2);
+  const waves = boards ? Math.max(1, Math.ceil(needed / boards)) : 1;
+  const total = minutes ? rounds * waves * minutes + (rounds - 1) * brk : 0;
+  let finish = "—";
+  if (start && minutes) {
+    const [h, m] = start.split(":").map(Number);
+    finish = formatTimeOfDay(minutesToHHMM(h * 60 + m + total));
+  }
+  const msgs = [];
+  if (players && players < rounds + 1) msgs.push(t("swissPreviewFewPlayers").replace("{min}", rounds + 1));
+  const badge = msgs.length
+    ? `<span class="tourn-setup-ready pending">${escapeAttr(msgs.join(" · "))}</span>`
+    : `<span class="tourn-setup-ready ok">${escapeAttr(t("swissPreviewOk"))}</span>`;
+  const wavesNote = waves > 1 ? `<p class="hint-note">${escapeAttr(t("swissPreviewWaves").replace("{needed}", needed).replace("{boards}", boards).replace("{waves}", waves))}</p>` : "";
+  const activeLabel = t("statActivePlayers") + (isPlanning ? ` ${t("planningBadge")}` : "");
+  return `<div class="tourn-setup-dashboard">
+    <h5>${t("setupDashboardTitle")} ${badge}</h5>
+    <div class="stat-row">
+      <div class="stat"><div class="n">${players}</div><div class="l">${activeLabel}</div></div>
+      <div class="stat"><div class="n">${rounds}</div><div class="l">${t("swissStatRounds")}</div></div>
+      <div class="stat"><div class="n">${needed}</div><div class="l">${t("swissStatBoardsNeeded")}</div></div>
+      <div class="stat"><div class="n">${players ? players * rounds / 2 : 0}</div><div class="l">${t("statTotalMatches")}</div></div>
+    </div>
+    <div class="stat-row" style="margin-top:10px;">
+      <div class="stat"><div class="n">${total ? tournMinutesLabel(total) : "—"}</div><div class="l">${t("statEstDuration")}</div></div>
+      <div class="stat"><div class="n">${finish}</div><div class="l">${t("statExpectedFinish")}</div></div>
+      <div class="stat"><div class="n">${waves}</div><div class="l">${t("swissStatWaves")}</div></div>
+    </div>
+    ${wavesNote}
+  </div>`;
+}
+function minutesToHHMM(mins) {
+  const w = ((Math.round(mins) % 1440) + 1440) % 1440;
+  return String(Math.floor(w / 60)).padStart(2, "0") + ":" + String(w % 60).padStart(2, "0");
+}
+
+
+// ---- public (read-only) Swiss page ----------------------------------
+let PUBLIC_SWISS_TN = null;
+let PUBLIC_SWISS_ROUND = null;
+let PUBLIC_SWISS_TAB = "open";
+let PUBLIC_SWISS_QUERY = "";
+function renderPublicSwiss(tn, eventId, meta, ev) {
+  PUBLIC_SWISS_TN = tn;
+  const sw = tn.swiss;
+  const generated = sw.generatedRounds > 0;
+  const statusLabel = tn.status === "completed"
+    ? t("tournStatusCompleted")
+    : generated
+    ? t("swissRoundOf").replace("{n}", sw.generatedRounds).replace("{total}", sw.totalRounds)
+    : t("swissNotDrawn");
+  return `
+    <div class="tourn-summary tourn-hero">
+      ${meta ? `<h3 style="margin:0 0 6px;">${eventNameHtml(meta)}</h3>` : ""}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <span class="tourn-summary-badge">${escapeAttr(tournamentFormatLabel("swiss"))}</span>
+        <span class="tourn-summary-badge">${escapeAttr(statusLabel)}</span>
+        ${ev ? `<button class="secondary small" id="tourn-public-view-event-btn" style="margin-inline-start:auto;">${t("btnViewEventDetails")}</button>` : ""}
+      </div>
+    </div>
+    <div id="swiss-pub-body">${renderPublicSwissInner()}</div>
+  `;
+}
+function renderPublicSwissInner() {
+  const tn = PUBLIC_SWISS_TN;
+  const sw = tn.swiss;
+  if (!sw.generatedRounds) return `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
+  const cur = PUBLIC_SWISS_ROUND && PUBLIC_SWISS_ROUND <= sw.generatedRounds ? PUBLIC_SWISS_ROUND : sw.generatedRounds;
+  const round = sw.rounds[cur - 1];
+  const q = PUBLIC_SWISS_QUERY.trim().toLowerCase();
+  const resText = { "1-0": "1–0", "0-1": "0–1", "1/2-1/2": "½–½", "1-0f": "1–0 (f)", "0-1f": "0–1 (f)", "0-0f": "0–0 (f)" };
+  const tabs = sw.rounds
+    .map((r) => `<button class="secondary small swiss-round-tab ${r.number === cur ? "active" : ""}" data-swiss-pub-round="${r.number}">${r.number}</button>`)
+    .join("");
+  const boards = round.pairings
+    .filter((p) => p.b != null)
+    .map((p) => {
+      const hit = q && (p.aLabel.toLowerCase().includes(q) || p.bLabel.toLowerCase().includes(q));
+      const hide = q && !hit ? ' style="display:none;"' : "";
+      return `<tr class="${p.result ? "decided" : ""}${hit ? " swiss-hit" : ""}"${hide}><td>${swissBoardCell(p, round)}</td><td class="swiss-white">${escapeAttr(p.aLabel)}</td><td class="swiss-res-cell"><strong>${p.result ? escapeAttr(resText[p.result] || p.result) : "—"}</strong></td><td class="swiss-black">${escapeAttr(p.bLabel)}</td></tr>`;
+    })
+    .join("");
+  const bye = round.pairings.find((p) => p.b == null);
+  const roundCard = tournCardHtml(
+    TOURN_ICON.live,
+    t("swissRoundsTitle"),
+    `<div class="swiss-round-tabs">${tabs}</div>
+     <p class="hint-note">${escapeAttr(t("swissRoundOf").replace("{n}", cur).replace("{total}", sw.totalRounds))}${round.time ? " · " + escapeAttr(t("swissStarts").replace("{time}", formatTimeOfDay(round.time))) : ""}</p>
+     <input type="search" id="swiss-pub-search" placeholder="${escapeAttr(t("swissFindBoard"))}" value="${escapeAttr(PUBLIC_SWISS_QUERY)}" style="max-width:280px;" />
+     <div class="tourn-table-scroll"><table class="swiss-table swiss-boards"><thead><tr><th>${t("swissBoard")}</th><th>${t("swissWhite")}</th><th>${t("colResult")}</th><th>${t("swissBlack")}</th></tr></thead><tbody>${boards}</tbody></table></div>
+     ${bye ? `<p class="hint-note">${escapeAttr(t("swissByeLine").replace("{name}", bye.aLabel))}</p>` : ""}`,
+    "tourn-card-live"
+  );
+  const standingsCard = tournCardHtml(TOURN_ICON.standings, t("swissStandingsTitle"), swissStandingsHtml(sw, PUBLIC_SWISS_TAB, true), "tourn-card-standings");
+  const prizesCard = tn.status === "completed" ? tournCardHtml(TOURN_ICON.standings, t("swissPrizesTitle"), swissPrizeColsHtml(sw), "tourn-card-standings") : "";
+  return roundCard + standingsCard + prizesCard;
+}
+document.getElementById("tourn-public-detail-body").addEventListener("click", (e) => {
+  const rb = e.target.closest("[data-swiss-pub-round]");
+  const tb = e.target.closest("[data-swiss-pub-tab]");
+  if (!rb && !tb) return;
+  if (rb) PUBLIC_SWISS_ROUND = Number(rb.dataset.swissPubRound);
+  if (tb) PUBLIC_SWISS_TAB = tb.dataset.swissPubTab;
+  const wrap = document.getElementById("swiss-pub-body");
+  if (wrap) wrap.innerHTML = renderPublicSwissInner();
+});
+document.getElementById("tourn-public-detail-body").addEventListener("input", (e) => {
+  if (e.target.id !== "swiss-pub-search") return;
+  PUBLIC_SWISS_QUERY = e.target.value;
+  const wrap = document.getElementById("swiss-pub-body");
+  if (!wrap) return;
+  wrap.innerHTML = renderPublicSwissInner();
+  const input = document.getElementById("swiss-pub-search");
+  if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+});
+
+// ---- Register / My Registrations: Women & Juniors ranking tick-boxes ----
+function swissCatBoxesHtml(prefix, women, junior, extraAttrs) {
+  return `<span class="reg-cat-wrap hidden">
+    <label class="reg-cat"><input type="checkbox" class="att-cat" data-cat="women" ${extraAttrs} ${women ? "checked" : ""} /> ${escapeAttr(t("regCatWomen"))}</label>
+    <label class="reg-cat"><input type="checkbox" class="att-cat" data-cat="junior" ${extraAttrs} ${junior ? "checked" : ""} /> ${escapeAttr(t("regCatJunior"))}</label>
+  </span>`;
+}
+function updateRegCategoryVisibility() {
+  const sel = document.getElementById("reg-event");
+  const ev = sel ? EVENTS_DATA.find((e) => e.id === Number(sel.value)) : null;
+  const on = !!(ev && ev.rankingCategories);
+  document.querySelectorAll("#reg-attendees-list .reg-cat-wrap").forEach((el) => el.classList.toggle("hidden", !on));
+  const note = document.getElementById("reg-cat-note");
+  if (note) note.classList.toggle("hidden", !on);
 }
 
 // Present/absent check-in for the actual players in this tournament -
@@ -6271,6 +6900,10 @@ function refreshCreateSetupPreview() {
   const el = document.getElementById("tourn-setup-preview");
   if (!el) return;
   const cfg = tournSetupCfgFromCreateForm();
+  if (cfg.format === "swiss") {
+    el.innerHTML = swissCreatePreviewHtml();
+    return;
+  }
   el.innerHTML = setupPreviewHtml(computeTournamentSetupPreview(cfg), cfg);
 }
 function refreshEditSetupPreview() {
@@ -6298,6 +6931,7 @@ function renderTournamentCreateForm() {
           <option value="knockout">${t("tournamentFormatKnockout")}</option>
           <option value="groups">${t("tournamentFormatGroups")}</option>
           <option value="casual">${t("tournamentFormatCasual")}</option>
+          <option value="swiss">${t("tournamentFormatSwiss")}</option>
         </select>
       </div>
     </div>
@@ -6305,9 +6939,13 @@ function renderTournamentCreateForm() {
       <div><label>${t("fieldNumGroups")}</label><input id="tourn-num-groups" type="number" min="2" value="2" /></div>
       <div><label>${t("fieldAdvancePerGroup")}</label><input id="tourn-advance-per-group" type="number" min="1" value="2" /></div>
     </div>
+    <div class="grid-2" id="tourn-swiss-fields" style="display:none;">
+      <div><label>${t("fieldSwissRounds")}</label><input id="tourn-swiss-rounds" type="number" min="1" max="30" value="7" /></div>
+    </div>
+    <p class="hint-note" id="tourn-swiss-hint" style="display:none;">${t("swissCreateHint")}</p>
     <p class="hint-note" id="tourn-casual-hint" style="display:none;">${t("tournCasualCreateHint")}</p>
     <div id="tourn-match-config-fields">
-      <div class="grid-2">
+      <div class="grid-2" id="tourn-points-fields">
         <div><label>${t("fieldWinPoints")}</label><input id="tourn-win-points" type="number" min="0" value="3" /></div>
         <div><label>${t("fieldDrawPoints")}</label><input id="tourn-draw-points" type="number" min="0" value="1" /></div>
         <div><label>${t("fieldLossPoints")}</label><input id="tourn-loss-points" type="number" min="0" value="0" /></div>
@@ -6337,12 +6975,27 @@ function toggleTournamentGroupFields() {
   if (matchConfig) matchConfig.style.display = casual ? "none" : "";
   const casualHint = document.getElementById("tourn-casual-hint");
   if (casualHint) casualHint.style.display = casual ? "" : "none";
+  const swiss = format === "swiss";
+  const swissFields = document.getElementById("tourn-swiss-fields");
+  if (swissFields) swissFields.style.display = swiss ? "grid" : "none";
+  const swissHint = document.getElementById("tourn-swiss-hint");
+  if (swissHint) swissHint.style.display = swiss ? "" : "none";
+  const pointsFields = document.getElementById("tourn-points-fields");
+  if (pointsFields) pointsFields.style.display = swiss ? "none" : "";
+  // Swiss is always individual players - lock the mode selector.
+  const modeSel = document.getElementById("tourn-mode");
+  if (modeSel) {
+    if (swiss) modeSel.value = "individual";
+    modeSel.disabled = swiss;
+  }
+  refreshCreateSetupPreview();
 }
 async function createTournament() {
   const msg = document.getElementById("tourn-msg");
   const mode = document.getElementById("tourn-mode").value;
   const format = document.getElementById("tourn-format").value;
   const body = { mode, format };
+  if (format === "swiss") body.swissRounds = Number(document.getElementById("tourn-swiss-rounds").value) || 7;
   if (format === "groups") {
     body.numGroups = Number(document.getElementById("tourn-num-groups").value);
     body.advancePerGroup = Number(document.getElementById("tourn-advance-per-group").value);
@@ -6364,9 +7017,11 @@ async function createTournament() {
     const drawPoints = document.getElementById("tourn-draw-points").value.trim();
     const lossPoints = document.getElementById("tourn-loss-points").value.trim();
     const availableHours = document.getElementById("tourn-available-hours").value.trim();
-    if (winPoints) body.winPoints = Number(winPoints);
-    if (drawPoints) body.drawPoints = Number(drawPoints);
-    if (lossPoints) body.lossPoints = Number(lossPoints);
+    if (format !== "swiss") {
+      if (winPoints) body.winPoints = Number(winPoints);
+      if (drawPoints) body.drawPoints = Number(drawPoints);
+      if (lossPoints) body.lossPoints = Number(lossPoints);
+    }
     if (availableHours) body.availableHours = Number(availableHours);
   }
   try {
@@ -6987,6 +7642,7 @@ function renderPublicTournamentBody(tn, eventId) {
   const ev = EVENTS_DATA.find((e) => e.id === eventId);
   const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = tournamentFormatLabel(tn.format);
+  if (tn.format === "swiss" && tn.swiss) return renderPublicSwiss(tn, eventId, meta, ev);
   let notStartedHtml = "";
   let groupsCard = "";
   let bracketCard = "";

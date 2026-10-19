@@ -31,6 +31,43 @@
   const params = new URLSearchParams(location.search);
   const eventId = params.get("event");
 
+  // Swiss (chess): newest round's boards + the live Open top-10, then the
+  // three prize rankings once the tournament is complete. Auto-refreshes
+  // with the rest of the page.
+  function swissPts(n) {
+    const whole = Math.floor(n);
+    return n - whole === 0.5 ? (whole ? whole + "½" : "½") : String(n);
+  }
+  function renderSwiss(tn) {
+    const sw = tn.swiss;
+    if (!sw || !sw.generatedRounds) return `<div class="empty-state"><h2>${esc(t("tournPublicNotStarted"))}</h2></div>`;
+    const round = sw.rounds[sw.rounds.length - 1];
+    const resText = { "1-0": "1–0", "0-1": "0–1", "1/2-1/2": "½–½", "1-0f": "1–0", "0-1f": "0–1", "0-0f": "0–0" };
+    const boards = round.pairings
+      .filter((p) => p.b != null)
+      .map((p) => `<tr><td>${p.board}</td><td>${esc(p.aLabel)}</td><td class="sw-res">${p.result ? esc(resText[p.result] || p.result) : "—"}</td><td>${esc(p.bLabel)}</td></tr>`)
+      .join("");
+    const top = sw.standings
+      .filter((r) => r.recorded > 0)
+      .slice(0, 10)
+      .map((r) => `<tr><td>${r.rank}</td><td>${esc(r.label)}</td><td class="sw-res">${swissPts(r.points)}</td></tr>`)
+      .join("");
+    const prizeCol = (title, list) => `<div class="sw-prize"><h3>${esc(title)}</h3>${list
+      .map((x) => `<div class="sw-prize-line"><span>${x.place}</span><span>${esc(x.label)}</span>${x.prize != null ? `<span>${esc(t("swissPrizeEgp").replace("{n}", Number(x.prize).toLocaleString("en-US")))}</span>` : ""}</div>`)
+      .join("")}</div>`;
+    const prizes = tn.status === "completed"
+      ? `<div class="section-title">${esc(sw.hasPrizes ? t("swissPrizesTitle") : t("swissWinnersTitle"))}</div><div class="sw-prize-grid">${prizeCol(t("swissCatOpen"), sw.rankings.open)}${prizeCol(t("swissCatWomen"), sw.rankings.women)}${prizeCol(t("swissCatJunior"), sw.rankings.junior)}</div>`
+      : "";
+    return `
+      ${prizes}
+      <div class="sw-grid">
+        <div class="standings-card"><div class="section-title" style="margin-top:0;color:#1c1c1c;">${esc(t("swissRoundOf").replace("{n}", round.number).replace("{total}", sw.totalRounds))}${round.time ? " · " + esc(t("swissStarts").replace("{time}", round.time)) : ""}</div>
+          <table><thead><tr><th>${esc(t("swissBoard"))}</th><th>${esc(t("swissWhite"))}</th><th>${esc(t("colResult"))}</th><th>${esc(t("swissBlack"))}</th></tr></thead><tbody>${boards}</tbody></table></div>
+        <div class="standings-card"><div class="section-title" style="margin-top:0;color:#1c1c1c;">${esc(t("swissStandingsTitle"))}</div>
+          <table><thead><tr><th>#</th><th>${esc(t("colName"))}</th><th>${esc(t("swissColPts"))}</th></tr></thead><tbody>${top}</tbody></table></div>
+      </div>`;
+  }
+
   async function applyTheme() {
     try {
       const res = await fetch("/api/settings");
@@ -187,13 +224,15 @@
         return;
       }
       const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-      const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : tn.format === "casual" ? t("tournamentFormatCasual") : t("tournamentFormatKnockout");
+      const formatLabel = tn.format === "groups" ? t("tournamentFormatGroups") : tn.format === "casual" ? t("tournamentFormatCasual") : tn.format === "swiss" ? t("tournamentFormatSwiss") : t("tournamentFormatKnockout");
       const statusLabel = tn.format === "casual"
         ? (tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusCasual"))
         : (tn.status === "completed" ? t("tournStatusCompleted") : t("tournStatusInProgress"));
       let inner = "";
       if (tn.format === "casual") {
         inner = renderCasualAttendance(tn.attendance);
+      } else if (tn.format === "swiss") {
+        inner = renderSwiss(tn);
       } else if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
         inner = `<div class="empty-state"><h2>${esc(t("tournPublicNotStarted"))}</h2></div>`;
       } else if (tn.status === "groups") {

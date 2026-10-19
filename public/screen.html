@@ -152,6 +152,15 @@
   .lang-ar { display: block; }
   .lang-en { display: block; font-size: 0.72em; color: var(--muted); font-weight: 400; }
   .hidden { display: none !important; }
+  .sw-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 20px; align-items: start; }
+  .sw-res { text-align: center; font-weight: 800; white-space: nowrap; }
+  .sw-prize-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .sw-prize { background: var(--card, #fff); border-radius: 14px; overflow: hidden; border: 1px solid var(--border, #e4dfd8); }
+  .sw-prize h3 { margin: 0; padding: 10px 16px; background: var(--red); color: #fff; font-size: 1.3rem; }
+  .sw-prize-line { display: flex; gap: 12px; padding: 10px 16px; font-size: 1.2rem; border-top: 1px solid var(--border, #e4dfd8); }
+  .sw-prize-line span:nth-child(2) { flex: 1; font-weight: 700; }
+  .sw-prize-line span:last-child { color: var(--red); font-weight: 800; }
+  @media (max-width: 900px) { .sw-grid, .sw-prize-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
