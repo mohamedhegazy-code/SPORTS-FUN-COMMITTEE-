@@ -627,6 +627,10 @@
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v3M14 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span data-i18n="adminTabEvents">Events</span>
         </button>
+        <button class="admin-tab evt-tab-only" type="button" data-admin-tab="reports" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5V17.5H5V2.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span data-i18n="adminTabReports">Reports</span>
+        </button>
         <button class="admin-tab admin-full-only" type="button" data-admin-tab="members" role="tab">
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7.2" cy="6.5" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.3 16c.6-2.9 2.5-4.4 4.9-4.4s4.3 1.5 4.9 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14.3" cy="7" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M13 11.9c1.9.1 3.4 1.5 3.9 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
           <span data-i18n="adminTabMembers">Members</span>
@@ -830,6 +834,15 @@
           <select id="ev-delete-select"></select>
           <button class="danger" id="ev-delete-btn" data-i18n="btnDeleteEvent" style="margin-top:10px;">Delete event</button>
           <div class="msg" id="ev-delete-msg"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden evt-tab-only" data-admin-panel="reports">
+        <div class="card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5V17.5H5V2.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="reportsTitle">Reports</span></h2>
+          <p class="section-sub" data-i18n="reportsIntro">Print or save as PDF the sheets for any event. Each button opens a clean A4 page in a new tab - choose Print, then Save as PDF.</p>
+          <div id="reports-list"></div>
+          <div class="msg" id="reports-msg"></div>
         </div>
       </div>
 
