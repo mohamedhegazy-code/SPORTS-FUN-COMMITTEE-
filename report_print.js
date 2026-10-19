@@ -18,6 +18,17 @@ function dateText(iso, lang) {
     return String(iso);
   }
 }
+const AGE_LABELS = {
+  under12: ["أطفال (أقل من 12)", "Kids (under 12)"],
+  "12to17": ["مراهقون (12–17)", "Teens (12–17)"],
+  "18to45": ["بالغون (18–45)", "Adults (18–45)"],
+  "46plus": ["كبار السن (+46)", "Seniors (46+)"],
+};
+const AGE_ORDER = ["under12", "12to17", "18to45", "46plus"];
+function ageLabel(code, ar) {
+  const l = AGE_LABELS[code];
+  return l ? l[ar ? 0 : 1] : "";
+}
 function shortDate(isoDateTime) {
   return String(isoDateTime || "").slice(0, 10);
 }
@@ -42,6 +53,8 @@ const CSS = `
   .strip > div:first-child { border-inline-start: 0; }
   .strip .k { font-size: 8.5pt; color: #5b5b5b; }
   .strip .v { font-size: 13pt; font-weight: 800; color: var(--red); }
+  .agebar { display: flex; flex-wrap: wrap; gap: 1mm 5mm; align-items: baseline; padding: 2mm 3mm; font-size: 9pt; background: #faf6e6; border-bottom: 0.4mm solid var(--border); }
+  .agebar b { color: var(--red); }
   table.grid { width: 100%; border-collapse: collapse; margin-top: 4mm; font-size: 10.5pt; }
   table.grid th { background: #111; color: var(--gold); font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.04em; padding: 2mm; text-align: start; }
   table.grid thead { display: table-header-group; }
@@ -51,7 +64,7 @@ const CSS = `
   table.grid td.c, table.grid th.c { text-align: center; }
   table.grid td.num { direction: ltr; unicode-bidi: isolate; text-align: center; }
   table.grid td.name { font-weight: 700; }
-  table.grid td.sig { width: 38mm; border: 0.4mm solid #999; background: #fff !important; }
+  table.grid td.sig { width: 30mm; border: 0.4mm solid #999; background: #fff !important; }
   table.grid tr.wait td { color: var(--muted); font-style: italic; }
   table.grid tr.total td { background: #fff6d6 !important; font-weight: 800; border-top: 0.5mm solid var(--gold); }
   .tag { display: inline-block; font-size: 7.5pt; font-weight: 800; padding: 0.3mm 1.8mm; border-radius: 99px; background: #e6e2da; color: #444; }
@@ -98,17 +111,25 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
     <div><div class="k">${esc(L("السعة", "Capacity"))}</div><div class="v">${event.maxCapacity ? esc(event.maxCapacity) : "—"}</div></div>
   </div>`;
 
+  // Age-group breakdown of the confirmed players (blank = not set / a
+  // dependent's registration, which carries no age group of its own).
+  const ageCounts = AGE_ORDER.map((code) => ({ code, n: confirmed.filter((r) => r.ageGroup === code).length }));
+  const ageUnset = confirmed.filter((r) => !AGE_LABELS[r.ageGroup]).length;
+  const ageBar = `<div class="agebar"><b>${esc(L("الفئات العمرية", "Age groups"))}:</b> ${ageCounts
+    .map((a) => `<span>${esc(ageLabel(a.code, ar))} <b>${a.n}</b></span>`)
+    .join("")}<span>${esc(L("غير محدد", "Not set"))} <b>${ageUnset}</b></span></div>`;
+
   let table;
   if (view === "attendance") {
     const list = confirmed.slice().sort(byName);
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          <th class="c">${esc(L("الهاتف", "Phone"))}</th><th class="c">${esc(L("الحضور", "Present"))}</th><th>${esc(L("التوقيع", "Signature"))}</th></tr></thead><tbody>
+          <th class="c">${esc(L("الهاتف", "Phone"))}</th><th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("الحضور", "Present"))}</th><th>${esc(L("التوقيع", "Signature"))}</th></tr></thead><tbody>
           ${list
             .map(
               (r, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              <td class="num">${esc(r.phone || "")}</td><td class="c">${r.checkedIn ? "✓" : ""}</td><td class="sig"></td></tr>`
+              <td class="num">${esc(r.phone || "")}</td><td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="c">${r.checkedIn ? "✓" : ""}</td><td class="sig"></td></tr>`
             )
             .join("")}</tbody></table>`
       : `<p class="empty">${esc(L("لا يوجد مسجّلون بعد.", "No registrations yet."))}</p>`;
@@ -118,21 +139,21 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          <th class="c">${esc(L("تسجيل مبكر", "Early"))}</th><th class="c">${esc(L("المركز", "Position"))}</th><th class="c">${esc(L("النقاط", "Points"))}</th></tr></thead><tbody>
+          <th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("تسجيل مبكر", "Early"))}</th><th class="c">${esc(L("المركز", "Position"))}</th><th class="c">${esc(L("النقاط", "Points"))}</th></tr></thead><tbody>
           ${list
             .map(
               (r, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              <td class="c">${r.earlyRegistration ? "✓" : ""}</td><td class="c">${r.position ? esc(r.position) : ""}</td><td class="num"><b>${esc(r.points)}</b></td></tr>`
+              <td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="c">${r.earlyRegistration ? "✓" : ""}</td><td class="c">${r.position ? esc(r.position) : ""}</td><td class="num"><b>${esc(r.points)}</b></td></tr>`
             )
             .join("")}
-          <tr class="total"><td colspan="5">${esc(L("إجمالي النقاط الممنوحة", "Total points awarded"))}</td><td class="num">${esc(total)}</td></tr></tbody></table>`
+          <tr class="total"><td colspan="6">${esc(L("إجمالي النقاط الممنوحة", "Total points awarded"))}</td><td class="num">${esc(total)}</td></tr></tbody></table>`
       : `<p class="empty">${esc(L("لم يتم تسجيل حضور أحد بعد، فلا توجد نقاط.", "Nobody has been checked in yet, so there are no points to show."))}</p>`;
   } else {
     const list = confirmed.slice().sort(byName).concat(waitlisted.slice().sort(byName));
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          <th class="c">${esc(L("الهاتف", "Phone"))}</th><th class="c">${esc(L("تاريخ التسجيل", "Registered"))}</th><th class="c">${esc(L("الحالة", "Status"))}</th></tr></thead><tbody>
+          <th class="c">${esc(L("الهاتف", "Phone"))}</th><th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("تاريخ التسجيل", "Registered"))}</th><th class="c">${esc(L("الحالة", "Status"))}</th></tr></thead><tbody>
           ${list
             .map((r, i) => {
               const status = r.waitlisted
@@ -141,7 +162,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
                 ? `<span class="tag ok">${esc(L("حضر", "Checked in"))}</span>`
                 : `<span class="tag">${esc(L("مؤكد", "Confirmed"))}</span>`;
               return `<tr class="${r.waitlisted ? "wait" : ""}"><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              <td class="num">${esc(r.phone || "")}</td><td class="num">${esc(shortDate(r.registeredAt))}</td><td class="c">${status}</td></tr>`;
+              <td class="num">${esc(r.phone || "")}</td><td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${esc(shortDate(r.registeredAt))}</td><td class="c">${status}</td></tr>`;
             })
             .join("")}</tbody></table>`
       : `<p class="empty">${esc(L("لا يوجد مسجّلون بعد.", "No registrations yet."))}</p>`;
@@ -150,6 +171,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
   const body = `<section class="sheet" dir="${dir}">
     <div class="head"><img src="/ahly-crest-logo.png" alt="" /><div class="t"><div class="org">${esc(L("النادي الأهلي · لجنة الرياضة الترفيهية – التجمع الخامس، القاهرة الجديدة","Al Ahly Club · Recreational Sports Committee — Fifth Settlement, New Cairo"))}</div><h1>${esc(title)}</h1><p>${esc(subtitle)} — ${esc(eventDate)}</p></div></div>
     ${strip}
+    ${ageBar}
     ${table}
     <div class="sign"><div>${esc(L("المسؤول", "Prepared by"))}</div><div>${esc(L("ختم اللجنة", "Committee stamp"))}</div></div>
     <p class="foot">${esc(L("أُنشئ في", "Generated"))} <bdi dir="ltr">${esc(generatedAt)}</bdi></p>
