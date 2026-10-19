@@ -1457,3 +1457,11 @@ html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
 .ev-managers-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0; }
 .ev-managers-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
 .ev-managers-list input { width: auto; margin: 0; }
+
+/* "Watch how" help videos (Member Profile) */
+.howto-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+@media (max-width: 640px) { .howto-grid { grid-template-columns: 1fr; } }
+.howto-item { margin: 0; }
+.howto-item video { width: 100%; display: block; border-radius: 10px; background: #1b0707; aspect-ratio: 1280 / 900; }
+.howto-item figcaption { margin-top: 8px; font-weight: 600; font-size: 0.92rem; text-align: center; }
+.howto-item.howto-flash video { outline: 3px solid var(--gold, #c9a227); outline-offset: 3px; }

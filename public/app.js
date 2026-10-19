@@ -9320,3 +9320,27 @@ for (const [wrapId, getCtx] of [
   await loadLadder();
   await checkSession();
 })();
+
+
+// "Watch how" links (My Family card, event registration form): jump to the
+// Member Profile's help-video card and start the matching video. The click is
+// the user gesture browsers require before play() is allowed to run.
+document.addEventListener("click", (ev) => {
+  const link = ev.target.closest && ev.target.closest(".howto-link");
+  if (!link) return;
+  ev.preventDefault();
+  const which = link.dataset.howto === "register-family" ? "howto-register-family" : "howto-add-family";
+  switchTab("mypoints");
+  const fig = document.getElementById(which);
+  if (!fig) return;
+  document.querySelectorAll(".howto-item").forEach((f) => f.classList.remove("howto-flash"));
+  fig.classList.add("howto-flash");
+  fig.scrollIntoView({ behavior: "smooth", block: "center" });
+  const v = fig.querySelector("video");
+  if (v) {
+    try {
+      const p = v.play();
+      if (p && p.catch) p.catch(() => {});
+    } catch (_) {}
+  }
+});

@@ -302,6 +302,7 @@
       <label data-i18n="whoAttending">Who's attending?</label>
       <div id="reg-attendees-list"></div>
       <p class="hint-note" data-i18n="manageFamilyHint">Want to register a family member? Add them under Member Profile → My Family, then come back here.</p>
+      <p class="hint-note"><a href="#" class="howto-link" data-howto="register-family" data-i18n="howToLinkRegisterFamily">▶ Watch how to register family members for an event</a></p>
 
       <button class="primary" id="reg-submit" data-i18n="btnRegister">Submit registration</button>
       <div class="msg" id="reg-msg"></div>
@@ -338,6 +339,23 @@
         <p data-i18n="pageHeroProfileSub">Your points, family, registrations, and account settings — all in one place.</p>
       </div>
     </div>
+    <!-- "Watch how" help videos (Arabic voice-over + captions). The two
+         links elsewhere (My Family, event registration) jump here and play. -->
+    <div class="card" id="mp-howto-card">
+      <h2 data-i18n="howToCardTitle">Watch how</h2>
+      <p class="hint-note" data-i18n="howToCardSub">Two short videos (about a minute each) — narrated in Arabic with Arabic on-screen captions.</p>
+      <div class="howto-grid">
+        <figure class="howto-item" id="howto-add-family">
+          <video controls preload="metadata" playsinline poster="videos/how-to-add-family-poster.jpg" src="videos/how-to-add-family-ar.mp4"></video>
+          <figcaption data-i18n="howToAddFamilyTitle">How to add a family member</figcaption>
+        </figure>
+        <figure class="howto-item" id="howto-register-family">
+          <video controls preload="metadata" playsinline poster="videos/how-to-register-family-poster.jpg" src="videos/how-to-register-family-ar.mp4"></video>
+          <figcaption data-i18n="howToRegisterFamilyTitle">How to register a family member for an event</figcaption>
+        </figure>
+      </div>
+    </div>
+
     <div class="card" id="mp-signed-out">
       <p style="color:var(--muted);" data-i18n="mpSignInFirst">Log in on the Register tab to see your points balance.</p>
     </div>
@@ -417,6 +435,7 @@
 
       <h3 style="margin-top:20px;" data-i18n="myFamilyDependentsTitle">Dependents without their own club ID</h3>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myFamilyIntro">Add family members here, then pick who's attending when you register for an event. They don't need their own login — everyone's points pool into your balance.</p>
+      <p class="hint-note"><a href="#" class="howto-link" data-howto="add-family" data-i18n="howToLinkAddFamily">▶ Watch how to add a family member</a></p>
       <div id="mp-family-list"></div>
       <div class="grid-2" style="align-items:end;">
         <div><label class="required-label" data-i18n="fieldFamilyMemberName">Family member's name</label><input id="fam-name" placeholder="e.g. Sara Ahmed" /></div>
