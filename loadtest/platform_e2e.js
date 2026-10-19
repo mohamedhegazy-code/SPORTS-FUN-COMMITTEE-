@@ -293,7 +293,8 @@ async function main() {
   }
 
   // staff-login wrong password / staff accounts CRUD + role matrix
-  let staffStaff, staffTournament, staffManagement, staffAdmin2;
+  let staffStaff, staffTournament, staffManagement, staffAdmin2, tournUser;
+  const assignTM = (eventId) => api(`/api/admin/events/${eventId}/managers`, { method: "PUT", jar: admin, body: { managerUsernames: [tournUser] } });
   {
     const wrong = await api("/api/auth/staff-login", { method: "POST", jar: await primeCsrf(newJar()), body: { username: ADMIN_USER, password: "wrongpassword" } });
     ok(wrong.status === 401, "staff-login: wrong password -> 401", wrong.json);
@@ -307,7 +308,8 @@ async function main() {
       return jar;
     }
     staffStaff = await createStaff("staff", `staffrole_${Date.now()}`);
-    staffTournament = await createStaff("tournament", `tournrole_${Date.now()}`);
+    tournUser = `tournrole_${Date.now()}`;
+    staffTournament = await createStaff("tournament", tournUser);
     staffManagement = await createStaff("management", `mgmtrole_${Date.now()}`);
     staffAdmin2 = await createStaff("admin", `adminrole2_${Date.now()}`);
 
@@ -389,8 +391,8 @@ async function main() {
       { path: "/api/admin/directory", method: "GET", allow: [] },
       { path: "/api/redemptions", method: "GET", allow: [] },
       { path: "/api/registrations", method: "GET", allow: [] },
-      { path: "/api/staff/chats", method: "GET", allow: [] },
-      { path: "/api/staff/inquiries", method: "GET", allow: [] },
+      { path: "/api/staff/chats", method: "GET", allow: ["tournament"] }, // admin + Tournament Manager
+      { path: "/api/staff/inquiries", method: "GET", allow: ["tournament"] }, // admin + Tournament Manager
       { path: "/api/admin/dashboard", method: "GET", allow: ["tournament"] },
       { path: "/api/admin/management/dashboard", method: "GET", allow: ["management"] },
       { path: "/api/admin/events/1/waitlist", method: "GET", allow: ["tournament"] },
@@ -477,6 +479,7 @@ async function main() {
     // parent/child events
     const parent = await createEvent(admin, { nameEn: "Multi-Activity Day" });
     eventParent = parent.json;
+    await assignTM(eventParent.id);
     const child = await createEvent(admin, { nameEn: "Chess Sub-Activity", parentEventId: eventParent.id });
     ok(child.status === 201, "create child activity under a parent event", child.json);
     eventChild = child.json;
@@ -570,6 +573,7 @@ async function main() {
 
     // admin cancel with reason + promote endpoint directly
     const promoTestEvent = await createEvent(admin, { nameEn: "Promote Test Event", maxCapacity: 1 });
+    await assignTM(promoTestEvent.json.id);
     const pA = await signupMember("PROA");
     const pB = await signupMember("PROB");
     await api("/api/register", { method: "POST", jar: pA.jar, body: { eventId: promoTestEvent.json.id } });
@@ -649,6 +653,39 @@ async function main() {
     ok(doubleCheckin.status === 409, "double check-in of the same registration -> 409", doubleCheckin.json);
     const balAfterDouble = await api("/api/me/balance", { jar: ciMember.jar });
     ok(balAfterDouble.json.balance === balAfter.json.balance, "balance unchanged after a rejected double check-in", { after: balAfter.json.balance, afterDouble: balAfterDouble.json.balance });
+
+    // ---- undo a mistaken check-in (gate staff / Tournament Manager / admin; not Management) ----
+    {
+      const undoNoAuth = await api("/api/checkin/undo", { method: "POST", jar: await primeCsrf(newJar()), body: { registrationId: regId } });
+      ok(undoNoAuth.status === 401, "undo check-in unauthenticated -> 401", undoNoAuth.json);
+      const undoMember = await api("/api/checkin/undo", { method: "POST", jar: ciMember.jar, body: { registrationId: regId } });
+      ok(undoMember.status === 401 || undoMember.status === 403, "undo check-in as a member -> 401/403", undoMember.json);
+      const undoMgmt = await api("/api/checkin/undo", { method: "POST", jar: staffManagement, body: { registrationId: regId } });
+      ok(undoMgmt.status === 403, "undo check-in as Management role -> 403", undoMgmt.json);
+      const undoTmUnassigned = await api("/api/checkin/undo", { method: "POST", jar: staffTournament, body: { registrationId: regId } });
+      ok(undoTmUnassigned.status === 403, "undo check-in as a Tournament Manager NOT assigned to the event -> 403", undoTmUnassigned.json);
+      const undoMissing = await api("/api/checkin/undo", { method: "POST", jar: staffStaff, body: { registrationId: 9999999 } });
+      ok(undoMissing.status === 404, "undo check-in for a nonexistent registration -> 404", undoMissing.json);
+
+      const undoOk = await api("/api/checkin/undo", { method: "POST", jar: staffStaff, body: { registrationId: regId } });
+      ok(undoOk.status === 200 && undoOk.json.success, "gate staff can undo a check-in", undoOk.json);
+      const balUndone = await api("/api/me/balance", { jar: ciMember.jar });
+      ok(balUndone.json.balance === balBefore.json.balance, "points from the undone check-in are removed again", { before: balBefore.json.balance, after: balUndone.json.balance });
+      const rosterAfterUndo = await api(`/api/staff/events/${ciEvent.json.id}/roster`, { jar: staffStaff });
+      const rowU = (rosterAfterUndo.json || []).find((r) => r.registrationId === regId);
+      ok(rowU && rowU.checkedIn === false, "roster shows the person as not checked in after the undo", rowU);
+      ok(rowU && !!rowU.qrDataUrl, "the QR is valid (shown) again after the undo");
+      const undoAgain = await api("/api/checkin/undo", { method: "POST", jar: staffStaff, body: { registrationId: regId } });
+      ok(undoAgain.status === 409, "undoing a registration that is not checked in -> 409", undoAgain.json);
+
+      const reCheck = await api("/api/checkin/manual", { method: "POST", jar: staffStaff, body: { registrationId: regId } });
+      ok(reCheck.status === 200, "the person can be checked in again after an undo", reCheck.json);
+      await assignTM(ciEvent.json.id);
+      const undoTm = await api("/api/checkin/undo", { method: "POST", jar: staffTournament, body: { registrationId: regId } });
+      ok(undoTm.status === 200, "an assigned Tournament Manager can undo a check-in", undoTm.json);
+      const reCheck2 = await api("/api/checkin/manual", { method: "POST", jar: staffStaff, body: { registrationId: regId } });
+      ok(reCheck2.status === 200, "checked in again (leave the final state checked in for the tests below)", reCheck2.json);
+    }
 
     const checkinMissingReg = await api("/api/checkin/manual", { method: "POST", jar: staffStaff, body: { registrationId: 9999999 } });
     ok(checkinMissingReg.status === 404, "manual check-in for nonexistent registration -> 404", checkinMissingReg.json);
@@ -895,7 +932,72 @@ async function main() {
       ok(inqResolve.status === 200 && inqResolve.json.resolved === true, "resolve inquiry with a staff note", inqResolve.json);
     }
     const inqReadMissing = await api(`/api/staff/inquiries/999999/read`, { method: "POST", jar: admin });
+    // Tournament Manager can read + reply to member chat and handle enquiries; gate staff / management cannot.
+    {
+      const tmChats = await api("/api/staff/chats", { jar: staffTournament });
+      ok(tmChats.status === 200 && Array.isArray(tmChats.json), "tournament role: can list chat threads", tmChats.status);
+      const tmReply = await api(`/api/staff/chats/${chatMember.membershipNumber}`, { method: "POST", jar: staffTournament, body: { text: "Reply from the Tournament Manager" } });
+      ok(tmReply.status === 201 && tmReply.json.sender === "staff", "tournament role: can reply to a member chat", tmReply.json);
+      const tmThread = await api(`/api/staff/chats/${chatMember.membershipNumber}`, { jar: staffTournament });
+      ok(tmThread.status === 200 && JSON.stringify(tmThread.json).includes("Reply from the Tournament Manager"), "tournament role: reply shows in the thread");
+      const tmUnread = await api("/api/staff/chats/unread-count", { jar: staffTournament });
+      ok(tmUnread.status === 200, "tournament role: unread count", tmUnread.status);
+      const tmInq = await api("/api/staff/inquiries", { jar: staffTournament });
+      ok(tmInq.status === 200 && Array.isArray(tmInq.json), "tournament role: can list inquiries", tmInq.status);
+      for (const [label, jar] of [["gate staff", staffStaff], ["management", staffManagement]]) {
+        const a1 = await api(`/api/staff/chats/${chatMember.membershipNumber}`, { method: "POST", jar, body: { text: "nope" } });
+        ok(a1.status === 403, `${label}: cannot reply to member chat`, a1.status);
+        const a2 = await api("/api/staff/inquiries", { jar });
+        ok(a2.status === 403, `${label}: cannot read inquiries`, a2.status);
+      }
+    }
     ok(inqReadMissing.status === 404, "mark nonexistent inquiry as read -> 404", inqReadMissing.json);
+
+    // ---- replies to public inquiries (send + edit) and editing chat replies
+    {
+      const inqTarget = inqList.json.find((i) => i.phone) || inqList.json[0];
+      const r1 = await api(`/api/staff/inquiries/${inqTarget.id}/replies`, { method: "POST", jar: staffTournament, body: { text: "  Thanks, we will confirm tomorrow  ", channel: "whatsapp" } });
+      ok(r1.status === 201 && r1.json.replies.length === 1 && r1.json.replies[0].text === "Thanks, we will confirm tomorrow" && r1.json.replies[0].channel === "whatsapp" && !r1.json.replies[0].editedAt, "inquiry reply recorded (trimmed, channel, no edit tag)", r1.json.replies);
+      const rid = r1.json.replies[0].id;
+      const rEmpty = await api(`/api/staff/inquiries/${inqTarget.id}/replies`, { method: "POST", jar: admin, body: { text: "   " } });
+      ok(rEmpty.status === 400, "empty inquiry reply -> 400", rEmpty.status);
+      const rBadCh = await api(`/api/staff/inquiries/${inqTarget.id}/replies`, { method: "POST", jar: admin, body: { text: "x", channel: "sms" } });
+      ok(rBadCh.status === 400, "unknown reply channel -> 400", rBadCh.status);
+      const rNoEmail = await api(`/api/staff/inquiries/${inqTarget.id}/replies`, { method: "POST", jar: admin, body: { text: "x", channel: "email" } });
+      ok(inqTarget.email ? rNoEmail.status === 201 : rNoEmail.status === 400, "email reply requires an email on the inquiry", rNoEmail.status);
+      const rEdit = await api(`/api/staff/inquiries/${inqTarget.id}/replies/${rid}`, { method: "PUT", jar: admin, body: { text: "Corrected: registration opens Sunday" } });
+      const edited = rEdit.json.replies.find((x) => x.id === rid);
+      ok(rEdit.status === 200 && edited.text === "Corrected: registration opens Sunday" && edited.editedAt && edited.editedBy, "inquiry reply edited (editedAt/editedBy set)", edited);
+      const rEditMissing = await api(`/api/staff/inquiries/${inqTarget.id}/replies/999999`, { method: "PUT", jar: admin, body: { text: "x" } });
+      ok(rEditMissing.status === 404, "edit nonexistent reply -> 404", rEditMissing.status);
+      const rEditEmpty = await api(`/api/staff/inquiries/${inqTarget.id}/replies/${rid}`, { method: "PUT", jar: admin, body: { text: " " } });
+      ok(rEditEmpty.status === 400, "edit to empty text -> 400", rEditEmpty.status);
+      const rMissingInq = await api(`/api/staff/inquiries/999999/replies`, { method: "POST", jar: admin, body: { text: "x" } });
+      ok(rMissingInq.status === 404, "reply to nonexistent inquiry -> 404", rMissingInq.status);
+      for (const [label, jar] of [["gate staff", staffStaff], ["management", staffManagement]]) {
+        const a = await api(`/api/staff/inquiries/${inqTarget.id}/replies`, { method: "POST", jar, body: { text: "nope" } });
+        ok(a.status === 403, `${label}: cannot reply to inquiries`, a.status);
+        const b = await api(`/api/staff/inquiries/${inqTarget.id}/replies/${rid}`, { method: "PUT", jar, body: { text: "nope" } });
+        ok(b.status === 403, `${label}: cannot edit inquiry replies`, b.status);
+      }
+      // chat: staff can edit their own reply; member message can't be edited
+      const thread = await api(`/api/staff/chats/${chatMember.membershipNumber}`, { jar: admin });
+      const staffMsg = thread.json.find((m) => m.sender === "staff");
+      const memberMsg = thread.json.find((m) => m.sender === "member");
+      const cEdit = await api(`/api/staff/chats/${chatMember.membershipNumber}/messages/${staffMsg.id}`, { method: "PUT", jar: staffTournament, body: { text: "Hi - how can we help you today?" } });
+      ok(cEdit.status === 200 && cEdit.json.text === "Hi - how can we help you today?" && cEdit.json.editedAt, "staff edits their chat reply (editedAt set)", cEdit.json);
+      const memberSees = await api("/api/me/chat/messages", { jar: chatMember.jar });
+      const seen = memberSees.json.find((m) => m.id === staffMsg.id);
+      ok(seen.text === "Hi - how can we help you today?" && seen.editedAt, "member sees the edited text with the edited marker", seen);
+      const cEditMember = await api(`/api/staff/chats/${chatMember.membershipNumber}/messages/${memberMsg.id}`, { method: "PUT", jar: admin, body: { text: "tampered" } });
+      ok(cEditMember.status === 403, "member's own chat message cannot be edited by staff", cEditMember.status);
+      const cEditEmpty = await api(`/api/staff/chats/${chatMember.membershipNumber}/messages/${staffMsg.id}`, { method: "PUT", jar: admin, body: { text: "" } });
+      ok(cEditEmpty.status === 400, "edit chat reply to empty -> 400", cEditEmpty.status);
+      const cEditWrongMember = await api(`/api/staff/chats/NOSUCH/messages/${staffMsg.id}`, { method: "PUT", jar: admin, body: { text: "x" } });
+      ok(cEditWrongMember.status === 404, "edit chat reply under the wrong member -> 404", cEditWrongMember.status);
+      const cEditGate = await api(`/api/staff/chats/${chatMember.membershipNumber}/messages/${staffMsg.id}`, { method: "PUT", jar: staffStaff, body: { text: "nope" } });
+      ok(cEditGate.status === 403, "gate staff cannot edit chat replies", cEditGate.status);
+    }
   }
 
   // =========================================================================
