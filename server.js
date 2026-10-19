@@ -16,6 +16,8 @@ const QRCode = require("qrcode");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const helmet = require("helmet");
+const Swiss = require("./swiss");
+const { renderSwissPrint } = require("./swiss_print");
 const {
   Document,
   Packer,
@@ -2158,6 +2160,12 @@ app.get("/api/events", (req, res) => {
     ...ev,
     confirmedCount: confirmedRegistrationCount(db, ev.id),
     waitlistCount: waitlistedRegistrationCount(db, ev.id),
+    // Lets the Register tab show the Women / Juniors ranking tick-boxes for
+    // events that run a Swiss (chess) tournament.
+    rankingCategories: (() => {
+      const tn = findTournament(db, ev.id);
+      return !!(tn && tn.format === "swiss");
+    })(),
   }));
   res.json(events);
 });
@@ -3086,11 +3094,41 @@ app.get("/api/me/registrations", requireMember, async (req, res) => {
     regs.map(async (r) => ({
       ...r,
       event: db.events.find((e) => e.id === r.eventId),
+      rankingCategories: (() => {
+        const tn = findTournament(db, r.eventId);
+        return !!(tn && tn.format === "swiss");
+      })(),
+      categoriesLocked: tournamentIsGenerated(findTournament(db, r.eventId)),
       points: registrationPoints(db, r),
       qrDataUrl: r.checkedIn || r.waitlisted ? null : await qrDataUrl(r), // no QR once checked in, or while still just a waitlist request
     }))
   );
   res.json(enriched);
+});
+
+// A member declaring (or changing) which extra rankings they're competing
+// for - Women / Juniors (under 14) - on their own registration. Locked once
+// round 1 has been drawn; after that only tournament staff can change it
+// (see PUT /api/admin/tournaments/:eventId/categories).
+app.put("/api/me/registrations/:id/categories", requireMember, (req, res) => {
+  const db = req.db;
+  const id = Number(req.params.id);
+  const reg = db.registrations.find((r) => r.id === id);
+  if (!reg || reg.membershipNumber !== req.member.membershipNumber) {
+    return res.status(404).json({ error: "No such registration" });
+  }
+  const tn = findTournament(db, reg.eventId);
+  if (!tn || tn.format !== "swiss") return res.status(400).json({ error: "This event has no ranking categories" });
+  if (tournamentIsGenerated(tn)) {
+    return res.status(400).json({ error: "The first round has already been drawn - ask the tournament staff to change your category." });
+  }
+  if (typeof req.body.women !== "boolean" || typeof req.body.junior !== "boolean") {
+    return res.status(400).json({ error: "women and junior must be true or false" });
+  }
+  reg.catWomen = req.body.women;
+  reg.catJunior = req.body.junior;
+  writeDb(db);
+  res.json({ ok: true, catWomen: reg.catWomen, catJunior: reg.catJunior });
 });
 
 // Self-service cancellation: a member removing their own (or a dependent's)
@@ -3112,7 +3150,7 @@ app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
     return res.status(404).json({ error: "No such registration" });
   }
   const tournament = findTournament(db, reg.eventId);
-  if (tournament && (tournament.groups || tournament.knockout) && !reg.waitlisted) {
+  if (tournamentIsGenerated(tournament) && !reg.waitlisted) {
     return res.status(400).json({
       error: "This event's tournament bracket has already been generated - contact the committee to cancel this spot.",
     });
@@ -3257,6 +3295,11 @@ app.post("/api/register", requireMember, async (req, res) => {
     checkInAt: null,
     waitlisted: isWaitlisted,
     whatsappConfirmedAt: null,
+    // Ranking categories the player declared at sign-up (only meaningful for
+    // Swiss/chess events): Women's ranking and Juniors (under 14) ranking.
+    // Everyone is always in the Open ranking. Staff can correct these.
+    catWomen: req.body.women === true,
+    catJunior: req.body.junior === true,
   };
   db.registrations.push(registration);
   logActivity(db, {
@@ -3821,7 +3864,7 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
   const reg = db.registrations.find((r) => r.id === id);
   if (!reg) return res.status(404).json({ error: "No such registration" });
   const tournament = findTournament(db, reg.eventId);
-  if (tournament && (tournament.groups || tournament.knockout) && !reg.waitlisted) {
+  if (tournamentIsGenerated(tournament) && !reg.waitlisted) {
     return res.status(400).json({
       error: "This event's tournament bracket has already been generated - cancelling this spot isn't safe. A full admin can remove it directly from the database if it really has to go.",
     });
@@ -4473,6 +4516,9 @@ app.put("/api/settings/theme", requireStaffRole("admin"), uploadLogo.single("log
 //     standings: [{entrantId, rank}] | null,   // set once knockout completes
 //     pointsAwardedAt: isoString | null,
 //     status: "setup"|"team-setup"|"seeding"|"groups"|"knockout"|"casual"|"completed" }
+//   "swiss" (individual chess events): t.swiss = { totalRounds, rounds, withdrawn,
+//   nextPairingId } - see the "Swiss system" section below and swiss.js.
+//   Its status goes seeding -> "swiss" (rounds in play) -> "completed".
 //   "casual" is a fourth tournament format (alongside "knockout"/"groups")
 //   for a no-results "just for fun" session - entrants/teams and attendance
 //   work exactly as normal, but there's no seeding, generated bracket,
@@ -4490,6 +4536,10 @@ app.put("/api/settings/theme", requireStaffRole("admin"), uploadLogo.single("log
 
 function findTournament(db, eventId) {
   return db.tournaments.find((t) => t.eventId === eventId);
+}
+// True once entrants are locked in (bracket / group stage / Swiss round 1).
+function tournamentIsGenerated(t) {
+  return !!(t && (t.groups || t.knockout || (t.swiss && t.swiss.rounds.length > 0)));
 }
 
 // Individual-mode entrants are derived live from current registrations
@@ -4807,6 +4857,243 @@ function computeGroupStandings(group, seedOrder, points) {
     .map((id) => ({ entrantId: id, ...stat[id], gd: stat[id].gf - stat[id].ga }));
 }
 
+// ---- Swiss system (chess) ------------------------------------------------
+// format "swiss": t.swiss = { totalRounds, rounds: [{number, pairings, warnings}],
+// withdrawn: [entrantId], nextPairingId }. Pairing/ranking maths lives in
+// swiss.js; this section owns storage, validation and the client shape.
+// Prizes are set per tournament by the admin (EGP, all optional):
+// t.swiss.prizes = { open: [1st, 2nd, ...], women: [...], junior: [...] }.
+// The number of prize places in a ranking is simply the length of its list.
+// Everyone is ranked in the Open category; Women and Juniors (under 14) are
+// separate rankings over the players who ticked those categories, shown
+// independently (a player can appear in more than one). With no prizes set
+// the rankings still show a top-3 podium, just without amounts.
+const SWISS_PODIUM_PLACES = 3;
+const SWISS_MAX_PRIZE_PLACES = 20;
+const SWISS_MAX_ROUNDS = 30;
+const SWISS_PRIZE_KEYS = ["open", "women", "junior"];
+function swissPrizesOf(sw) {
+  const p = (sw && sw.prizes) || {};
+  const out = {};
+  for (const k of SWISS_PRIZE_KEYS) out[k] = Array.isArray(p[k]) ? p[k].filter((n) => Number.isFinite(n) && n >= 0) : [];
+  return out;
+}
+function swissPlacesOf(sw) {
+  const prizes = swissPrizesOf(sw);
+  const hasPrizes = SWISS_PRIZE_KEYS.some((k) => prizes[k].length > 0);
+  const places = {};
+  for (const k of SWISS_PRIZE_KEYS) places[k] = hasPrizes ? prizes[k].length : SWISS_PODIUM_PLACES;
+  return { prizes, hasPrizes, places };
+}
+
+// How many boards a round plays on and how many "waves" that takes when
+// there are fewer boards (courts) than games - e.g. 100 players on 25
+// boards play each round in two waves of 25 games.
+function swissWaves(t, games) {
+  if (!t.courts) return 1;
+  return Math.max(1, Math.ceil(games / t.courts));
+}
+function swissGamesIn(round) {
+  return round.pairings.filter((p) => p.b != null).length;
+}
+// Start time (minutes after midnight) of round `number`, accounting for each
+// earlier round's waves; a round not drawn yet is estimated from the last
+// one drawn.
+function swissRoundStartMinutes(t, number) {
+  let start = timeStrToMinutes(t.startTime);
+  const rounds = t.swiss.rounds;
+  for (let r = 1; r < number; r++) {
+    const round = rounds[r - 1] || rounds[rounds.length - 1];
+    const games = round ? swissGamesIn(round) : 0;
+    start += swissWaves(t, games) * t.matchMinutes + (t.breakMinutes || 0);
+  }
+  return start;
+}
+// Details that only the printable regulation sheet needs (editable from the
+// admin panel). Defaults come from the committee's regulation flyer.
+const SWISS_INFO_DEFAULTS = {
+  venueAr: "فرع مدينة نصر",
+  venueEn: "Madinat Nasr branch",
+  organizerAr: "تنظيم أكاديمية عدلي للشطرنج",
+  organizerEn: "Organized by Adly Chess Academy",
+  timeControlAr: "10 دقائق + 5 ثوانٍ/نقلة (فيشر)",
+  timeControlEn: "10 minutes + 5 seconds per move (Fischer)",
+  ceremonyTime: "20:30",
+  // Free text under the prize table (e.g. "Top 3 also receive a trophy and medal").
+  prizeNoteAr: "",
+  prizeNoteEn: "",
+};
+function swissRoundTime(t, number) {
+  if (!hasSchedule(t)) return null;
+  return minutesToTimeStr(swissRoundStartMinutes(t, number));
+}
+function swissRoundComplete(round) {
+  return round.pairings.every((p) => p.result != null);
+}
+
+function serializeSwiss(db, t, entrants, labelOf, forPublic) {
+  const sw = t.swiss;
+  const entrantById = new Map(entrants.map((e) => [e.id, e]));
+  const idSet = new Set(entrants.map((e) => e.id));
+  sw.rounds.forEach((r) =>
+    r.pairings.forEach((p) => {
+      idSet.add(p.a);
+      if (p.b != null) idSet.add(p.b);
+    })
+  );
+  const rows = Swiss.computeStandings(sw.rounds, [...idSet], t.seedOrder, sw.totalRounds);
+  const withdrawn = new Set(sw.withdrawn);
+  const regById = new Map(db.registrations.map((r) => [r.id, r]));
+  const counters = { women: 0, junior: 0 };
+  const standings = rows.map((r) => {
+    const e = entrantById.get(r.entrantId);
+    const reg = e ? regById.get(e.registrationIds[0]) : null;
+    const out = {
+      rank: r.rank,
+      entrantId: r.entrantId,
+      label: labelOf(r.entrantId),
+      registrationId: reg ? reg.id : null,
+      women: !!(reg && reg.catWomen),
+      junior: !!(reg && reg.catJunior),
+      withdrawn: withdrawn.has(r.entrantId),
+      absent: !!(reg && (t.attendance || {})[reg.id] === "absent"),
+      points: r.points,
+      games: r.games,
+      recorded: r.recorded,
+      wins: r.wins,
+      buchholz: r.buchholz,
+      buchholzCut1: r.buchholzCut1,
+      sonnebornBerger: r.sonnebornBerger,
+      direct: r.direct,
+      // Only meaningful for the final ranking (mid-event everyone on the
+      // same score is "level" until more rounds are played).
+      tiedOnAll: t.status === "completed" && r.tiedOnAll,
+      rankWomen: null,
+      rankJunior: null,
+    };
+    if (r.recorded > 0) {
+      if (out.women) out.rankWomen = ++counters.women;
+      if (out.junior) out.rankJunior = ++counters.junior;
+    }
+    return out;
+  });
+  const { prizes, hasPrizes, places } = swissPlacesOf(sw);
+  const prizeAt = (k, i) => (prizes[k][i] !== undefined ? prizes[k][i] : null);
+  const pick = (k, filter, place) =>
+    standings
+      .filter(filter)
+      .slice(0, places[k])
+      .map((r) => ({ place: place(r), entrantId: r.entrantId, label: r.label, points: r.points, tiedOnAll: r.tiedOnAll, prize: prizeAt(k, place(r) - 1) }));
+  const rankings = {
+    open: standings
+      .filter((r) => r.recorded > 0)
+      .slice(0, places.open)
+      .map((r, i) => ({ place: i + 1, entrantId: r.entrantId, label: r.label, points: r.points, tiedOnAll: r.tiedOnAll, prize: prizeAt("open", i) })),
+    women: pick("women", (r) => r.rankWomen != null, (r) => r.rankWomen),
+    junior: pick("junior", (r) => r.rankJunior != null, (r) => r.rankJunior),
+  };
+  const rounds = sw.rounds.map((r) => ({
+    number: r.number,
+    time: swissRoundTime(t, r.number),
+    waves: swissWaves(t, swissGamesIn(r)),
+    complete: swissRoundComplete(r),
+    warnings: (r.warnings || []).map((w) => ({ aLabel: labelOf(w.a), bLabel: labelOf(w.b) })),
+    pairings: r.pairings.map((p) => ({
+      id: p.id,
+      board: p.board,
+      // Physical board/table and start time when fewer boards than games
+      // force the round into waves (null without a schedule).
+      table: p.board != null && t.courts ? ((p.board - 1) % t.courts) + 1 : p.board,
+      time: p.board != null && hasSchedule(t) ? minutesToTimeStr(swissRoundStartMinutes(t, r.number) + (Math.ceil(p.board / t.courts) - 1) * t.matchMinutes) : null,
+      a: p.a,
+      b: p.b,
+      aLabel: labelOf(p.a),
+      bLabel: p.b != null ? labelOf(p.b) : null,
+      result: p.result,
+    })),
+  }));
+  const last = sw.rounds[sw.rounds.length - 1];
+  const allResultsIn = !last || swissRoundComplete(last);
+  return {
+    totalRounds: sw.totalRounds,
+    generatedRounds: sw.rounds.length,
+    nextRound: sw.rounds.length < sw.totalRounds ? sw.rounds.length + 1 : null,
+    allResultsIn,
+    canGenerateNext: sw.rounds.length < sw.totalRounds && allResultsIn,
+    nextRoundTime: sw.rounds.length < sw.totalRounds ? swissRoundTime(t, sw.rounds.length + 1) : null,
+    info: { ...SWISS_INFO_DEFAULTS, ...(sw.info || {}) },
+    prizes,
+    places,
+    hasPrizes,
+    prizeTotal: [...prizes.open, ...prizes.women, ...prizes.junior].reduce((a, b) => a + b, 0),
+    maxRounds: SWISS_MAX_ROUNDS,
+    rounds,
+    standings,
+    rankings,
+    final: t.status === "completed",
+    withdrawn: standings.filter((r) => r.withdrawn).map((r) => ({ entrantId: r.entrantId, label: r.label })),
+  };
+}
+
+// Draws the next round from the current standings. Players who withdrew or
+// are marked absent in the tournament attendance list sit the round out.
+function generateSwissRound(db, t) {
+  const sw = t.swiss;
+  if (!sw) return { error: "This isn't a Swiss tournament" };
+  if (sw.rounds.length >= sw.totalRounds) return { error: `All ${sw.totalRounds} rounds have already been drawn` };
+  const last = sw.rounds[sw.rounds.length - 1];
+  if (last && !swissRoundComplete(last)) {
+    const missing = last.pairings.filter((p) => p.result == null).length;
+    return { error: `Round ${last.number} still has ${missing} game${missing === 1 ? "" : "s"} without a result` };
+  }
+  const entrants = reconcileSeedOrder(db, t);
+  const withdrawn = new Set(sw.withdrawn);
+  const activeIds = entrants
+    .filter((e) => !withdrawn.has(e.id) && (t.attendance || {})[e.registrationIds[0]] !== "absent")
+    .map((e) => e.id);
+  if (activeIds.length < 2) return { error: "Need at least 2 active (not withdrawn / not absent) players to draw a round" };
+  const made = Swiss.buildNextRound({
+    activeIds,
+    rounds: sw.rounds,
+    seedOrder: t.seedOrder,
+    totalRounds: sw.totalRounds,
+    nextPairingId: sw.nextPairingId,
+  });
+  if (made.error) return { error: made.error };
+  made.round.warnings = made.warnings.map((w) => ({ a: w.a, b: w.b }));
+  sw.rounds.push(made.round);
+  sw.nextPairingId = made.nextPairingId;
+  t.status = "swiss";
+  t.standings = null;
+  return { warnings: made.round.warnings };
+}
+
+// Keeps t.status / t.standings in step with the recorded results: the
+// tournament completes when the last planned round is fully scored, and
+// re-opens if a result is cleared afterwards.
+function refreshSwissStatus(db, t) {
+  const sw = t.swiss;
+  const last = sw.rounds[sw.rounds.length - 1];
+  const finished = sw.rounds.length >= sw.totalRounds && last && swissRoundComplete(last);
+  if (finished) {
+    const entrants = tournamentEntrants(db, t);
+    const ids = new Set(entrants.map((e) => e.id));
+    sw.rounds.forEach((r) =>
+      r.pairings.forEach((p) => {
+        ids.add(p.a);
+        if (p.b != null) ids.add(p.b);
+      })
+    );
+    const rows = Swiss.computeStandings(sw.rounds, [...ids], t.seedOrder, sw.totalRounds);
+    t.standings = rows.filter((r) => r.recorded > 0).map((r) => ({ entrantId: r.entrantId, rank: r.rank }));
+    t.status = "completed";
+  } else {
+    t.standings = null;
+    t.pointsAwardedAt = t.status === "completed" ? null : t.pointsAwardedAt;
+    t.status = sw.rounds.length ? "swiss" : "seeding";
+  }
+}
+
 // Serializes a tournament for the client, resolving entrant ids to display
 // labels along the way so the frontend never has to cross-reference.
 function serializeTournament(db, t, forPublic) {
@@ -4866,7 +5153,13 @@ function serializeTournament(db, t, forPublic) {
     seedOrder: t.seedOrder,
     groups,
     knockout,
-    standings: t.standings ? t.standings.map((s) => ({ ...s, label: labelOf(s.entrantId) })) : null,
+    // Swiss tournaments store a full ranking of every player; only the prize
+    // places (top 5) are exposed through the generic standings field the
+    // public/podium views and reports read.
+    standings: t.standings
+      ? t.standings.slice(0, t.format === "swiss" ? swissPlacesOf(t.swiss).places.open : undefined).map((s) => ({ ...s, label: labelOf(s.entrantId) }))
+      : null,
+    swiss: t.format === "swiss" && t.swiss ? serializeSwiss(db, t, entrants, labelOf, forPublic) : null,
     pointsAwardedAt: t.pointsAwardedAt,
     schedule: hasSchedule(t)
       ? {
@@ -4929,7 +5222,7 @@ app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (re
     .filter((r) => r.eventId === eventId && !r.waitlisted)
     .map((r) => {
       const member = db.members[r.membershipNumber];
-      return { id: r.id, label: r.dependentName || (member ? member.name : "Member") };
+      return { id: r.id, label: r.dependentName || (member ? member.name : "Member"), women: !!r.catWomen, junior: !!r.catJunior };
     });
   if (!t) return res.json({ tournament: null, registrations });
   res.json({ tournament: serializeTournament(db, t), registrations });
@@ -4971,8 +5264,16 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (r
   }
   const { mode, format } = req.body;
   if (mode !== "individual" && mode !== "team") return res.status(400).json({ error: "mode must be 'individual' or 'team'" });
-  if (format !== "knockout" && format !== "groups" && format !== "casual") {
-    return res.status(400).json({ error: "format must be 'knockout', 'groups' or 'casual'" });
+  if (format !== "knockout" && format !== "groups" && format !== "casual" && format !== "swiss") {
+    return res.status(400).json({ error: "format must be 'knockout', 'groups', 'casual' or 'swiss'" });
+  }
+  let swissRounds = null;
+  if (format === "swiss") {
+    if (mode !== "individual") return res.status(400).json({ error: "A Swiss tournament is played by individual players, not teams" });
+    swissRounds = req.body.swissRounds === undefined || req.body.swissRounds === "" ? 7 : Number(req.body.swissRounds);
+    if (!Number.isInteger(swissRounds) || swissRounds < 1 || swissRounds > SWISS_MAX_ROUNDS) {
+      return res.status(400).json({ error: `Number of rounds must be a whole number from 1 to ${SWISS_MAX_ROUNDS}` });
+    }
   }
   let numGroups = null;
   let advancePerGroup = null;
@@ -5025,6 +5326,7 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), (r
     nextMatchId: 1,
     groups: null,
     knockout: null,
+    swiss: format === "swiss" ? { totalRounds: swissRounds, rounds: [], withdrawn: [], nextPairingId: 1 } : null,
     standings: null,
     pointsAwardedAt: null,
     attendance: {},
@@ -5158,9 +5460,15 @@ app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tourname
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
   if (t.format === "casual") return res.status(400).json({ error: "Fun sessions don't use a generated bracket - just track attendance" });
-  if (t.groups || t.knockout) return res.status(400).json({ error: "Already generated for this tournament" });
+  if (tournamentIsGenerated(t)) return res.status(400).json({ error: "Already generated for this tournament" });
   const entrants = reconcileSeedOrder(db, t);
   if (entrants.length < 2) return res.status(400).json({ error: "Need at least 2 entrants to generate a tournament" });
+  if (t.format === "swiss") {
+    const made = generateSwissRound(db, t);
+    if (made.error) return res.status(400).json({ error: made.error });
+    writeDb(db);
+    return res.json({ tournament: serializeTournament(db, t), warnings: made.warnings });
+  }
   if (t.format === "groups") {
     if (entrants.length < t.numGroups * 2) {
       return res.status(400).json({ error: `Need at least ${t.numGroups * 2} entrants for ${t.numGroups} groups (2 per group minimum)` });
@@ -5187,6 +5495,9 @@ app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.format === "swiss") {
+    return res.status(400).json({ error: "Swiss tournaments use 'Undo last round' instead of reseeding" });
+  }
   if (!t.groups && !t.knockout) {
     return res.status(400).json({ error: "This tournament hasn't been generated yet - just edit the seed order directly" });
   }
@@ -5389,6 +5700,246 @@ app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tour
   t.pointsAwardedAt = new Date().toISOString();
   writeDb(db);
   res.json({ updated, tournament: serializeTournament(db, t) });
+});
+
+// ---- Swiss endpoints -----------------------------------------------------
+function swissFor(db, req, res) {
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) {
+    res.status(404).json({ error: "No tournament for this event" });
+    return null;
+  }
+  if (t.format !== "swiss" || !t.swiss) {
+    res.status(400).json({ error: "This isn't a Swiss tournament" });
+    return null;
+  }
+  return t;
+}
+
+// Draws round 2..N (round 1 comes from the normal "generate" step).
+app.post("/api/admin/tournaments/:eventId/swiss/next-round", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  if (!t.swiss.rounds.length) return res.status(400).json({ error: "Draw round 1 first (Generate)" });
+  const made = generateSwissRound(db, t);
+  if (made.error) return res.status(400).json({ error: made.error });
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t), warnings: made.warnings });
+});
+
+// Removes the newest round, only while none of its games has a result - so a
+// draw made before everyone arrived can be redone.
+app.post("/api/admin/tournaments/:eventId/swiss/undo-round", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  const sw = t.swiss;
+  const last = sw.rounds[sw.rounds.length - 1];
+  if (!last) return res.status(400).json({ error: "No round has been drawn yet" });
+  if (last.pairings.some((p) => p.b != null && p.result != null)) {
+    return res.status(400).json({ error: `Round ${last.number} already has results - clear them before undoing the draw` });
+  }
+  sw.rounds.pop();
+  refreshSwissStatus(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Records (or corrects, or clears) one game's result.
+app.put("/api/admin/tournaments/:eventId/swiss/result", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  const sw = t.swiss;
+  const round = sw.rounds.find((r) => r.number === Number(req.body.roundNumber));
+  if (!round) return res.status(404).json({ error: "No such round" });
+  const pairing = round.pairings.find((p) => p.id === Number(req.body.pairingId));
+  if (!pairing) return res.status(404).json({ error: "No such game" });
+  if (pairing.b == null) return res.status(400).json({ error: "That's a bye - it scores automatically" });
+  const result = req.body.result;
+  if (result === null) {
+    if (round !== sw.rounds[sw.rounds.length - 1]) {
+      return res.status(400).json({ error: "Results can only be cleared in the latest round - correct them instead" });
+    }
+    pairing.result = null;
+  } else {
+    if (typeof result !== "string" || !Swiss.ALL_RESULTS.has(result)) {
+      return res.status(400).json({ error: "result must be 1-0, 0-1, 1/2-1/2, 1-0f, 0-1f, 0-0f or null" });
+    }
+    pairing.result = result;
+  }
+  refreshSwissStatus(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Arbiter override on the newest round: swap two players' places (or, naming
+// the two players of one board, flip their colours). Only boards with no
+// result yet can change. Rematches it creates are reported, not blocked.
+app.put("/api/admin/tournaments/:eventId/swiss/swap", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  const sw = t.swiss;
+  const round = sw.rounds[sw.rounds.length - 1];
+  if (!round) return res.status(400).json({ error: "No round has been drawn yet" });
+  const { a, b } = req.body;
+  if (typeof a !== "string" || typeof b !== "string" || a === b) return res.status(400).json({ error: "Pick two different players" });
+  const locate = (id) => {
+    for (const p of round.pairings) {
+      if (p.a === id) return { p, slot: "a" };
+      if (p.b === id) return { p, slot: "b" };
+    }
+    return null;
+  };
+  const la = locate(a);
+  const lb = locate(b);
+  if (!la || !lb) return res.status(400).json({ error: "Both players must be in the latest round" });
+  for (const l of [la, lb]) {
+    if (l.p.b != null && l.p.result != null) return res.status(400).json({ error: "A game with a result can't be changed" });
+  }
+  if (la.p === lb.p) {
+    if (la.p.b == null) return res.status(400).json({ error: "That's a bye" });
+    const x = la.p.a;
+    la.p.a = la.p.b;
+    la.p.b = x;
+  } else {
+    la.p[la.slot] = b;
+    lb.p[lb.slot] = a;
+  }
+  // A "bye" pairing keeps b === null; anything else needs both players.
+  const hist = Swiss.historyOf(sw.rounds.slice(0, -1));
+  const warnings = [];
+  for (const p of round.pairings) {
+    if (p.b != null && (hist.met.get(p.a) || new Set()).has(p.b)) warnings.push({ a: p.a, b: p.b });
+  }
+  round.warnings = warnings;
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t), warnings });
+});
+
+// A player leaving the event: stays in the standings with the points they
+// scored but is not drawn into further rounds. Reversible.
+app.put("/api/admin/tournaments/:eventId/swiss/withdraw", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  const entrants = tournamentEntrants(db, t);
+  const entrant = entrants.find((e) => e.id === req.body.entrantId);
+  if (!entrant) return res.status(400).json({ error: "That player isn't in this tournament" });
+  if (typeof req.body.withdrawn !== "boolean") return res.status(400).json({ error: "withdrawn must be true or false" });
+  const set = new Set(t.swiss.withdrawn);
+  if (req.body.withdrawn) set.add(entrant.id);
+  else set.delete(entrant.id);
+  t.swiss.withdrawn = [...set];
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Venue / organizer / time-control text used by the printable regulation sheet.
+app.put("/api/admin/tournaments/:eventId/swiss/info", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  const info = {};
+  for (const key of ["venueAr", "venueEn", "organizerAr", "organizerEn", "timeControlAr", "timeControlEn", "prizeNoteAr", "prizeNoteEn"]) {
+    const v = req.body[key];
+    if (v === undefined) continue;
+    if (typeof v !== "string" || v.length > 120) return res.status(400).json({ error: `${key} must be text of at most 120 characters` });
+    info[key] = v.trim();
+  }
+  if (req.body.ceremonyTime !== undefined) {
+    const v = req.body.ceremonyTime;
+    if (v !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v))) return res.status(400).json({ error: "Ceremony time must be HH:MM (24-hour) or empty" });
+    info.ceremonyTime = v;
+  }
+  t.swiss.info = { ...(t.swiss.info || {}), ...info };
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Admin-editable settings: how many rounds the event plays and the (optional)
+// prize amounts per ranking. Rounds can be raised or lowered any time as long
+// as it isn't below the rounds already drawn and points haven't been awarded.
+app.put("/api/admin/tournaments/:eventId/swiss/settings", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const t = swissFor(db, req, res);
+  if (!t) return;
+  const sw = t.swiss;
+  let newRounds = null;
+  if (req.body.totalRounds !== undefined) {
+    const n = Number(req.body.totalRounds);
+    if (req.body.totalRounds === "" || req.body.totalRounds === null || !Number.isInteger(n) || n < 1 || n > SWISS_MAX_ROUNDS) {
+      return res.status(400).json({ error: `Number of rounds must be a whole number from 1 to ${SWISS_MAX_ROUNDS}` });
+    }
+    if (n < sw.rounds.length) {
+      return res.status(400).json({ error: `${sw.rounds.length} round${sw.rounds.length === 1 ? " has" : "s have"} already been drawn - undo the latest draw first to go lower` });
+    }
+    if (n !== sw.totalRounds && t.pointsAwardedAt) {
+      return res.status(400).json({ error: "Points were already awarded for this tournament - the number of rounds can't change" });
+    }
+    newRounds = n;
+  }
+  let newPrizes = null;
+  if (req.body.prizes !== undefined) {
+    const p = req.body.prizes;
+    if (!p || typeof p !== "object" || Array.isArray(p)) return res.status(400).json({ error: "prizes must be an object with open, women and junior lists" });
+    newPrizes = {};
+    for (const k of SWISS_PRIZE_KEYS) {
+      const list = p[k] === undefined || p[k] === null ? [] : p[k];
+      if (!Array.isArray(list) || list.length > SWISS_MAX_PRIZE_PLACES) {
+        return res.status(400).json({ error: `${k}: at most ${SWISS_MAX_PRIZE_PLACES} prize places` });
+      }
+      newPrizes[k] = [];
+      for (const v of list) {
+        const n = typeof v === "string" ? Number(v.trim()) : v;
+        if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 10000000) {
+          return res.status(400).json({ error: `${k}: every prize must be a number from 0 to 10,000,000` });
+        }
+        newPrizes[k].push(Math.round(n * 100) / 100);
+      }
+    }
+  }
+  if (newRounds !== null) sw.totalRounds = newRounds;
+  if (newPrizes) sw.prizes = newPrizes;
+  refreshSwissStatus(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Printable A4 sheets (regulation poster / round pairings / standings &
+// prizes) for staff to print or save as PDF. Plain HTML page, not JSON.
+app.get("/admin/print/tournament/:eventId", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const event = db.events.find((e) => e.id === eventId);
+  const t = findTournament(db, eventId);
+  if (!event || !t || t.format !== "swiss" || !t.swiss) return res.status(404).type("text/plain").send("No Swiss tournament for this event");
+  const view = ["regulation", "pairings", "standings"].includes(req.query.view) ? req.query.view : "regulation";
+  const lang = req.query.lang === "en" ? "en" : "ar";
+  const roundNumber = Number.isInteger(Number(req.query.round)) ? Number(req.query.round) : null;
+  const tn = serializeTournament(db, t);
+  res.set("Cache-Control", "no-store");
+  res.type("html").send(renderSwissPrint({ event, tn, view, roundNumber, lang }));
+});
+
+// Staff correction of a player's Women / Juniors ranking categories (e.g.
+// after checking age or ID at the door). Allowed at any time.
+app.put("/api/admin/tournaments/:eventId/categories", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const reg = db.registrations.find((r) => r.id === Number(req.body.registrationId) && r.eventId === eventId);
+  if (!reg) return res.status(404).json({ error: "No such registration for this event" });
+  if (typeof req.body.women !== "boolean" || typeof req.body.junior !== "boolean") {
+    return res.status(400).json({ error: "women and junior must be true or false" });
+  }
+  reg.catWomen = req.body.women;
+  reg.catJunior = req.body.junior;
+  const t = findTournament(db, eventId);
+  if (t && t.format === "swiss" && t.status === "completed") refreshSwissStatus(db, t);
+  writeDb(db);
+  res.json({ ok: true, tournament: t ? serializeTournament(db, t) : null });
 });
 
 // ---------------------------------------------- management dashboard/report --
