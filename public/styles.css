@@ -1346,3 +1346,14 @@ html[dir="rtl"] .swiss-black { text-align: start; }
 .reports-btns a { text-decoration: none; display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red); padding: 7px 14px; border-radius: 7px; font-size: 0.85rem; font-weight: 600; }
 .reports-btns a:hover { background: #fdf0f0; }
 .reports-rounds a { padding: 6px 12px; min-width: 36px; text-align: center; }
+
+/* Non-blocking "age group missing" reminder shown to members */
+.age-reminder {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 10px 14px; border-radius: 10px;
+  background: rgba(212, 175, 55, 0.14); border: 1px solid var(--gold); font-size: 0.9rem;
+}
+.age-reminder.hidden { display: none; }
+.age-reminder button { margin: 0; padding: 6px 14px; font-size: 0.8rem; }
+.fam-age-missing, .fam-rel-badge.fam-age-missing { color: var(--red); font-weight: 600; }
+.fam-age-select { max-width: 220px; }
