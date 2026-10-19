@@ -20,7 +20,7 @@ function dateText(iso, lang) {
 }
 const AGE_LABELS = {
   under12: ["أطفال (أقل من 12)", "Kids (under 12)"],
-  "12to17": ["مراهقون (12–17)", "Teens (12–17)"],
+  "12to17": ["شباب (12–17)", "Youth (12–17)"],
   "18to45": ["بالغون (18–45)", "Adults (18–45)"],
   "46plus": ["كبار السن (+46)", "Seniors (46+)"],
 };

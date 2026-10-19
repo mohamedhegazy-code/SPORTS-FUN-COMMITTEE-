@@ -4373,7 +4373,7 @@ app.post("/api/admin/members/:membershipNumber/family/unlink", requireStaffRole(
 // ageGroup dropdown options (see AGE_GROUP_LABEL_KEYS in app.js).
 const AGE_GROUP_EXPORT_LABELS = {
   under12: "Kids (Under 12)",
-  "12to17": "Teens (12-17)",
+  "12to17": "Youth (12-17)",
   "18to45": "Adults (18-45)",
   "46plus": "Seniors (46+)",
 };
@@ -4381,7 +4381,9 @@ const AGE_GROUP_IMPORT_LOOKUP = {
   "kids (under 12)": "under12",
   "under 12": "under12",
   kids: "under12",
+  "youth (12-17)": "12to17",
   "teens (12-17)": "12to17",
+  youth: "12to17",
   "12-17": "12to17",
   teens: "12to17",
   "adults (18-45)": "18to45",
