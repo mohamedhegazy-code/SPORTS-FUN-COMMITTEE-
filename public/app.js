@@ -6134,9 +6134,9 @@ function renderSwissSettingsCard() {
     <p class="hint-note">${t("swissTimingEditHint")}</p>
     <div class="grid-2">
       <div><label>${t("fieldStartTime")}</label><input id="swiss-set-start" type="time" value="${sch ? escapeAttr(sch.startTime) : ""}" /></div>
-      <div><label>${t("fieldMatchMinutes")}</label><input id="swiss-set-minutes" type="number" min="1" value="${sch ? sch.matchMinutes : ""}" /></div>
-      <div><label>${t("fieldCourts")}</label><input id="swiss-set-courts" type="number" min="1" value="${sch ? sch.courts : ""}" /></div>
-      <div><label>${t("fieldBreakMinutes")}</label><input id="swiss-set-break" type="number" min="0" value="${sch ? sch.breakMinutes : 0}" /></div>
+      <div><label>${t("swissFieldRoundMinutes")}</label><input id="swiss-set-minutes" type="number" min="1" value="${sch ? sch.matchMinutes : ""}" /></div>
+      <div><label>${t("swissFieldBoards")}</label><input id="swiss-set-courts" type="number" min="1" value="${sch ? sch.courts : ""}" /></div>
+      <div><label>${t("swissFieldBreak")}</label><input id="swiss-set-break" type="number" min="0" value="${sch ? sch.breakMinutes : 0}" /></div>
     </div>
     <h5 style="margin:12px 0 4px;">${t("swissPrizesEditTitle")}</h5>
     <p class="hint-note">${t("swissPrizesEditHint")}</p>
@@ -6956,13 +6956,13 @@ function renderTournamentCreateForm() {
         <div><label>${t("fieldPlanningCount")}</label><input id="tourn-planning-count" type="number" min="0" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
       </div>
       <p class="hint-note">${t("planningCountHint")}</p>
-      <p class="hint-note" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
+      <p class="hint-note" id="tourn-schedule-hint" style="margin-top:14px;">${t("scheduleSetupHint")}</p>
       <div class="grid-2">
-        <div><label>${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
-        <div><label>${t("fieldMatchMinutes")}</label><input id="tourn-match-minutes" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+        <div><label id="tourn-lbl-courts">${t("fieldCourts")}</label><input id="tourn-courts" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+        <div><label id="tourn-lbl-match-minutes">${t("fieldMatchMinutes")}</label><input id="tourn-match-minutes" type="number" min="1" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
         <div><label>${t("fieldStartTime")}</label><input id="tourn-start-time" type="time" /></div>
-        <div><label>${t("fieldBreakMinutes")}</label><input id="tourn-break-minutes" type="number" min="0" placeholder="0" /></div>
-        <div><label>${t("fieldAvailableHours")}</label><input id="tourn-available-hours" type="number" min="0" step="0.5" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
+        <div><label id="tourn-lbl-break">${t("fieldBreakMinutes")}</label><input id="tourn-break-minutes" type="number" min="0" placeholder="0" /></div>
+        <div id="tourn-wrap-available-hours"><label>${t("fieldAvailableHours")}</label><input id="tourn-available-hours" type="number" min="0" step="0.5" placeholder="${escapeAttr(t("optionalPlaceholder"))}" /></div>
       </div>
       <div id="tourn-setup-preview"></div>
     </div>
@@ -6984,6 +6984,14 @@ function toggleTournamentGroupFields() {
   if (swissHint) swissHint.style.display = swiss ? "" : "none";
   const pointsFields = document.getElementById("tourn-points-fields");
   if (pointsFields) pointsFields.style.display = swiss ? "none" : "";
+  // Chess wording for the schedule fields (boards / round time / break between rounds).
+  const setText = (id, key) => { const el = document.getElementById(id); if (el) el.textContent = t(key); };
+  setText("tourn-lbl-courts", swiss ? "swissFieldBoards" : "fieldCourts");
+  setText("tourn-lbl-match-minutes", swiss ? "swissFieldRoundMinutes" : "fieldMatchMinutes");
+  setText("tourn-lbl-break", swiss ? "swissFieldBreak" : "fieldBreakMinutes");
+  setText("tourn-schedule-hint", swiss ? "swissScheduleSetupHint" : "scheduleSetupHint");
+  const avail = document.getElementById("tourn-wrap-available-hours");
+  if (avail) avail.style.display = swiss ? "none" : "";
   // Swiss is always individual players - lock the mode selector.
   const modeSel = document.getElementById("tourn-mode");
   if (modeSel) {
