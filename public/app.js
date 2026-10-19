@@ -468,6 +468,7 @@ function setLang(lang) {
   // below - re-render from the already-fetched data rather than re-fetching.
   renderPublicCommittee(COMMITTEE_PUBLIC_DATA);
   renderCommitteeAdminList();
+  renderReports();
   {
     const committeeTierSel = document.getElementById("committee-tier");
     if (committeeTierSel) committeeTierSel.innerHTML = committeeTierSelectHtml(committeeTierSel.value || COMMITTEE_TIERS[0]);
@@ -3086,6 +3087,82 @@ function switchAdminTab(tabKey) {
   } catch (e) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
+  if (tabKey === "reports") loadReports();
+}
+
+// ------------------------------------------------------ admin: reports tab --
+// One card per event with one-click print buttons (registrations list,
+// attendance / check-in sheet, points sheet, plus the Swiss tournament sheets
+// when the event runs one). Each button opens the printable A4 page in a new
+// tab; staff press Print > Save as PDF there.
+let REPORTS_DATA = null;
+async function loadReports() {
+  const msg = document.getElementById("reports-msg");
+  const wrap = document.getElementById("reports-list");
+  if (wrap && !REPORTS_DATA) wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
+  try {
+    REPORTS_DATA = await api("/api/admin/reports/events");
+    if (msg) msg.textContent = "";
+    renderReports();
+  } catch (e) {
+    if (wrap) wrap.innerHTML = "";
+    if (msg) showMsg(msg, e.message, false);
+  }
+}
+function renderReports() {
+  const wrap = document.getElementById("reports-list");
+  if (!wrap || !REPORTS_DATA) return;
+  if (!REPORTS_DATA.length) {
+    wrap.innerHTML = `<p class="hint-note">${escapeAttr(t("reportsEmpty"))}</p>`;
+    return;
+  }
+  const isAdmin = CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin";
+  const link = (href, label) => `<a href="${escapeAttr(href)}" target="_blank" rel="noopener">${escapeAttr(label)}</a>`;
+  wrap.innerHTML = REPORTS_DATA.map((ev) => {
+    const eventBase = `/admin/print/event/${ev.eventId}`;
+    const tournBase = `/admin/print/tournament/${ev.eventId}`;
+    const lang = `lang=${currentLang}`;
+    const counts = t("reportsCounts")
+      .replace("{reg}", fmt(ev.confirmedCount))
+      .replace("{wait}", fmt(ev.waitlistCount))
+      .replace("{in}", fmt(ev.checkedInCount));
+    const dates = ev.endDate && ev.endDate !== ev.date ? `${ev.date} → ${ev.endDate}` : ev.date;
+    const sheets = `
+      <div class="reports-group">
+        <span class="reports-group-title">${escapeAttr(t("reportsEventSheets"))}</span>
+        <div class="reports-btns">
+          ${link(`${eventBase}?view=registrations&${lang}`, t("reportsRegistrations"))}
+          ${link(`${eventBase}?view=attendance&${lang}`, t("reportsAttendance"))}
+          ${link(`${eventBase}?view=points&${lang}`, t("reportsPoints"))}
+          ${isAdmin ? link(`/api/admin/management/events/${ev.eventId}/report.docx?${lang}`, t("reportsEventDoc")) : ""}
+        </div>
+      </div>`;
+    let tournament = "";
+    if (ev.swiss) {
+      const rounds = [];
+      for (let r = 1; r <= ev.swiss.generatedRounds; r++) rounds.push(link(`${tournBase}?view=pairings&round=${r}&${lang}`, String(r)));
+      tournament = `
+      <div class="reports-group">
+        <span class="reports-group-title">${escapeAttr(t("reportsTournamentSheets"))} <span class="tourn-summary-badge">${escapeAttr(tournamentFormatLabel("swiss"))}</span></span>
+        <div class="reports-btns">
+          ${link(`${tournBase}?view=regulation&${lang}`, t("btnPrintRegulation"))}
+          ${ev.swiss.generatedRounds ? link(`${tournBase}?view=standings&${lang}`, t("btnPrintStandings")) : ""}
+        </div>
+        ${ev.swiss.generatedRounds ? `<div class="reports-btns reports-rounds"><span class="hint-note" style="margin:0;">${escapeAttr(t("reportsPairingsRound"))}</span>${rounds.join("")}</div>` : `<p class="hint-note" style="margin:6px 0 0;">${escapeAttr(t("reportsSwissNotStarted"))}</p>`}
+      </div>`;
+    } else if (ev.tournament) {
+      tournament = `<p class="hint-note" style="margin:8px 0 0;">${escapeAttr(t("reportsOtherTournament"))}</p>`;
+    }
+    return `
+    <div class="reports-event">
+      <div class="reports-event-head">
+        <b>${escapeAttr(eventLabel(ev))}</b>
+        <span class="hint-note" style="margin:0;">${escapeAttr(dates)} · ${escapeAttr(counts)}</span>
+      </div>
+      ${sheets}
+      ${tournament}
+    </div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------- admin: settings --

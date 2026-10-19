@@ -1335,3 +1335,14 @@ html[dir="rtl"] .swiss-black { text-align: start; }
 .my-reg-cats { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.82rem; margin: -4px 0 10px; padding: 6px 12px; background: rgba(201, 162, 39, 0.1); border-radius: 8px; }
 .swiss-info-details { margin: 12px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
 .swiss-info-details summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+
+/* ---- Admin > Reports tab -------------------------------------------- */
+.reports-event { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
+.reports-event-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-bottom: 8px; }
+.reports-group { margin-top: 8px; }
+.reports-group-title { display: block; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 6px; }
+.reports-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reports-rounds { margin-top: 8px; }
+.reports-btns a { text-decoration: none; display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red); padding: 7px 14px; border-radius: 7px; font-size: 0.85rem; font-weight: 600; }
+.reports-btns a:hover { background: #fdf0f0; }
+.reports-rounds a { padding: 6px 12px; min-width: 36px; text-align: center; }
