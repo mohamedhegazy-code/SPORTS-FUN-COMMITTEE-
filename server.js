@@ -18,6 +18,7 @@ const XLSX = require("xlsx");
 const helmet = require("helmet");
 const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
+const { renderEventSheet } = require("./report_print");
 const {
   Document,
   Packer,
@@ -6001,6 +6002,65 @@ app.get("/admin/print/tournament/:eventId", requireStaffRole(["tournament"]), (r
   const tn = serializeTournament(db, t);
   res.set("Cache-Control", "no-store");
   res.type("html").send(renderSwissPrint({ event, tn, view, roundNumber, lang }));
+});
+
+// ----------------------------------------------- admin: Reports tab ------
+// One list of every event (past and upcoming) with the numbers and tournament
+// state the Reports tab needs to offer the right print buttons per event.
+app.get("/api/admin/reports/events", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const rows = db.events
+    .slice()
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .map((ev) => {
+      const regs = db.registrations.filter((r) => r.eventId === ev.id);
+      const confirmed = regs.filter((r) => !r.waitlisted);
+      const t = findTournament(db, ev.id);
+      const swiss = t && t.format === "swiss" && t.swiss ? t.swiss : null;
+      return {
+        eventId: ev.id,
+        nameEn: ev.nameEn,
+        nameAr: ev.nameAr,
+        date: ev.date,
+        endDate: ev.endDate || null,
+        maxCapacity: ev.maxCapacity || null,
+        confirmedCount: confirmed.length,
+        waitlistCount: regs.length - confirmed.length,
+        checkedInCount: confirmed.filter((r) => r.checkedIn).length,
+        tournament: t ? { format: t.format, status: t.status, generated: tournamentIsGenerated(t) } : null,
+        swiss: swiss ? { totalRounds: swiss.totalRounds, generatedRounds: swiss.rounds.length } : null,
+      };
+    });
+  res.json(rows);
+});
+
+// Printable event sheets: registrations list, attendance / check-in sheet
+// (signature column) and points sheet. Plain HTML page, not JSON.
+app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const event = db.events.find((e) => e.id === eventId);
+  if (!event) return res.status(404).type("text/plain").send("No such event");
+  const view = ["registrations", "attendance", "points"].includes(req.query.view) ? req.query.view : "registrations";
+  const lang = req.query.lang === "en" ? "en" : "ar";
+  const rows = db.registrations
+    .filter((r) => r.eventId === eventId)
+    .map((r) => {
+      const m = db.members[r.membershipNumber];
+      return {
+        name: r.dependentName || (m ? m.name : "Member"),
+        membershipNumber: r.membershipNumber,
+        phone: m ? m.phone || "" : "",
+        registeredAt: r.registeredAt,
+        waitlisted: !!r.waitlisted,
+        checkedIn: !!r.checkedIn,
+        earlyRegistration: !!r.earlyRegistration,
+        position: r.position || null,
+        points: registrationPoints(db, r),
+      };
+    });
+  res.set("Cache-Control", "no-store");
+  res.type("html").send(renderEventSheet({ event, rows, view, lang, generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC" }));
 });
 
 // Staff correction of a player's Women / Juniors ranking categories (e.g.
