@@ -346,16 +346,16 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
     for (const view of ["registrations", "attendance", "points"]) {
       const h = (await getHtml(`/admin/print/event/${evAge}?view=${view}&lang=${lang}`)).text;
       ok(h.includes(lang === "ar" ? "الفئة العمرية" : "Age group"), `age group header ${view}/${lang}`);
-      ok(h.includes(lang === "ar" ? "أطفال (أقل من 12)" : "Kids (under 12)") && h.includes(lang === "ar" ? "كبار السن (+46)" : "Seniors (46+)"), `age labels shown ${view}/${lang}`);
+      ok(h.includes(lang === "ar" ? "أطفال (أقل من 12)" : "Kids (under 12)") && h.includes(lang === "ar" ? "ماسترز (+46)" : "Masters (46+)"), `age labels shown ${view}/${lang}`);
     }
   }
   const ageHtml = (await getHtml(`/admin/print/event/${evAge}?view=registrations&lang=en`)).text;
   const bar = (ageHtml.match(/<div class="agebar">.*?<\/div>/s) || [""])[0];
   const cnt = (label) => Number((bar.match(new RegExp(label.replace(/[()+]/g, "\\$&") + " <b>(\\d+)</b>")) || [])[1]);
-  ok(cnt("Kids (under 12)") === 2 && cnt("Youth (12–17)") === 1 && cnt("Adults (18–45)") === 1 && cnt("Seniors (46+)") === 1, "age breakdown counts (dependent counted in its OWN band)", bar);
+  ok(cnt("Kids (under 12)") === 2 && cnt("Youth (12–17)") === 1 && cnt("Adults (18–45)") === 1 && cnt("Masters (46+)") === 1, "age breakdown counts (dependent counted in its OWN band)", bar);
   ok(cnt("Not set") === 0, "nobody is 'not set' now that age group is mandatory", bar);
   const depRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Dependent Child(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
-  ok(depRow && !/Seniors/.test(depRow) && /Kids \(under 12\)/.test(depRow), "dependent shows its own age group, not the parent's", depRow.slice(0, 300));
+  ok(depRow && !/Masters/.test(depRow) && /Kids \(under 12\)/.test(depRow), "dependent shows its own age group, not the parent's", depRow.slice(0, 300));
   const adultRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Adult Player(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
   ok(/Adults \(18–45\)/.test(adultRow), "own registration shows own age group", adultRow.slice(0, 200));
   const ptsHtml = (await getHtml(`/admin/print/event/${evAge}?view=points&lang=en`)).text;
