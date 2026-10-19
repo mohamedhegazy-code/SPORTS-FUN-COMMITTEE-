@@ -1081,6 +1081,7 @@ function updateSessionBadge() {
 
 function updateUIForSession() {
   updateSessionBadge();
+  renderAgeReminder();
   const isMember = CURRENT_SESSION && CURRENT_SESSION.type === "member";
   const isStaff = CURRENT_SESSION && CURRENT_SESSION.type === "staff";
   const isAdmin = isStaff && CURRENT_SESSION.staff.role === "admin";
@@ -2069,6 +2070,11 @@ document.getElementById("su-submit").addEventListener("click", async () => {
     showMsg(msg, t("errFillFields"), false);
     return;
   }
+  if (!ageGroup) {
+    highlightMissingFields(["su-age-group"]);
+    showMsg(msg, t("errAgeGroupRequired"), false);
+    return;
+  }
   if (password.length < 6) {
     showMsg(msg, t("errPasswordShort"), false);
     return;
@@ -2492,9 +2498,10 @@ function renderFamilyList() {
           (d) => `<div class="family-item" data-dep-id="${d.id}">
         <span class="name">${escapeAttr(d.name)}${
             d.relationship ? ` <span class="fam-rel-badge">(${escapeAttr(d.relationship)})</span>` : ""
-          }${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
+          } <span class="fam-rel-badge ${d.ageGroup ? "" : "fam-age-missing"}">${d.ageGroup ? escapeAttr(ageGroupLabel(d.ageGroup)) : escapeAttr(t("famAgeGroupMissing"))}</span>${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
         <span class="fam-rel-edit">
           <select class="fam-rel-select" data-dep-id="${d.id}">${familyRelationSelectHtml(d.relationship || "")}</select>
+          <select class="fam-age-select" data-dep-id="${d.id}" style="margin-top:6px;">${ageGroupOptionsHtml(d.ageGroup || "")}</select>
           <input class="fam-rel-other-input ${
             !!d.relationship && !FAMILY_RELATIONS.includes(d.relationship) ? "" : "hidden"
           }" data-dep-id="${d.id}" value="${
@@ -2547,14 +2554,18 @@ function renderFamilyList() {
       const otherInput = wrap.querySelector(`.fam-rel-other-input[data-dep-id="${btn.dataset.depId}"]`);
       const phoneInput = wrap.querySelector(`.fam-phone-input[data-dep-id="${btn.dataset.depId}"]`);
       const emailInput = wrap.querySelector(`.fam-email-input[data-dep-id="${btn.dataset.depId}"]`);
+      const ageSel = wrap.querySelector(`.fam-age-select[data-dep-id="${btn.dataset.depId}"]`);
       const relationship = sel.value === "other" ? otherInput.value.trim() : sel.value;
       const msg = document.getElementById("fam-msg");
+      const payload = { relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() };
+      if (ageSel && ageSel.value) payload.ageGroup = ageSel.value;
       try {
         const result = await api("/api/me/dependents/" + btn.dataset.depId, {
           method: "PUT",
-          body: JSON.stringify({ relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() }),
+          body: JSON.stringify(payload),
         });
         CURRENT_SESSION.member.dependents = result.dependents;
+        renderAgeReminder();
         showMsg(msg, t("famRelationshipSaved"), true);
         renderFamilyList();
       } catch (e) {
@@ -2577,6 +2588,7 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   const relOtherInput = document.getElementById("fam-relationship-other");
   const phoneInput = document.getElementById("fam-phone");
   const emailInput = document.getElementById("fam-email");
+  const ageSelect = document.getElementById("fam-age-group");
   const name = nameInput.value.trim();
   const relationship = relSelect.value === "other" ? relOtherInput.value.trim() : relSelect.value;
   const msg = document.getElementById("fam-msg");
@@ -2585,12 +2597,19 @@ document.getElementById("fam-add").addEventListener("click", async () => {
     showMsg(msg, t("errFillFields"), false);
     return;
   }
+  if (!ageSelect.value) {
+    highlightMissingFields(["fam-age-group"]);
+    showMsg(msg, t("errFamilyAgeGroupRequired"), false);
+    return;
+  }
   try {
     const result = await api("/api/me/dependents", {
       method: "POST",
-      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() }),
+      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim(), ageGroup: ageSelect.value }),
     });
     CURRENT_SESSION.member.dependents = result.dependents;
+    renderAgeReminder();
+    ageSelect.value = "";
     nameInput.value = "";
     relSelect.value = "";
     relOtherInput.value = "";
@@ -4395,11 +4414,26 @@ function renderDirectoryTable() {
     const dependentsHtml = m.dependents.length
       ? `<ul class="directory-list">${m.dependents
           .map((d) => {
-            const bits = [d.relationship, d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ");
+            const bits = [d.relationship, d.ageGroup ? ageGroupLabel(d.ageGroup) : "", d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ");
             return `<li>${escapeAttr(d.name)}${bits ? ` <span style="color:var(--muted);">(${bits})</span>` : ""}</li>`;
           })
           .join("")}</ul>`
       : `<p class="dashboard-empty-note">${t("noDependents")}</p>`;
+    // Admin age-group editor: one row for the member plus one per family
+    // member, so accounts created before age group became mandatory can be
+    // completed from here (PUT /api/admin/members/:n/age-group).
+    const ageRow = (label, current, depId) =>
+      `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0;">
+        <span style="min-width:120px;">${escapeAttr(label)}</span>
+        <select class="dir-age-select" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="max-width:200px;padding:4px 6px;font-size:0.8rem;">${ageGroupOptionsHtml(current || "")}</select>
+        <button class="secondary dir-age-save" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button>
+      </div>`;
+    const ageEditorHtml = `<div style="margin-top:14px;">
+        <h4 style="margin:6px 0;">${t("directoryAgeGroupsTitle")}</h4>
+        ${ageRow(m.name, m.ageGroup, null)}
+        ${m.dependents.map((d) => ageRow(d.name, d.ageGroup, d.id)).join("")}
+        <div class="msg dir-age-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
+      </div>`;
     const regsHtml = m.registrations.length
       ? `<table class="dashboard-table"><thead><tr>
           <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colStatus")}</th><th>${t("colPoints")}</th><th></th>
@@ -4456,6 +4490,7 @@ function renderDirectoryTable() {
     return `<tr data-directory-row data-search="${searchBlob}">
         <td>${escapeAttr(m.membershipNumber)}</td>
         <td>${escapeAttr(m.name)}${memberTypeBadge}</td>
+        <td style="white-space:nowrap;">${m.ageGroup ? escapeAttr(ageGroupLabel(m.ageGroup)) : `<span class="fam-age-missing">—</span>`}</td>
         <td>${escapeAttr(m.phone)}</td>
         <td>${escapeAttr(m.email || "")}</td>
         <td>${escapeAttr(m.familyGroup)}</td>
@@ -4465,18 +4500,19 @@ function renderDirectoryTable() {
         <td><button class="secondary" data-directory-toggle="${i}" style="padding:3px 10px;font-size:0.78rem;">${t("btnDetails")}</button></td>
       </tr>
       <tr data-directory-row data-search="${searchBlob}" data-directory-detail="${i}" data-open="false" class="hidden">
-        <td colspan="9">
+        <td colspan="10">
           <div class="grid-2">
             <div><h4 style="margin:6px 0;">${t("colFamilyMembers")}</h4>${dependentsHtml}</div>
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
           </div>
+          ${ageEditorHtml}
           ${familyLinkHtml}
         </td>
       </tr>`;
   }).join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
-      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
+      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colAgeGroup")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
       <th>${t("colFamilyGroup")}</th><th>${t("colPointsBalance")}</th><th>${t("colRegistrations")}</th>
       <th>${t("colCheckedIn")}</th><th></th>
     </tr></thead>
@@ -4489,6 +4525,32 @@ function renderDirectoryTable() {
       detailRow.dataset.open = String(nowOpen);
       btn.textContent = nowOpen ? t("btnHideDetails") : t("btnDetails");
       applyDirectorySearchFilter();
+    });
+  });
+  wrap.querySelectorAll(".dir-age-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const me = btn.dataset.me;
+      const dep = btn.dataset.dep;
+      const sel = wrap.querySelector(`.dir-age-select[data-me="${me}"][data-dep="${dep}"]`);
+      const msg = wrap.querySelector(`.dir-age-msg[data-me="${me}"]`);
+      if (!sel.value) return showMsg(msg, t("errAgeGroupRequired"), false);
+      try {
+        await api(`/api/admin/members/${encodeURIComponent(me)}/age-group`, {
+          method: "PUT",
+          body: JSON.stringify({ ageGroup: sel.value, dependentId: dep === "" ? undefined : Number(dep) }),
+        });
+        const m = DIRECTORY_DATA.find((x) => x.membershipNumber === me);
+        if (m) {
+          if (dep === "") m.ageGroup = sel.value;
+          else {
+            const d = m.dependents.find((x) => String(x.id) === dep);
+            if (d) d.ageGroup = sel.value;
+          }
+        }
+        showMsg(msg, t("okAgeGroupSavedShort"), true);
+      } catch (e) {
+        showMsg(msg, e.message, false);
+      }
     });
   });
   wrap.querySelectorAll(".family-link-btn").forEach((btn) => {
@@ -8258,7 +8320,38 @@ const AGE_GROUP_LABEL_KEYS = {
 function ageGroupLabel(code) {
   return code && AGE_GROUP_LABEL_KEYS[code] ? t(AGE_GROUP_LABEL_KEYS[code]) : "—";
 }
+function ageGroupOptionsHtml(selected) {
+  return (
+    `<option value="">${escapeAttr(t("ageGroupPlaceholderRequired"))}</option>` +
+    Object.keys(AGE_GROUP_LABEL_KEYS)
+      .map((code) => `<option value="${code}"${code === selected ? " selected" : ""}>${escapeAttr(t(AGE_GROUP_LABEL_KEYS[code]))}</option>`)
+      .join("")
+  );
+}
+// Non-blocking reminder banner: lists whoever on this account (the member
+// and/or their family members) still has no age group. Accounts created
+// before the field became mandatory simply see this until it is filled in.
+function renderAgeReminder() {
+  const box = document.getElementById("age-reminder");
+  if (!box) return;
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const missing = [];
+  if (member) {
+    if (!member.ageGroup) missing.push(t("ageReminderYou"));
+    (member.dependents || []).forEach((d) => {
+      if (!d.ageGroup) missing.push(d.name);
+    });
+  }
+  box.classList.toggle("hidden", !missing.length);
+  if (missing.length) document.getElementById("age-reminder-text").textContent = `${t("ageReminderLead")} ${missing.join(", ")}`;
+}
+document.getElementById("age-reminder-btn").addEventListener("click", () => {
+  switchTab("mypoints");
+  const card = document.getElementById("mp-agegroup-card");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+});
 function renderAgeGroupStatus() {
+  renderAgeReminder();
   const el = document.getElementById("mp-agegroup-status");
   if (!el) return;
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
@@ -8272,10 +8365,16 @@ document.getElementById("mp-agegroup-save").addEventListener("click", async () =
   const select = document.getElementById("mp-agegroup-select");
   const msg = document.getElementById("mp-agegroup-msg");
   const ageGroup = select.value;
+  if (!ageGroup) {
+    highlightMissingFields(["mp-agegroup-select"]);
+    showMsg(msg, t("errAgeGroupRequired"), false);
+    return;
+  }
   try {
     const result = await api("/api/me/profile", { method: "PATCH", body: JSON.stringify({ ageGroup }) });
     CURRENT_SESSION.member.ageGroup = result.member.ageGroup;
     renderAgeGroupStatus();
+    renderAgeReminder();
     showMsg(msg, t("okAgeGroupSaved"), true);
   } catch (e) {
     showMsg(msg, e.message, false);

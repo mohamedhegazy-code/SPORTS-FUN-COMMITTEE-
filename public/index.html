@@ -46,6 +46,12 @@
 
 <main>
 
+  <!-- Non-blocking reminder for members whose own / family members' age group is still missing -->
+  <div id="age-reminder" class="age-reminder hidden" role="status">
+    <span id="age-reminder-text"></span>
+    <button class="secondary" id="age-reminder-btn" type="button" data-i18n="ageReminderBtn">Complete now</button>
+  </div>
+
   <!-- ============================= EVENTS (landing page) ============================= -->
   <section id="view-events" class="view active">
     <div class="hero-banner" data-landing-section="hero">
@@ -238,9 +244,9 @@
         <label data-i18n="fieldClaimCode">Claim code (optional)</label>
         <input id="su-claimcode" placeholder="e.g. 482913" />
         <p class="hint-note" data-i18n="claimCodeHint">Only needed if the committee gave you a claim code for this membership number - leave blank otherwise.</p>
-        <label data-i18n="fieldAgeGroup">Age group (optional)</label>
-        <select id="su-age-group">
-          <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
+        <label class="required-label" data-i18n="fieldAgeGroupRequired">Age group</label>
+        <select id="su-age-group" required>
+          <option value="" data-i18n="ageGroupPlaceholderRequired">— Select age group —</option>
           <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
           <option value="12to17" data-i18n="ageGroupTeens">Teens (12–17)</option>
           <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
@@ -376,9 +382,9 @@
       <h2 data-i18n="ageGroupTitle">Age group</h2>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="ageGroupIntro">Let the club know your age group so events and tournaments can be organized appropriately. This is optional and only visible to staff.</p>
       <p class="hint-note" id="mp-agegroup-status"></p>
-      <label data-i18n="fieldAgeGroup">Age group (optional)</label>
+      <label class="required-label" data-i18n="fieldAgeGroupRequired">Age group</label>
       <select id="mp-agegroup-select">
-        <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
+        <option value="" data-i18n="ageGroupPlaceholderRequired">— Select age group —</option>
         <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
         <option value="12to17" data-i18n="ageGroupTeens">Teens (12–17)</option>
         <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
@@ -429,6 +435,16 @@
             <option value="other" data-i18n="relOther">Other</option>
           </select>
           <input id="fam-relationship-other" class="hidden" style="margin-top:8px;" placeholder="e.g. Cousin, Uncle, Grandparent" />
+        </div>
+        <div>
+          <label class="required-label" data-i18n="fieldAgeGroupRequired">Age group</label>
+          <select id="fam-age-group">
+            <option value="" data-i18n="ageGroupPlaceholderRequired">— Select age group —</option>
+            <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
+            <option value="12to17" data-i18n="ageGroupTeens">Teens (12–17)</option>
+            <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
+            <option value="46plus" data-i18n="ageGroupSeniors">Seniors (46+)</option>
+          </select>
         </div>
         <div><label data-i18n="fieldFamilyMemberPhone">Mobile (optional)</label><input id="fam-phone" type="tel" /></div>
         <div><label data-i18n="fieldFamilyMemberEmail">Email (optional)</label><input id="fam-email" type="email" /></div>
