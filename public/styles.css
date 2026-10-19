@@ -1357,3 +1357,36 @@ html[dir="rtl"] .swiss-black { text-align: start; }
 .age-reminder button { margin: 0; padding: 6px 14px; font-size: 0.8rem; }
 .fam-age-missing, .fam-rel-badge.fam-age-missing { color: var(--red); font-weight: 600; }
 .fam-age-select { max-width: 220px; }
+
+/* ---- Roster tables (Gate Scanner manual check-in + Event hub) ----
+   Sortable headers, vertically centred cells, and equal-width coloured
+   action buttons: green Check in, blue Download QR, teal WhatsApp, red Cancel. */
+.roster-table td { vertical-align: middle; }
+.roster-table th button.roster-sort {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  color: var(--muted); font-weight: 700; font-size: 0.75rem; text-transform: uppercase; white-space: nowrap;
+}
+.roster-table th button.roster-sort:hover, .roster-table th button.roster-sort.active { color: var(--red); }
+.roster-table th button.roster-sort:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.roster-sort-arrow { font-size: 0.7rem; opacity: 0.7; }
+.roster-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 112px; }
+.roster-actions .roster-date-note { color: var(--muted); font-size: 0.68rem; text-align: center; }
+.roster-table button.roster-btn {
+  margin: 0; padding: 7px 12px; border-radius: 7px; border: 1px solid transparent;
+  font-size: 0.78rem; font-weight: 700; cursor: pointer; text-align: center; line-height: 1.2;
+  transition: filter 0.15s, transform 0.15s;
+}
+.roster-table button.roster-btn:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+.roster-table button.roster-btn.checkin { background: #1e8e3e; border-color: #187533; color: #fff; }
+.roster-table button.roster-btn.checkin:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; opacity: 1; cursor: not-allowed; }
+.roster-table button.roster-btn.wa { background: #128c7e; border-color: #0e7266; color: #fff; margin-top: 6px; width: 100%; }
+.roster-table button.roster-btn.cancel { background: #fff; border-color: #c0392b; color: #c0392b; }
+.roster-table button.roster-btn.cancel:hover:not(:disabled) { background: #fdeaea; }
+.roster-table .roster-qr { width: 100%; min-width: 96px; }
+.roster-table a.roster-qr-download {
+  display: block; width: 100%; box-sizing: border-box; text-align: center; text-decoration: none;
+  padding: 6px 10px; border-radius: 7px; background: #1a73e8; border: 1px solid #155fc0; color: #fff;
+  font-size: 0.75rem; font-weight: 700;
+}
+.roster-table a.roster-qr-download:hover { background: #155fc0; }
+.roster-table td:last-child { min-width: 190px; }

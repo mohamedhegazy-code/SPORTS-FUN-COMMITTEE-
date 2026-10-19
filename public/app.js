@@ -8652,7 +8652,7 @@ function waStatusCellHtml(r, eventName, eventDate) {
     ? `<span class="wa-status-pill sent">${escapeAttr(t("waStatusSent"))}</span><br/><small style="color:var(--muted);">${escapeAttr(new Date(r.whatsappConfirmedAt).toLocaleString())}</small>`
     : `<span class="wa-status-pill not-sent">${escapeAttr(t("waStatusNotSent"))}</span>`;
   const btnLabel = r.whatsappConfirmedAt ? t("btnResendWhatsappConfirm") : t("btnSendWhatsappConfirm");
-  const btn = `<button class="secondary small" data-wa-confirm="${r.registrationId}" data-wa-href="${escapeAttr(href)}">${escapeAttr(btnLabel)}</button>`;
+  const btn = `<button class="roster-btn wa" data-wa-confirm="${r.registrationId}" data-wa-href="${escapeAttr(href)}">${escapeAttr(btnLabel)}</button>`;
   const hint = r.qrDataUrl
     ? `<br/><small style="color:var(--muted);">${escapeAttr(t("waConfirmQrHint"))}</small>`
     : "";
@@ -8688,16 +8688,80 @@ async function sendWhatsappConfirm(btn, msgEl, onDone) {
 // is unchanged: cancelling isn't something staff should be able to do from
 // a fast-moving gate queue, only from the hub where the fuller event
 // context (and the reason prompt - see openCancelRegModal) is in view.
+// Sortable roster: one shared sort state for every roster table (Gate Scanner,
+// Event hub), toggled by clicking a column header (data-roster-sort).
+let ROSTER_SORT = { key: "", dir: 1 };
+const ROSTER_SORT_COLS = [
+  ["member", "colMember"],
+  ["registered", "colRegisteredAt"],
+  ["status", "colStatus"],
+  ["qr", "colQrCode"],
+  ["actions", "colActions"],
+  ["whatsapp", "colWhatsapp"],
+];
+function rosterSortValue(r, key) {
+  switch (key) {
+    case "member":
+      return (r.attendeeName || "").toLowerCase();
+    case "registered":
+      return r.registeredAt ? new Date(r.registeredAt).getTime() : 0;
+    case "status": // waiting for check-in first, then checked in, then waiting list
+      return r.waitlisted ? 2 : r.checkedIn ? 1 : 0;
+    case "qr":
+      return r.qrDataUrl ? 0 : 1;
+    case "actions": // rows that still need a check-in action first
+      return !r.waitlisted && !r.checkedIn ? 0 : 1;
+    case "whatsapp": // not sent yet, then sent, then no phone
+      return !r.phone ? 2 : r.whatsappConfirmedAt ? 1 : 0;
+    default:
+      return 0;
+  }
+}
+// Check-in is only possible on the event's date (or between start and end
+// date for a multi-day event). UI-level rule: the button is greyed out on
+// any other day. Dates are plain YYYY-MM-DD strings compared as text.
+function localTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function eventCheckInOpen(ev) {
+  if (!ev || !ev.date) return true;
+  const today = localTodayStr();
+  const end = ev.endDate && ev.endDate > ev.date ? ev.endDate : ev.date;
+  return today >= ev.date && today <= end;
+}
+document.addEventListener("click", (e) => {
+  const th = e.target.closest("[data-roster-sort]");
+  if (!th) return;
+  const key = th.dataset.rosterSort;
+  ROSTER_SORT = ROSTER_SORT.key === key ? { key, dir: -ROSTER_SORT.dir } : { key, dir: 1 };
+  if (th.closest("#hub-checkin-wrap")) {
+    document.getElementById("hub-checkin-search").dispatchEvent(new Event("input"));
+  } else if (th.closest("#checkin-roster-wrap")) {
+    renderCheckinRoster();
+  }
+});
 function rosterTableHtml(roster, query, eventId, showCancel) {
-  const filtered = roster.filter(
+  let filtered = roster.filter(
     (r) => !query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)
   );
   if (!filtered.length) {
     return `<p style="color:var(--muted);">${escapeAttr(t("checkinNoMatches"))}</p>`;
   }
+  if (ROSTER_SORT.key) {
+    const { key, dir } = ROSTER_SORT;
+    filtered = filtered.slice().sort((a, b) => {
+      const va = rosterSortValue(a, key);
+      const vb = rosterSortValue(b, key);
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return (a.attendeeName || "").localeCompare(b.attendeeName || "");
+    });
+  }
   const ev = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
   const eventName = ev ? bilingual(ev.nameEn, ev.nameAr) : "";
   const eventDate = ev ? ev.date : "";
+  const checkInOpen = eventCheckInOpen(ev);
   const body = filtered
     .map((r) => {
       let status, action;
@@ -8710,10 +8774,12 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         action = "";
       } else {
         status = "";
-        action = `<button class="secondary small" data-checkin-reg="${r.registrationId}">${t("btnCheckIn")}</button>`;
+        action = checkInOpen
+          ? `<button class="roster-btn checkin" data-checkin-reg="${r.registrationId}">${t("btnCheckIn")}</button>`
+          : `<button class="roster-btn checkin" disabled title="${escapeAttr(t("checkinOnlyOnEventDate"))}${eventDate ? " (" + escapeAttr(eventDate) + ")" : ""}">${t("btnCheckIn")}</button>`;
       }
       const cancelBtn = showCancel
-        ? `<button class="danger small" data-cancel-reg="${r.registrationId}" data-cancel-name="${escapeAttr(r.attendeeName)}">${t("btnCancelRegistration")}</button>`
+        ? `<button class="roster-btn cancel" data-cancel-reg="${r.registrationId}" data-cancel-name="${escapeAttr(r.attendeeName)}">${t("btnCancelRegistration")}</button>`
         : "";
       const registeredAt = r.registeredAt ? new Date(r.registeredAt).toLocaleString() : "—";
       return `<tr>
@@ -8721,16 +8787,18 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId)}</td>
-        <td>${action}${action && cancelBtn ? "<br/><br/>" : ""}${cancelBtn}</td>
+        <td><div class="roster-actions">${action}${cancelBtn}${!checkInOpen && action ? `<small class="roster-date-note">${escapeAttr(t("checkinOnlyOnEventDate"))}</small>` : ""}</div></td>
         <td>${waStatusCellHtml(r, eventName, eventDate)}</td>
       </tr>`;
     })
     .join("");
-  return `<div class="dashboard-table-wrap"><table class="dashboard-table">
-    <thead><tr>
-      <th>${t("colMember")}</th><th>${t("colRegisteredAt")}</th><th>${t("colStatus")}</th>
-      <th>${t("colQrCode")}</th><th>${t("colActions")}</th><th>${t("colWhatsapp")}</th>
-    </tr></thead>
+  const headCells = ROSTER_SORT_COLS.map(([key, label]) => {
+    const active = ROSTER_SORT.key === key;
+    const arrow = active ? (ROSTER_SORT.dir === 1 ? " ▲" : " ▼") : " ↕";
+    return `<th aria-sort="${active ? (ROSTER_SORT.dir === 1 ? "ascending" : "descending") : "none"}"><button type="button" class="roster-sort${active ? " active" : ""}" data-roster-sort="${key}">${t(label)}<span class="roster-sort-arrow">${arrow}</span></button></th>`;
+  }).join("");
+  return `<div class="dashboard-table-wrap"><table class="dashboard-table roster-table">
+    <thead><tr>${headCells}</tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
 }
