@@ -6051,6 +6051,11 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), (req, r
         name: r.dependentName || (m ? m.name : "Member"),
         membershipNumber: r.membershipNumber,
         phone: m ? m.phone || "" : "",
+        // Age group is self-reported by the account holder, so it is only
+        // meaningful for their own registration - a dependent's registration
+        // (e.g. a child signed up by a parent) would otherwise inherit the
+        // parent's band, which is wrong. Leave it blank there.
+        ageGroup: !r.dependentName && m ? m.ageGroup || "" : "",
         registeredAt: r.registeredAt,
         waitlisted: !!r.waitlisted,
         checkedIn: !!r.checkedIn,
