@@ -1452,3 +1452,8 @@ html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
 .roster-table button.roster-btn.wa.wa-chip.sent:disabled { background: #fff; }
 .inquiry-reply-btn { white-space: nowrap; }
 #inquiry-reply-wa-btn { font-size: 0.95rem; }
+
+.ev-managers-block { margin: 8px 0; }
+.ev-managers-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0; }
+.ev-managers-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
+.ev-managers-list input { width: auto; margin: 0; }

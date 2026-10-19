@@ -771,6 +771,11 @@
           <p class="hint-note" data-i18n="coverVideoHint">Plays instead of the cover photo on the event's details page - the photo still shows as the card thumbnail and as a fallback while the video loads. Up to 60MB; a short, compressed clip works best.</p>
           <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
           <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
+          <div class="admin-full-only ev-managers-block">
+            <label data-i18n="fieldEventManagers">Event managers (Tournament Managers)</label>
+            <div class="ev-managers-list" id="ev-managers-add"></div>
+            <p class="hint-note" data-i18n="hintEventManagers">Only the managers ticked here can see this event's check-in list, WhatsApp messages, reports and tournament - and their access closes automatically 7 days after the event ends. Create Tournament Manager accounts in Settings.</p>
+          </div>
           <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
           <label data-i18n="fieldDescAr">Description (AR)</label>
           <textarea id="ev-desc-ar" dir="rtl" rows="3"></textarea>
@@ -805,6 +810,11 @@
             </div>
             <p class="hint-note" id="ev-edit-capacity-status"></p>
             <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
+            <div class="admin-full-only ev-managers-block">
+              <label data-i18n="fieldEventManagers">Event managers (Tournament Managers)</label>
+              <div class="ev-managers-list" id="ev-managers-edit"></div>
+              <p class="hint-note" data-i18n="hintEventManagers">Only the managers ticked here can see this event's check-in list, WhatsApp messages, reports and tournament - and their access closes automatically 7 days after the event ends. Create Tournament Manager accounts in Settings.</p>
+            </div>
             <label class="checkbox-row"><input type="checkbox" id="ev-edit-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
             <label data-i18n="fieldDescAr">Description (AR)</label>
             <textarea id="ev-edit-desc-ar" dir="rtl" rows="3"></textarea>

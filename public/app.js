@@ -1062,6 +1062,19 @@ async function checkSession() {
     CURRENT_SESSION = null;
   }
   updateUIForSession();
+  await refreshStaffEventScope();
+}
+// Event assignments (managedByMe / managerUsernames) depend on who is signed in,
+// so the event list is fetched again once a staff session is known.
+async function refreshStaffEventScope() {
+  if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && ["admin", "tournament"].includes(CURRENT_SESSION.staff.role)) {
+    try {
+      await loadEvents();
+    } catch (e) {
+      /* keep the public list */
+    }
+    if (CURRENT_SESSION.staff.role === "admin") loadEventManagerChoices();
+  }
 }
 
 function updateSessionBadge() {
@@ -1398,6 +1411,14 @@ async function loadEvents() {
 function isParentEventWithChildren(ev) {
   return EVENTS_DATA.some((e) => e.parentEventId === ev.id);
 }
+// A Tournament Manager only works with the events assigned to them (the server
+// sets managedByMe and enforces the same rule); admins and other roles see all.
+function isTournamentManagerSession() {
+  return !!(CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "tournament");
+}
+function managerScoped(list) {
+  return isTournamentManagerSession() ? list.filter((ev) => ev.managedByMe) : list;
+}
 function renderEventDropdowns() {
   // Members can only register for events that haven't happened yet. Full
   // events stay in the list (not hidden) - selecting one still works, it
@@ -1419,12 +1440,12 @@ function renderEventDropdowns() {
   updateRegCapacityNote();
   updateRegSelectedEventLabel();
 
-  const upcomingOpts = upcoming.map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`).join("");
+  const upcomingOpts = managerScoped(upcoming).map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`).join("");
 
   // Admins need every event (including past ones) to enter results - the
   // soonest upcoming one first, so the dropdown defaults to what's actually
   // next instead of an arbitrary past event (see sortEventsForChooser).
-  const allOpts = sortEventsForChooser(EVENTS_DATA)
+  const allOpts = sortEventsForChooser(managerScoped(EVENTS_DATA))
     .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
     .join("");
   const resSel = document.getElementById("res-event");
@@ -1460,7 +1481,7 @@ function renderEventDropdowns() {
   const tournSel = document.getElementById("tourn-event-select");
   if (tournSel) {
     const prevTournValue = tournSel.value;
-    const tournOpts = sortEventsForChooser(EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev)))
+    const tournOpts = sortEventsForChooser(managerScoped(EVENTS_DATA).filter((ev) => !isParentEventWithChildren(ev)))
       .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
       .join("");
     tournSel.innerHTML = tournOpts || `<option value="">--</option>`;
@@ -1474,7 +1495,7 @@ function renderEventDropdowns() {
   const checkinSel = document.getElementById("checkin-event-select");
   if (checkinSel) {
     const prevCheckinValue = checkinSel.value;
-    const checkinOpts = EVENTS_DATA.filter((ev) => !isParentEventWithChildren(ev))
+    const checkinOpts = managerScoped(EVENTS_DATA).filter((ev) => !isParentEventWithChildren(ev))
       .sort((a, b) => b.date.localeCompare(a.date))
       .map((ev) => `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}</option>`)
       .join("");
@@ -3221,6 +3242,7 @@ async function staffLogin(usernameId, passwordId, msgId) {
     document.getElementById(passwordId).value = "";
     msg.classList.remove("show");
     updateUIForSession();
+    await refreshStaffEventScope();
   } catch (e) {
     showMsg(msg, e.message, false);
   }
@@ -4922,6 +4944,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("maxCapacity", maxCapacity);
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
+  appendManagers(fd, "ev-managers-add");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
   if (whatsappQrInput.files[0]) fd.append("whatsappQr", whatsappQrInput.files[0]);
@@ -4950,6 +4973,42 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     showMsg(msg, e.message, false);
   }
 });
+
+
+// ---- Event managers (admin): tick which Tournament Managers run an event ----
+let EVENT_MANAGER_CHOICES = [];
+async function loadEventManagerChoices() {
+  try {
+    const list = await api("/api/staff/accounts");
+    EVENT_MANAGER_CHOICES = list.filter((s) => s.role === "tournament");
+  } catch (e) {
+    EVENT_MANAGER_CHOICES = [];
+  }
+  renderEventManagerPicker("ev-managers-add", []);
+  const fields = document.getElementById("ev-edit-fields");
+  const editing = fields && fields.dataset.eventId ? EVENTS_DATA.find((e) => e.id === Number(fields.dataset.eventId)) : null;
+  renderEventManagerPicker("ev-managers-edit", editing ? editing.managerUsernames || [] : []);
+}
+function renderEventManagerPicker(containerId, selected) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  const prevChecked = selected === null ? getCheckedManagers(containerId) : selected;
+  wrap.innerHTML = EVENT_MANAGER_CHOICES.length
+    ? EVENT_MANAGER_CHOICES.map(
+        (s) =>
+          `<label><input type="checkbox" value="${escapeAttr(s.username)}" ${prevChecked.includes(s.username) ? "checked" : ""} /> ${escapeAttr(s.name)} <small style="color:var(--muted);">(${escapeAttr(s.username)})</small></label>`
+      ).join("")
+    : `<small style="color:var(--muted);">${escapeAttr(t("noManagersAvailable"))}</small>`;
+}
+// Only sent when the picker actually listed accounts (never wipe assignments by accident).
+function appendManagers(fd, containerId) {
+  const wrap = document.getElementById(containerId);
+  if (wrap && wrap.querySelector("input[type=checkbox]")) fd.append("managerUsernames", JSON.stringify(getCheckedManagers(containerId)));
+}
+function getCheckedManagers(containerId) {
+  const wrap = document.getElementById(containerId);
+  return wrap ? Array.from(wrap.querySelectorAll("input[type=checkbox]:checked")).map((i) => i.value) : [];
+}
 
 function populateEditForm(ev) {
   const fields = document.getElementById("ev-edit-fields");
@@ -4989,6 +5048,7 @@ function populateEditForm(ev) {
   if (editParentSel) editParentSel.value = ev.parentEventId ? String(ev.parentEventId) : "";
   const editAllowMulti = document.getElementById("ev-edit-allow-multi");
   if (editAllowMulti) editAllowMulti.checked = !!ev.allowMultipleActivities;
+  renderEventManagerPicker("ev-managers-edit", ev.managerUsernames || []);
   fields.classList.remove("hidden");
 }
 document.getElementById("ev-edit-load").addEventListener("click", () => {
@@ -5042,6 +5102,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("maxCapacity", maxCapacity);
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
+  appendManagers(fd, "ev-managers-edit");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
   if (whatsappQrInput.files[0]) fd.append("whatsappQr", whatsappQrInput.files[0]);
@@ -8190,6 +8251,9 @@ async function setRedemptionStatus(id, status) {
 async function loadStaffAccountsTable() {
   const wrap = document.getElementById("staff-accounts-table-wrap");
   const list = await api("/api/staff/accounts");
+  EVENT_MANAGER_CHOICES = list.filter((s) => s.role === "tournament");
+  renderEventManagerPicker("ev-managers-add", null);
+  renderEventManagerPicker("ev-managers-edit", null);
   wrap.innerHTML = `<table>
     <thead><tr><th>${t("fieldUsername")}</th><th>${t("fieldFullName")}</th><th>${t("fieldRole")}</th><th>${t("colActions")}</th></tr></thead>
     <tbody>
@@ -8891,18 +8955,18 @@ function waStatusCellHtml(r, eventName, eventDate, ev) {
   }
   const attending = !r.waitlisted && !r.checkedIn;
   const types = [
-    { key: "confirm", field: "whatsappConfirmedAt", label: "waTypeConfirm", short: "waShortConfirm", build: waConfirmMessage, open: true, cls: "wa" },
+    { key: "confirm", field: "whatsappConfirmedAt", label: "waTypeConfirm", short: "waShortConfirm", resend: "waResendConfirm", build: waConfirmMessage, open: true, cls: "wa" },
   ];
   if (attending) {
-    types.push({ key: "reminder", field: "whatsappReminderAt", label: "waTypeReminder", short: "waShortReminder", build: waReminderMessage, open: eventReminderOpen(ev), cls: "wa reminder", tip: "waOnlyBeforeEvent" });
-    types.push({ key: "dayof", field: "whatsappDayOfAt", label: "waTypeDayOf", short: "waShortDayOf", build: waDayOfMessage, open: eventCheckInOpen(ev), cls: "wa dayof", tip: "checkinOnlyOnEventDate" });
+    types.push({ key: "reminder", field: "whatsappReminderAt", label: "waTypeReminder", short: "waShortReminder", resend: "waResendReminder", build: waReminderMessage, open: eventReminderOpen(ev), cls: "wa reminder", tip: "waOnlyBeforeEvent" });
+    types.push({ key: "dayof", field: "whatsappDayOfAt", label: "waTypeDayOf", short: "waShortDayOf", resend: "waResendDayOf", build: waDayOfMessage, open: eventCheckInOpen(ev), cls: "wa dayof", tip: "checkinOnlyOnEventDate" });
   }
   const chips = types
     .map((ty) => {
       const sentAt = r[ty.field];
       const message = ty.build(r.attendeeName, eventName || "", eventDate || "");
       const href = hasPhoneNow ? waLink(r.phone, message) : "";
-      const label = (sentAt ? "\u2713 " : "") + t(ty.short);
+      const label = sentAt ? "\u21BB " + t(ty.resend) : t(ty.short);
       const cls = `roster-btn wa-chip ${ty.cls}${sentAt ? " sent" : ""}`;
       const dataAttrs = `data-wa-confirm="${r.registrationId}" data-wa-type="${ty.key}" ${href ? `data-wa-href="${escapeAttr(href)}"` : `data-wa-msg="${escapeAttr(message)}"`}`;
       if (!ty.open) {
