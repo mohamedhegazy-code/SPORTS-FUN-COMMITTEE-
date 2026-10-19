@@ -74,7 +74,7 @@ async function ensurePool(n) {
   while (pool.length < n) {
     const i = pool.length + 1;
     const jar = await prime(newJar());
-    const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `TM${i}`, name: `Matrix Player ${i}`, password: "abc12345", phone: `0105${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main" } });
+    const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `TM${i}`, name: `Matrix Player ${i}`, password: "abc12345", phone: `0105${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: "18to45" } });
     if (r.status !== 200 && r.status !== 201) throw new Error("signup failed " + JSON.stringify(r.json));
     pool.push({ jar, num: i, regByEvent: {} });
   }

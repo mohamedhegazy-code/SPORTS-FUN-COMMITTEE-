@@ -143,6 +143,7 @@ async function signupMember(prefix, extra) {
       phone: `01${String(Math.floor(Math.random() * 1e9)).padStart(9, "0")}`,
       agreeTerms: true,
       memberType: "main",
+      ageGroup: "18to45",
       ...extra,
     },
   });
@@ -187,7 +188,7 @@ async function main() {
   section("1. Auth: signup validation");
   // =========================================================================
   {
-    const base = { name: "Validator", password: "abc12345", phone: "01012345678", agreeTerms: true, memberType: "main" };
+    const base = { name: "Validator", password: "abc12345", phone: "01012345678", agreeTerms: true, memberType: "main", ageGroup: "18to45" };
     const jar1 = await primeCsrf(newJar());
     const dupNum = `DUP${Date.now()}`;
     const first = await api("/api/auth/signup", { method: "POST", jar: jar1, body: { ...base, membershipNumber: dupNum } });
@@ -539,7 +540,7 @@ async function main() {
 
     // dependents: add then register a dependent
     const depParent = await signupMember("DEPPAR");
-    const addDep = await api("/api/me/dependents", { method: "POST", jar: depParent.jar, body: { name: "Junior Kid", relationship: "Son" } });
+    const addDep = await api("/api/me/dependents", { method: "POST", jar: depParent.jar, body: { name: "Junior Kid", relationship: "Son", ageGroup: "under12" } });
     ok(addDep.status === 201 && addDep.json.dependents.length === 1, "add dependent succeeds", addDep.json);
     const depId = addDep.json.dependents[0].id;
     const depEvent = await createEvent(admin, { nameEn: "Dependent Reg Event" });
@@ -922,7 +923,7 @@ async function main() {
 
     // dependents CRUD
     const depOwner = await signupMember("DEPCRUD");
-    const addDep = await api("/api/me/dependents", { method: "POST", jar: depOwner.jar, body: { name: "Dep One", relationship: "Daughter" } });
+    const addDep = await api("/api/me/dependents", { method: "POST", jar: depOwner.jar, body: { name: "Dep One", relationship: "Daughter", ageGroup: "12to17" } });
     ok(addDep.status === 201, "add a dependent", addDep.json);
     const depId = addDep.json.dependents[0].id;
     const updateDep = await api(`/api/me/dependents/${depId}`, { method: "PUT", jar: depOwner.jar, body: { name: "Dep One Updated", phone: "0101234567" } });
@@ -931,6 +932,72 @@ async function main() {
     ok(updateDepMissing.status === 404, "update nonexistent dependent -> 404", updateDepMissing.json);
     const deleteDep = await api(`/api/me/dependents/${depId}`, { method: "DELETE", jar: depOwner.jar });
     ok(deleteDep.status === 200 && deleteDep.json.dependents.length === 0, "delete a dependent", deleteDep.json);
+
+    // ---- mandatory age group (signup, profile, dependents, admin editor) ----
+    {
+      const jarA = await primeCsrf(newJar());
+      const baseA = { name: "Age Tester", password: "abc12345", phone: "01012345600", agreeTerms: true, memberType: "main" };
+      const noAge = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `NOAGE${Date.now()}` } });
+      ok(noAge.status === 400 && /age group/i.test((noAge.json || {}).error || ""), "signup without age group -> 400", noAge.json);
+      const badAge = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `BADAGE${Date.now()}`, ageGroup: "toddler" } });
+      ok(badAge.status === 400, "signup with unknown age group -> 400", badAge.json);
+      const okAge = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `OKAGE${Date.now()}`, ageGroup: "46plus" } });
+      ok(okAge.status === 201 && okAge.json.member.ageGroup === "46plus", "signup with valid age group stores it", okAge.json);
+
+      const owner = await signupMember("AGEDEP", { ageGroup: "18to45" });
+      const clear = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "" } });
+      ok(clear.status === 400, "profile: age group cannot be cleared", clear.json);
+      const junk = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "xyz" } });
+      ok(junk.status === 400, "profile: invalid age group rejected", junk.json);
+      const chg = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "46plus" } });
+      ok(chg.status === 200 && chg.json.member.ageGroup === "46plus", "profile: age group can be changed", chg.json);
+      const noName = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { phone: "01099998888" } });
+      ok(noName.status === 200 && noName.json.member.ageGroup === "46plus", "profile: other updates keep the age group", noName.json);
+
+      const depNo = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "No Age Kid", relationship: "Son" } });
+      ok(depNo.status === 400 && /age group/i.test((depNo.json || {}).error || ""), "dependent without age group -> 400", depNo.json);
+      const depBad = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "Bad Age Kid", ageGroup: "nope" } });
+      ok(depBad.status === 400, "dependent with invalid age group -> 400", depBad.json);
+      const depOk = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "Age Kid", relationship: "Son", ageGroup: "under12" } });
+      ok(depOk.status === 201 && depOk.json.dependents[0].ageGroup === "under12", "dependent with age group stored", depOk.json);
+      const dId = depOk.json.dependents[0].id;
+      const depPutBad = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { ageGroup: "" } });
+      ok(depPutBad.status === 400, "dependent age group cannot be cleared", depPutBad.json);
+      const depPutOk = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { ageGroup: "12to17" } });
+      ok(depPutOk.status === 200 && depPutOk.json.dependents[0].ageGroup === "12to17", "dependent age group editable", depPutOk.json);
+      const depPutOther = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { phone: "0100000111" } });
+      ok(depPutOther.status === 200 && depPutOther.json.dependents[0].ageGroup === "12to17", "editing other dependent fields keeps age group", depPutOther.json);
+
+      // admin editor + directory
+      const dir = await api("/api/admin/directory", { jar: admin });
+      const row = (dir.json || []).find((m) => m.membershipNumber === owner.membershipNumber);
+      ok(row && row.ageGroup === "46plus" && row.dependents[0].ageGroup === "12to17", "directory exposes member + dependent age groups", row && [row.ageGroup, row.dependents]);
+      const aMem = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "18to45" } });
+      ok(aMem.status === 200, "admin sets a member's age group", aMem.json);
+      const aDep = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "under12", dependentId: dId } });
+      ok(aDep.status === 200, "admin sets a dependent's age group", aDep.json);
+      const dir2 = await api("/api/admin/directory", { jar: admin });
+      const row2 = (dir2.json || []).find((m) => m.membershipNumber === owner.membershipNumber);
+      ok(row2 && row2.ageGroup === "18to45" && row2.dependents[0].ageGroup === "under12", "directory reflects admin edits", row2 && [row2.ageGroup, row2.dependents]);
+      const aBad = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "" } });
+      ok(aBad.status === 400, "admin cannot clear age group", aBad.json);
+      const aNoMember = await api(`/api/admin/members/NOPE-404/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "18to45" } });
+      ok(aNoMember.status === 404, "admin age group: unknown member -> 404", aNoMember.json);
+      const aNoDep = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "18to45", dependentId: 99999999 } });
+      ok(aNoDep.status === 404, "admin age group: unknown dependent -> 404", aNoDep.json);
+      const aAnon = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: await primeCsrf(newJar()), body: { ageGroup: "18to45" } });
+      ok(aAnon.status === 401 || aAnon.status === 403, "admin age group: anonymous rejected", aAnon.status);
+      const aMemberTry = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: owner.jar, body: { ageGroup: "46plus" } });
+      ok(aMemberTry.status === 401 || aMemberTry.status === 403, "admin age group: member session rejected", aMemberTry.status);
+      const aStaffTry = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: staffTournament, body: { ageGroup: "46plus" } });
+      ok(aStaffTry.status === 403, "admin age group: tournament role rejected", aStaffTry.status);
+
+      // server source files must never be downloadable
+      for (const f of ["/server.js", "/swiss.js", "/swiss_print.js", "/report_print.js", "/package.json"]) {
+        const r = await fetch(BASE + f);
+        ok(r.status === 404, `source file ${f} is not downloadable`, r.status);
+      }
+    }
 
     // nickname
     const nickOwner = await signupMember("NICK");
