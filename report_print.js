@@ -32,7 +32,7 @@ const CSS = `
   .toolbar .hint { font-size: 0.8rem; opacity: 0.85; }
   .sheet { width: 210mm; min-height: 297mm; margin: 14px auto; background: var(--bg); box-shadow: 0 6px 30px rgba(0,0,0,0.25); padding: 8mm 10mm; }
   .head { display: flex; align-items: center; gap: 5mm; padding: 4mm; color: #fff; background: linear-gradient(135deg, var(--red), var(--red-dark)); border-bottom: 1.2mm solid var(--gold); }
-  .head img { height: 16mm; background: #111; padding: 2mm; flex: none; }
+  .head img { height: 22mm; width: auto; background: none; padding: 0; flex: none; }
   .head .t { flex: 1; }
   .head h1 { margin: 0; font-size: 16pt; line-height: 1.2; }
   .head p { margin: 1mm 0 0; font-size: 10.5pt; color: #f3dfa0; font-weight: 700; }
@@ -147,7 +147,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt }) {
   }
 
   const body = `<section class="sheet" dir="${dir}">
-    <div class="head"><img src="/ahly-crest.png" alt="" /><div class="t"><h1>${esc(title)}</h1><p>${esc(subtitle)} — ${esc(eventDate)}</p></div></div>
+    <div class="head"><img src="/ahly-crest-clear.png" alt="" /><div class="t"><h1>${esc(title)}</h1><p>${esc(subtitle)} — ${esc(eventDate)}</p></div></div>
     ${strip}
     ${table}
     <div class="sign"><div>${esc(L("المسؤول", "Prepared by"))}</div><div>${esc(L("ختم اللجنة", "Committee stamp"))}</div></div>

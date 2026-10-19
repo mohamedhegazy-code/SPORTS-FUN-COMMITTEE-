@@ -52,8 +52,8 @@ const CSS = `
   .sheet ~ .sheet { page-break-before: always; }
   .checker { height: 7mm; background: repeating-conic-gradient(#161616 0 25%, #fff 0 50%) 0 0 / 7mm 7mm; border: 0.3mm solid #161616; }
   .hero { display: flex; align-items: stretch; margin: 3mm 0 0; color: #fff; background: linear-gradient(135deg, var(--red), var(--red-dark)); border-bottom: 1.2mm solid var(--gold); }
-  .hero .crest { width: 34mm; background: #111; display: flex; align-items: center; justify-content: center; padding: 3mm; flex: none; }
-  .hero .crest img { max-width: 100%; max-height: 26mm; object-fit: contain; }
+  .hero .crest { width: 34mm; background: none; display: flex; align-items: center; justify-content: center; padding: 3mm; flex: none; }
+  .hero .crest img { max-width: 100%; max-height: 32mm; object-fit: contain; }
   .hero .titles { flex: 1; text-align: center; padding: 4mm 5mm; display: flex; flex-direction: column; justify-content: center; gap: 1.5mm; }
   .hero h1 { margin: 0; font-size: 24pt; line-height: 1.15; font-weight: 800; }
   .hero h2 { margin: 0; font-size: 13pt; font-weight: 700; color: var(--gold); letter-spacing: 0.04em; font-family: Anton, "Segoe UI", Arial, sans-serif; text-transform: uppercase; }
@@ -92,7 +92,7 @@ const CSS = `
   .dress li { font-size: 10.5pt; font-weight: 600; padding: 0.5mm 0; padding-inline-start: 5mm; position: relative; }
   .dress li::before { content: "♙"; position: absolute; inset-inline-start: 0; color: var(--red); }
   .page-head { display: flex; align-items: center; gap: 5mm; padding: 4mm; color: #fff; background: linear-gradient(135deg, var(--red), var(--red-dark)); border-bottom: 1.2mm solid var(--gold); margin-top: 3mm; }
-  .page-head img { height: 18mm; background: #111; padding: 2mm; flex: none; }
+  .page-head img { height: 22mm; width: auto; background: none; padding: 0; flex: none; }
   .page-head .t { flex: 1; }
   .page-head h1 { margin: 0; font-size: 17pt; }
   .page-head p { margin: 1mm 0 0; font-size: 10.5pt; color: #f3dfa0; font-weight: 700; }
@@ -134,7 +134,7 @@ function renderSwissPrint({ event, tn, view, roundNumber, lang, labels }) {
   const title = ar ? event.nameAr || event.nameEn : event.nameEn || event.nameAr;
   const subtitle = ar ? event.nameEn : event.nameAr;
   const firstTime = sw.rounds && sw.rounds[0] && sw.rounds[0].time ? sw.rounds[0].time : tn.schedule ? tn.schedule.startTime : event.startTime || "";
-  const crest = `<img src="/ahly-crest.png" alt="" />`;
+  const crest = `<img src="/ahly-crest-clear.png" alt="" />`;
 
   const toolbar = `<div class="toolbar"><button id="print-btn" type="button">${esc(L("طباعة / حفظ PDF", "Print / Save as PDF"))}</button><span class="hint">${esc(L("اختر «حفظ كـ PDF» من نافذة الطباعة لحفظ نسخة", "Choose “Save as PDF” in the print dialog to keep a copy"))}</span></div>`;
   const checker = '<div class="checker"></div>';
