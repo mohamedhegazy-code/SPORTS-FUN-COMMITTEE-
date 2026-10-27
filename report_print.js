@@ -185,4 +185,138 @@ function renderEventSheet({ event, rows, view, lang, generatedAt, showPhone = tr
 <body>${toolbar}${body}<script src="/print.js"></script></body></html>`;
 }
 
-module.exports = { renderEventSheet };
+// ------------------------------------------------------------ age-group report
+// Cross-event report: how many members / family members registered and
+// attended, split by age group, for any selection of events. rows: one entry
+// per CONFIRMED registration { eventId, personKey, name, membershipNumber,
+// phone, ageKey ("under12" | "12to17" | "18to45" | "46plus" | "none"),
+// checkedIn }.
+const AGE_KEYS = ["under12", "12to17", "18to45", "46plus", "none"];
+function aggregateAgeReport(events, rows, ageKeys) {
+  const keys = AGE_KEYS.filter((k) => ageKeys.includes(k));
+  const mk = () => ({ reg: 0, att: 0, people: new Set(), attPeople: new Set() });
+  const byAge = new Map(keys.map((k) => [k, mk()]));
+  const matrix = new Map(events.map((ev) => [ev.id, new Map(keys.map((k) => [k, { reg: 0, att: 0 }]))]));
+  const persons = new Map(keys.map((k) => [k, new Map()]));
+  const total = mk();
+  for (const r of rows) {
+    if (!byAge.has(r.ageKey) || !matrix.has(r.eventId)) continue;
+    const a = byAge.get(r.ageKey);
+    a.reg++; a.people.add(r.personKey); total.reg++; total.people.add(r.personKey);
+    const cell = matrix.get(r.eventId).get(r.ageKey);
+    cell.reg++;
+    const pm = persons.get(r.ageKey);
+    if (!pm.has(r.personKey)) pm.set(r.personKey, { name: r.name, membershipNumber: r.membershipNumber, phone: r.phone || "", reg: 0, att: 0 });
+    const p = pm.get(r.personKey);
+    p.reg++;
+    if (r.checkedIn) {
+      a.att++; a.attPeople.add(r.personKey); total.att++; total.attPeople.add(r.personKey);
+      cell.att++; p.att++;
+    }
+  }
+  return { keys, byAge, matrix, persons, total };
+}
+const pct = (a, b) => (b ? (Math.round((a / b) * 1000) / 10).toFixed(1) + "%" : "—");
+
+// opts: { events (selected, sorted by date), rows, ages, detail
+//         ("summary" | "events" | "names"), lang, from, to, allEvents,
+//         generatedAt, showPhone }
+function renderAgeReport({ events, rows, ages, detail, lang, from, to, allEvents, generatedAt, showPhone }) {
+  const ar = lang === "ar";
+  const dir = ar ? "rtl" : "ltr";
+  const L = (a, e) => (ar ? a : e);
+  const agg = aggregateAgeReport(events, rows, ages);
+  const label = (k) => (k === "none" ? L("غير محدد", "Not set") : ageLabel(k, ar));
+  const collator = new Intl.Collator(ar ? "ar" : "en", { sensitivity: "base", numeric: true });
+  const title = L("تقرير الفئات العمرية", "Age group report");
+  const evName = (ev) => (ar ? ev.nameAr || ev.nameEn : ev.nameEn || ev.nameAr);
+
+  const scopeBits = [];
+  scopeBits.push(allEvents ? L("كل الفعاليات", "All events") : L(`${events.length} فعالية محددة`, `${events.length} selected event(s)`));
+  if (from || to) scopeBits.push(`${from || "…"} → ${to || "…"}`);
+  scopeBits.push(L(`${events.length} فعالية`, `${events.length} event(s)`));
+  const subtitle = scopeBits.join(" · ");
+
+  const T = agg.total;
+  const strip = `<div class="strip">
+    <div><div class="k">${esc(L("أشخاص مختلفون", "Unique people"))}</div><div class="v">${T.people.size}</div></div>
+    <div><div class="k">${esc(L("تسجيلات", "Registrations"))}</div><div class="v">${T.reg}</div></div>
+    <div><div class="k">${esc(L("حضور", "Check-ins"))}</div><div class="v">${T.att}</div></div>
+    <div><div class="k">${esc(L("نسبة الحضور", "Attendance rate"))}</div><div class="v">${esc(pct(T.att, T.reg))}</div></div>
+  </div>`;
+  const filterBar = `<div class="agebar"><b>${esc(L("الفئات المشمولة", "Age groups included"))}:</b> ${agg.keys.map((k) => `<span>${esc(label(k))}</span>`).join("")}<span>${esc(L("يُحتسب المؤكَّدون فقط (دون قائمة الانتظار)", "Confirmed registrations only (no waiting list)"))}</span></div>`;
+
+  // 1. summary by age group
+  const sumRows = agg.keys
+    .map((k) => {
+      const a = agg.byAge.get(k);
+      return `<tr><td class="name nw">${esc(label(k))}</td><td class="num">${a.people.size}</td><td class="num">${a.reg}</td><td class="num">${a.attPeople.size}</td><td class="num">${a.att}</td><td class="num">${esc(pct(a.att, a.reg))}</td><td class="num">${esc(pct(a.reg, T.reg))}</td></tr>`;
+    })
+    .join("");
+  const summary = `<h2 class="sec">${esc(L("حسب الفئة العمرية", "By age group"))}</h2>
+  <table class="grid"><thead><tr><th>${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("أشخاص مختلفون", "Unique people"))}</th><th class="c">${esc(L("تسجيلات", "Registrations"))}</th><th class="c">${esc(L("حضروا مرة على الأقل", "Attended at least once"))}</th><th class="c">${esc(L("مرات الحضور", "Check-ins"))}</th><th class="c">${esc(L("نسبة الحضور", "Attendance rate"))}</th><th class="c">${esc(L("حصة من التسجيلات", "Share of registrations"))}</th></tr></thead><tbody>${sumRows}
+  <tr class="total"><td>${esc(L("الإجمالي", "Total"))}</td><td class="num">${T.people.size}</td><td class="num">${T.reg}</td><td class="num">${T.attPeople.size}</td><td class="num">${T.att}</td><td class="num">${esc(pct(T.att, T.reg))}</td><td class="num">${T.reg ? "100.0%" : "—"}</td></tr></tbody></table>`;
+
+  // 2. event x age-group matrix
+  let matrix = "";
+  if (detail !== "summary" && events.length) {
+    const head = agg.keys.map((k) => `<th class="c">${esc(label(k))}</th>`).join("");
+    const active = events.filter((ev) => [...agg.matrix.get(ev.id).values()].some((c) => c.reg > 0));
+    const body = active
+      .map((ev) => {
+        const m = agg.matrix.get(ev.id);
+        let evReg = 0, evAtt = 0;
+        const cells = agg.keys
+          .map((k) => {
+            const c = m.get(k);
+            evReg += c.reg; evAtt += c.att;
+            return `<td class="num">${c.reg} / ${c.att}</td>`;
+          })
+          .join("");
+        return `<tr><td class="name"><bdi>${esc(evName(ev))}</bdi><br><span class="muted">${esc(ev.date)}</span></td>${cells}<td class="num"><b>${evReg} / ${evAtt}</b></td></tr>`;
+      })
+      .join("");
+    matrix = !active.length ? "" : `<h2 class="sec">${esc(L("حسب الفعالية", "By event"))}</h2>
+    <p class="note">${esc(L("كل خلية: المسجَّلون / الحاضرون. الفعاليات التي لا مسجّلين فيها لا تظهر.", "Each cell: registered / checked in. Events with no registrations are not listed."))}</p>
+    <table class="grid"><thead><tr><th>${esc(L("الفعالية", "Event"))}</th>${head}<th class="c">${esc(L("المجموع", "Total"))}</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  // 3. names per age group
+  let names = "";
+  if (detail === "names") {
+    names = agg.keys
+      .map((k) => {
+        const list = [...agg.persons.get(k).values()].sort((a, b) => b.att - a.att || collator.compare(a.name, b.name));
+        const head = `<h2 class="sec">${esc(label(k))} <span class="muted">(${list.length})</span></h2>`;
+        if (!list.length) return head + `<p class="empty">${esc(L("لا يوجد أشخاص في هذه الفئة.", "Nobody in this age group."))}</p>`;
+        return (
+          head +
+          `<table class="grid"><thead><tr><th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("سجّل في", "Registered for"))}</th><th class="c">${esc(L("حضر", "Attended"))}</th><th class="c">${esc(L("النسبة", "Rate"))}</th></tr></thead><tbody>${list
+            .map((p, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(p.name)}</bdi></td><td class="num">${esc(p.membershipNumber)}</td>${showPhone ? `<td class="num">${esc(p.phone)}</td>` : ""}<td class="num">${p.reg}</td><td class="num">${p.att}</td><td class="num">${esc(pct(p.att, p.reg))}</td></tr>`)
+            .join("")}</tbody></table>`
+        );
+      })
+      .join("");
+  }
+
+  const empty = !events.length ? `<p class="empty">${esc(L("لا توجد فعاليات مطابقة للاختيار.", "No events match this selection."))}</p>` : "";
+  const body = `<section class="sheet" dir="${dir}">
+    <div class="head"><img src="/ahly-crest-logo.png" alt="" /><div class="t"><div class="org">${esc(L("النادي الأهلي · لجنة الرياضة الترفيهية – التجمع الخامس، القاهرة الجديدة","Al Ahly Club · Recreational Sports Committee — Fifth Settlement, New Cairo"))}</div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div></div>
+    ${strip}${filterBar}${empty}${events.length ? summary + matrix + names : ""}
+    <div class="sign"><div>${esc(L("المسؤول", "Prepared by"))}</div><div>${esc(L("ختم اللجنة", "Committee stamp"))}</div></div>
+    <p class="foot">${esc(L("أُنشئ في", "Generated"))} <bdi dir="ltr">${esc(generatedAt)}</bdi></p>
+  </section>`;
+  const toolbar = `<div class="toolbar"><button id="print-btn" type="button">${esc(L("طباعة / حفظ PDF", "Print / Save as PDF"))}</button><span class="hint">${esc(L("اختر «حفظ كـ PDF» من نافذة الطباعة لحفظ نسخة", "Choose “Save as PDF” in the print dialog to keep a copy"))}</span></div>`;
+  return `<!doctype html>
+<html lang="${lang}" dir="${dir}"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${esc(title)}</title>
+<style>${CSS}
+  h2.sec { margin: 6mm 0 1mm; font-size: 12pt; color: var(--red); border-bottom: 0.5mm solid var(--gold); padding-bottom: 1mm; }
+  .muted { color: var(--muted); font-size: 8.5pt; font-weight: 400; }
+  p.note { margin: 1mm 0 0; font-size: 8.5pt; color: var(--muted); }
+  td.nw { white-space: nowrap; }
+</style></head>
+<body>${toolbar}${body}<script src="/print.js"></script></body></html>`;
+}
+
+module.exports = { renderEventSheet, renderAgeReport, aggregateAgeReport, AGE_KEYS };

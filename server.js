@@ -18,7 +18,7 @@ const XLSX = require("xlsx");
 const helmet = require("helmet");
 const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
-const { renderEventSheet } = require("./report_print");
+const { renderEventSheet, renderAgeReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
 const {
   Document,
   Packer,
@@ -6396,6 +6396,64 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), require
     });
   res.set("Cache-Control", "no-store");
   res.type("html").send(renderEventSheet({ event, rows, view, lang, showPhone: isAdminViewer, generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC" }));
+});
+
+// Age-group report across events: registered / checked-in people split by
+// age group, optionally per event and with names. Customisable through the
+// query string: lang, detail (summary | events | names), events (all | 1,2,3),
+// from / to (event start date, YYYY-MM-DD), ages (comma list of under12,
+// 12to17, 18to45, 46plus, none). A Tournament Manager only ever sees the
+// events they are allowed to manage and never gets phone numbers.
+app.get("/admin/print/age-report", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const isAdminViewer = req.staff.role === "admin";
+  const lang = req.query.lang === "en" ? "en" : "ar";
+  const detail = ["summary", "events", "names"].includes(req.query.detail) ? req.query.detail : "summary";
+  const dateOk = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "");
+  const from = dateOk(req.query.from);
+  const to = dateOk(req.query.to);
+  let ages = String(req.query.ages || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => REPORT_AGE_KEYS.includes(x));
+  if (!ages.length) ages = REPORT_AGE_KEYS.slice();
+  const evParam = String(req.query.events || "all");
+  const wanted = evParam === "all" ? null : new Set(evParam.split(",").map((x) => Number(x)).filter((n) => Number.isInteger(n)).slice(0, 1000));
+  const events = db.events
+    .filter((ev) => eventAccessCheck(db, req.staff, ev.id).ok)
+    .filter((ev) => !wanted || wanted.has(ev.id))
+    .filter((ev) => (!from || String(ev.date) >= from) && (!to || String(ev.date) <= to))
+    .slice()
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
+  const ids = new Set(events.map((e) => e.id));
+  const rows = db.registrations
+    .filter((r) => ids.has(r.eventId) && !r.waitlisted)
+    .map((r) => {
+      const m = db.members[r.membershipNumber];
+      let ageKey = "none";
+      if (m) {
+        const raw = r.dependentName ? ((m.dependents || []).find((d) => d.id === r.dependentId) || {}).ageGroup : m.ageGroup;
+        if (REPORT_AGE_KEYS.includes(raw) && raw !== "none") ageKey = raw;
+      }
+      return {
+        eventId: r.eventId,
+        personKey: `${r.membershipNumber}#${r.dependentName ? r.dependentId || r.dependentName : 0}`,
+        name: r.dependentName || (m ? m.name : "Member"),
+        membershipNumber: r.membershipNumber,
+        phone: isAdminViewer && m ? m.phone || "" : "",
+        ageKey,
+        checkedIn: !!r.checkedIn,
+      };
+    });
+  res.set("Cache-Control", "no-store");
+  res.type("html").send(
+    renderAgeReport({
+      events, rows, ages, detail, lang, from, to,
+      allEvents: !wanted,
+      showPhone: isAdminViewer,
+      generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC",
+    })
+  );
 });
 
 // Staff correction of a player's Women / Juniors ranking categories (e.g.
