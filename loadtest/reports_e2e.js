@@ -377,6 +377,98 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   res = await getHtml(`/admin/print/event/${evChess}?view=attendance&lang=en&x=<script>`);
   ok(res.status === 200 && !res.text.includes("<script>"), "query noise ignored");
 
+  // ----------------------------------------------------- age-group report
+  section("Age group report (customisable cross-event report)");
+  const AR = (q, jar) => api(`/admin/print/age-report?${q}`, { jar: jar || admin, raw: true });
+  const totalOf = (h) => {
+    const m = h.match(/class="total"><td>[^<]*<\/td><td class="num">(\d+)<\/td><td class="num">(\d+)<\/td><td class="num">(\d+)<\/td><td class="num">(\d+)<\/td>/);
+    return m ? { people: +m[1], regs: +m[2], attPeople: +m[3], att: +m[4] } : null;
+  };
+  const rowOf = (h, label) => {
+    const esc2 = label.replace(/[()+]/g, "\\$&");
+    const m = h.match(new RegExp(`<tr><td class="name nw">${esc2}</td><td class="num">(\\d+)</td><td class="num">(\\d+)</td><td class="num">(\\d+)</td><td class="num">(\\d+)</td>`));
+    return m ? { people: +m[1], regs: +m[2], attPeople: +m[3], att: +m[4] } : null;
+  };
+  // guards
+  res = await api(`/admin/print/age-report?events=all`, { jar: anon, raw: true });
+  ok(res.status === 401, "age report: anonymous -> 401", res.status);
+  res = await AR(`events=all`, aKids.jar);
+  ok(res.status === 401 || res.status === 403, "age report: a member is refused", res.status);
+  for (const role of ["staff", "management"]) {
+    res = await AR(`events=all`, roles[role]);
+    ok(res.status === 403, `age report: ${role} role refused`, res.status);
+  }
+  // single event, admin, summary
+  res = await AR(`events=${evAge}&lang=en`);
+  ok(res.status === 200 && /text\/html/.test(res.type) && res.text.includes('id="print-btn"') && res.text.includes("Age group report"), "age report: admin 200 html", res.status);
+  ok(!/<script(?![^>]*src=)/.test(res.text), "age report: no inline scripts (CSP-safe)");
+  let h = res.text;
+  const kidsR = rowOf(h, "Kids (under 12)"), youthR = rowOf(h, "Youth (12–17)"), adultsR = rowOf(h, "Adults (18–45)"), mastersR = rowOf(h, "Masters (46+)"), unsetR = rowOf(h, "Not set");
+  ok(kidsR && kidsR.people === 2 && kidsR.regs === 2 && kidsR.attPeople === 1 && kidsR.att === 1, "age report: Kids row (member kid + dependent; only the member checked in)", kidsR);
+  ok(youthR && youthR.people === 1 && youthR.regs === 1 && youthR.att === 1, "age report: Youth row", youthR);
+  ok(adultsR && adultsR.people === 1 && adultsR.regs === 1 && adultsR.att === 1, "age report: Adults row", adultsR);
+  ok(mastersR && mastersR.people === 1 && mastersR.regs === 1 && mastersR.att === 1, "age report: Masters row (dependent NOT counted here)", mastersR);
+  ok(unsetR && unsetR.regs === 0, "age report: Not set row is empty", unsetR);
+  const tot = totalOf(h);
+  ok(tot && tot.people === 5 && tot.regs === 5 && tot.att === 4 && tot.attPeople === 4, "age report: totals 5 people / 5 regs / 4 check-ins", tot);
+  ok(/80\.0%/.test(h), "age report: attendance rate 80.0%");
+  ok(!h.includes("By event") && !h.includes("Dependent Child"), "age report: summary level has no per-event table or names");
+  // detail levels
+  h = (await AR(`events=${evAge}&lang=en&detail=events`)).text;
+  ok(h.includes("By event") && h.includes("Reports Age Groups") && /<td class="num">2 \/ 1<\/td>/.test(h), "age report: per-event table shows registered / checked-in (2 / 1 for Kids)");
+  ok(!h.includes("Dependent Child"), "age report: events level still has no names");
+  h = (await AR(`events=${evAge}&lang=en&detail=names`)).text;
+  ok(h.includes("Dependent Child") && h.includes("Senior Player") && h.includes("Kid Player") && h.includes("Teen Player"), "age report: names level lists every person");
+  ok(/Masters \(46\+\) <span class="muted">\(1\)<\/span>/.test(h), "age report: names section headings carry the head-count");
+  ok(h.includes("0106"), "age report: admin sees phone numbers in the names list");
+  // age filter
+  h = (await AR(`events=${evAge}&lang=en&ages=under12`)).text;
+  const t2 = totalOf(h);
+  ok(rowOf(h, "Kids (under 12)") && !rowOf(h, "Adults (18–45)") && t2 && t2.regs === 2, "age report: ages filter keeps only the chosen group", t2);
+  h = (await AR(`events=${evAge}&lang=en&ages=under12,none`)).text;
+  ok(rowOf(h, "Not set") && rowOf(h, "Kids (under 12)") && !rowOf(h, "Masters (46+)"), "age report: 'none' can be chosen as a group");
+  // all events + waitlist exclusion + multiple events
+  const listAll = (await A("/api/admin/reports/events")).json;
+  const confirmedTotal = listAll.reduce((a, e) => a + e.confirmedCount, 0);
+  h = (await AR(`events=all&lang=en`)).text;
+  const allTot = totalOf(h);
+  ok(allTot && allTot.regs === confirmedTotal, "age report: all events = every CONFIRMED registration (waitlist excluded)", [allTot, confirmedTotal]);
+  const smallInfo = listAll.find((e) => e.eventId === evSmall);
+  ok(smallInfo.waitlistCount === 2, "(fixture) small event has 2 waitlisted");
+  const hSmall = (await AR(`events=${evSmall}&lang=en`)).text;
+  ok(totalOf(hSmall).regs === smallInfo.confirmedCount, "age report: waitlisted players are not counted", [totalOf(hSmall), smallInfo.confirmedCount]);
+  const hTwo = (await AR(`events=${evSmall},${evAge}&lang=en&detail=events`)).text;
+  ok(totalOf(hTwo).regs === smallInfo.confirmedCount + 5, "age report: several chosen events add up", totalOf(hTwo));
+  ok(hTwo.includes("Reports Age Groups") && !hTwo.includes("Reports Past Event"), "age report: only the chosen events appear");
+  const hEmptyEv = (await AR(`events=${evEmpty},${evAge}&lang=en&detail=events`)).text;
+  ok(hEmptyEv.includes("Reports Age Groups") && !hEmptyEv.includes("Reports Empty Event") && /2 event\(s\)/.test(hEmptyEv), "age report: events with no registrations are not listed in the per-event table (but count as selected)");
+  // period filter
+  h = (await AR(`events=all&lang=en&from=2099-01-01`)).text;
+  ok(/No events match this selection/.test(h) && !/class="total"/.test(h), "age report: empty period -> friendly message");
+  const hRange = await AR(`events=all&lang=en&from=2026-12-20&to=2026-12-20&detail=events`);
+  ok(hRange.text.includes("Reports Age Groups") && !hRange.text.includes("Reports Chess Cup"), "age report: date range excludes other dates");
+  // language
+  h = (await AR(`events=${evAge}&lang=ar&detail=names`)).text;
+  ok(h.includes('dir="rtl"') && h.includes("تقرير الفئات العمرية") && h.includes("ماسترز (+46)") && h.includes("أطفال (أقل من 12)"), "age report: Arabic version");
+  // bad input never crashes
+  for (const q of ["events=abc", "events=", "ages=zzz", "detail=bogus", "from=notadate&to=2026-13-99", "events=1,2,,x&ages=,,", `events=${"9".repeat(40)}`]) {
+    res = await AR(q + "&lang=en");
+    ok(res.status === 200 && /Age group report/.test(res.text), `age report: bad input handled (${q.slice(0, 30)})`, res.status);
+  }
+  h = (await AR(`events=all&lang=en&detail=bogus&ages=zzz`)).text;
+  ok(!h.includes("By event") && rowOf(h, "Kids (under 12)") && rowOf(h, "Masters (46+)"), "age report: bogus detail -> summary, bogus ages -> all groups");
+  // XSS
+  h = (await AR(`events=${evChess}&lang=en&detail=names`)).text;
+  ok(!h.includes("<script>alert(1)</script>") && h.includes("&lt;script&gt;alert(1)&lt;/script&gt;"), "age report: hostile names escaped");
+  // Tournament Manager: only own events, never phones
+  const tmEvents = (await api("/api/admin/reports/events", { jar: roles.tournament })).json.map((e) => e.eventId);
+  h = (await AR(`events=all&lang=en&detail=events`, roles.tournament)).text;
+  ok(tmEvents.length >= 1 && h.includes("Reports Chess Cup") && !h.includes("Reports Age Groups"), "age report: Tournament Manager only sees assigned events", tmEvents);
+  h = (await AR(`events=all&lang=en&detail=names`, roles.tournament)).text;
+  ok(!/0106\d{7}/.test(h) && !h.includes(">Phone<"), "age report: Tournament Manager gets no phone numbers");
+  h = (await AR(`events=${evAge}&lang=en`, roles.tournament)).text;
+  ok(/No events match this selection/.test(h), "age report: asking a Tournament Manager for an unassigned event returns nothing");
+
   // Swiss tournament sheets (the other half of the tab)
   section("Swiss tournament sheets linked from the tab");
   for (const q of ["view=regulation", "view=pairings&round=1", "view=standings"]) {
