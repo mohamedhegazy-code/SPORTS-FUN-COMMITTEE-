@@ -1468,3 +1468,13 @@ html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
 
 .roster-table button.roster-btn.undo { background: #fff; border-color: #b36b00; color: #8a5200; }
 .roster-table button.roster-btn.undo:hover:not(:disabled) { background: #fff4e0; }
+
+/* Age group report builder (Admin > Reports) */
+.agerep-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; }
+.agerep-events { max-height:220px; overflow:auto; border:1px solid var(--border,#e4dfd8); border-radius:8px; padding:6px 10px; background:#fff; margin-bottom:12px; }
+.agerep-events label.agerep-chk { display:flex; gap:8px; align-items:baseline; margin:0; padding:4px 0; font-weight:400; }
+.agerep-ages { display:flex; flex-wrap:wrap; gap:6px 18px; margin:4px 0 12px; }
+.agerep-ages label.agerep-chk { display:flex; gap:6px; align-items:center; margin:0; font-weight:400; }
+.agerep-chk input { width:auto; margin:0; }
+.agerep-open { display:inline-block; background:var(--primary,#8B0000); color:#fff; padding:9px 18px; border-radius:8px; font-weight:700; text-decoration:none; }
+.agerep-open.disabled { opacity:0.45; pointer-events:none; }

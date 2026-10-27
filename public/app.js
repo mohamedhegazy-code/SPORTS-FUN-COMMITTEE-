@@ -469,6 +469,7 @@ function setLang(lang) {
   renderPublicCommittee(COMMITTEE_PUBLIC_DATA);
   renderCommitteeAdminList();
   renderReports();
+  renderAgeReportBuilder();
   // Rosters are built with t() at render time - redraw them in the new language
   try {
     if (CHECKIN_ROSTER && CHECKIN_ROSTER.length) renderCheckinRoster();
@@ -3335,6 +3336,7 @@ async function loadReports() {
     REPORTS_DATA = await api("/api/admin/reports/events");
     if (msg) msg.textContent = "";
     renderReports();
+    renderAgeReportBuilder();
   } catch (e) {
     if (wrap) wrap.innerHTML = "";
     if (msg) showMsg(msg, e.message, false);
@@ -3395,6 +3397,73 @@ function renderReports() {
     </div>`;
   }).join("");
 }
+
+// ----------------------------------------------- admin: age group report --
+// Builds the link to /admin/print/age-report from the chosen events, period,
+// age groups and level of detail. The link is rebuilt on every change.
+let AGEREP_SEL = null; // Set of selected event ids (null = not initialised yet)
+function renderAgeReportBuilder() {
+  const box = document.getElementById("agerep-events");
+  if (!box || !REPORTS_DATA) return;
+  if (AGEREP_SEL === null) AGEREP_SEL = new Set(REPORTS_DATA.map((e) => e.eventId));
+  box.innerHTML = REPORTS_DATA.map((ev) => {
+    const dates = ev.endDate && ev.endDate !== ev.date ? `${ev.date} → ${ev.endDate}` : ev.date;
+    return `<label class="agerep-chk"><input type="checkbox" data-evid="${ev.eventId}" ${AGEREP_SEL.has(ev.eventId) ? "checked" : ""} /> <span><b>${escapeAttr(eventLabel(ev))}</b> <span class="hint-note" style="margin:0;">${escapeAttr(dates)}</span></span></label>`;
+  }).join("");
+  updateAgeReportLink();
+}
+function updateAgeReportLink() {
+  const link = document.getElementById("agerep-open");
+  if (!link || !REPORTS_DATA) return;
+  const total = REPORTS_DATA.length;
+  const ages = [...document.querySelectorAll("#agerep-ages input:checked")].map((i) => i.value);
+  const sel = AGEREP_SEL || new Set();
+  const count = document.getElementById("agerep-count");
+  if (count) count.textContent = t("ageRepSelected").replace("{n}", fmt(sel.size)).replace("{total}", fmt(total));
+  const hint = document.getElementById("agerep-hint");
+  const valid = sel.size > 0 && ages.length > 0;
+  link.classList.toggle("disabled", !valid);
+  if (hint) hint.textContent = valid ? t("ageRepPeriodHint") : t("ageRepPickEvent");
+  if (!valid) {
+    link.setAttribute("href", "#");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("lang", currentLang);
+  q.set("detail", document.getElementById("agerep-detail").value);
+  q.set("ages", ages.join(","));
+  q.set("events", sel.size === total ? "all" : [...sel].join(","));
+  const from = document.getElementById("agerep-from").value;
+  const to = document.getElementById("agerep-to").value;
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  link.setAttribute("href", `/admin/print/age-report?${q.toString()}`);
+}
+(function wireAgeReportBuilder() {
+  const card = document.getElementById("agerep-card");
+  if (!card) return;
+  card.addEventListener("change", (e) => {
+    const cb = e.target.closest && e.target.closest("input[data-evid]");
+    if (cb && AGEREP_SEL) {
+      const id = Number(cb.dataset.evid);
+      if (cb.checked) AGEREP_SEL.add(id);
+      else AGEREP_SEL.delete(id);
+    }
+    updateAgeReportLink();
+  });
+  document.getElementById("agerep-all").addEventListener("click", () => {
+    if (!REPORTS_DATA) return;
+    AGEREP_SEL = new Set(REPORTS_DATA.map((e) => e.eventId));
+    renderAgeReportBuilder();
+  });
+  document.getElementById("agerep-none").addEventListener("click", () => {
+    AGEREP_SEL = new Set();
+    renderAgeReportBuilder();
+  });
+  document.getElementById("agerep-open").addEventListener("click", (e) => {
+    if (e.currentTarget.classList.contains("disabled")) e.preventDefault();
+  });
+})();
 
 // ---------------------------------------------------------- admin: settings --
 document.getElementById("settings-points-visible").addEventListener("change", async (e) => {
