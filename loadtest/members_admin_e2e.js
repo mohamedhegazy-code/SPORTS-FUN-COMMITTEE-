@@ -254,6 +254,39 @@ const login = async (num, pw) => { const jar = await prime(newJar()); const r = 
   ok(d103b.familyPooled === false || d103b.balance >= 0, "pool excludes archived", [d103b.balance, d103b.familyPooled]);
   ok(poolBefore >= 0, "pool before sane");
 
+
+  section("staff phone + credentials");
+  const sLogin = async (u, p) => { const jar = await prime(newJar()); const r = await api("/api/auth/staff-login", { method: "POST", jar, body: { username: u, password: p } }); return { ...r, jar }; };
+  r = await A("/api/staff/accounts", "POST", { username: "stf1", password: "OldPass!1", name: "Staff One", role: "tournament", phone: "0100 111-2222 abc<script>" });
+  ok(r.status === 201 && r.json.staff.phone === "0100 111-2222", "create with sanitized phone", r.json);
+  r = await A("/api/staff/accounts", "POST", { username: "stf2", password: "OldPass!2", name: "Staff Two", role: "staff" });
+  ok(r.status === 201, "create without phone", r.json);
+  r = await A("/api/staff/accounts/stf2/send-credentials", "POST", { replaceExisting: true }); ok(r.status === 400, "no phone 400", r.json);
+  r = await api("/api/staff/accounts/stf1/send-credentials", { method: "POST", jar: anon, body: { replaceExisting: true } }); ok(r.status === 401 || r.status === 403, "anon blocked", r.status);
+  const stfJar = (await sLogin("stf1", "OldPass!1"));
+  ok(stfJar.status === 200, "stf1 logs in with original password", stfJar.json);
+  r = await api("/api/staff/accounts/stf1/send-credentials", { method: "POST", jar: stfJar.jar, body: { replaceExisting: true } }); ok(r.status === 403, "non-admin staff blocked", r.status);
+  r = await api("/api/staff/accounts/stf1/phone", { method: "PUT", jar: stfJar.jar, body: { phone: "0100" } }); ok(r.status === 403, "non-admin cannot edit phone", r.status);
+  r = await A("/api/staff/accounts/stf2/phone", "PUT", { phone: "01099998888" }); ok(r.status === 200 && r.json.phone === "01099998888", "set phone", r.json);
+  r = await A("/api/staff/accounts/NOPE/phone", "PUT", { phone: "0100" }); ok(r.status === 404, "phone unknown account", r.status);
+  r = await A("/api/staff/accounts"); ok(r.json.find((x) => x.username === "stf2").phone === "01099998888", "phone listed");
+  r = await A("/api/staff/accounts/NOPE/send-credentials", "POST", { replaceExisting: true }); ok(r.status === 404, "unknown 404", r.status);
+  r = await A("/api/staff/accounts/e2eadmin/send-credentials", "POST", { replaceExisting: true }); ok(r.status === 400, "own account refused (no phone or self)", r.json);
+  await A("/api/staff/accounts/e2eadmin/phone", "PUT", { phone: "01000000000" });
+  r = await A("/api/staff/accounts/e2eadmin/send-credentials", "POST", { replaceExisting: true }); ok(r.status === 400 && /own/i.test(r.json.error), "own account refused", r.json);
+  r = await A("/api/staff/accounts/stf1/send-credentials", "POST", {}); ok(r.status === 409 && r.json.needsConfirm, "needs confirm", r.json);
+  r = await A("/api/staff/accounts/stf1/send-credentials", "POST", { replaceExisting: true });
+  ok(r.status === 200 && r.json.tempPassword && r.json.username === "stf1", "issued", r.json);
+  const spw = r.json.tempPassword;
+  const sess = await api("/api/auth/me", { jar: stfJar.jar }); ok(sess.status === 401 || !(sess.json && sess.json.staff), "old staff session dropped", sess.status);
+  let sl = await sLogin("stf1", "OldPass!1"); ok(sl.status === 401, "old password dead", sl.status);
+  sl = await sLogin("stf1", spw); ok(sl.status === 200 && sl.json.staff && sl.json.staff.mustChangePassword === true && !sl.json.staff.passwordHash, "temp password logs in, flagged", sl.json);
+  r = await api("/api/auth/change-password", { method: "POST", jar: sl.jar, body: { oldPassword: spw, newPassword: "BrandNew!77" } });
+  ok(r.status === 200, "staff changes password", r.json);
+  const lst = await A("/api/staff/accounts"); ok(lst.json.find((x) => x.username === "stf1").mustChangePassword === false, "flag cleared");
+  const al = JSON.stringify((await A("/api/admin/activity-log")).json);
+  ok(!al.includes(spw) && /staff\.credentials_issued/.test(al), "staff issuance logged without password");
+
   console.log(`\nserver errors: ${serverErrors.length}`, serverErrors.slice(0, 5));
   ok(serverErrors.length === 0, "no 5xx");
   console.log(`\nPASSED ${passed}  FAILED ${failed}`);
