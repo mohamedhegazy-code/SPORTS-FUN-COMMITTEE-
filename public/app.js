@@ -5453,9 +5453,7 @@ function renderMembersTable() {
     return;
   }
   const rows = MEMBERS_DATA.map((m) => {
-    const searchBlob = escapeAttr(
-      `${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup}`.toLowerCase()
-    );
+    const searchBlob = escapeAttr(searchNorm(`${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup}`));
     return `<tr data-member-row data-search="${searchBlob}">
       <td><input type="checkbox" data-member-checkbox value="${escapeAttr(m.membershipNumber)}" /></td>
       <td>${escapeAttr(m.membershipNumber)}</td>
@@ -5484,7 +5482,7 @@ function renderMembersTable() {
 // Filtering hides/shows existing rows rather than rebuilding the table, so
 // any checkboxes the admin already ticked survive typing in the search box.
 function applyMembersSearchFilter() {
-  const query = document.getElementById("members-search").value.trim().toLowerCase();
+  const query = searchNorm(document.getElementById("members-search").value);
   document.querySelectorAll("#members-table [data-member-row]").forEach((row) => {
     row.classList.toggle("hidden", !!query && !row.dataset.search.includes(query));
   });
@@ -5652,6 +5650,21 @@ async function loadAdminDirectory() {
   renderDirectoryTable();
 }
 
+// Search normaliser shared by the directory boxes: case, Arabic diacritics,
+// alef/yaa/taa-marbuta spelling variants, Arabic-Indic digits and extra spaces
+// are all ignored so "احمد" finds "أحمد" and "هانى" finds "هاني".
+function searchNorm(str) {
+  return String(str == null ? "" : str)
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+    .replace(/[\u0622\u0623\u0625\u0671]/g, "\u0627")
+    .replace(/\u0649/g, "\u064A")
+    .replace(/\u0629/g, "\u0647")
+    .replace(/[\u0660-\u0669]/g, (c) => String(c.charCodeAt(0) - 0x0660))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function renderDirectoryTable() {
   const wrap = document.getElementById("directory-table");
   if (!DIRECTORY_DATA.length) {
@@ -5659,8 +5672,13 @@ function renderDirectoryTable() {
     return;
   }
   const rows = DIRECTORY_DATA.map((m, i) => {
+    // The blob also carries every family member's name / phone / email, so
+    // searching a child's name finds the parent's row (it used to be invisible).
     const searchBlob = escapeAttr(
-      `${m.name} ${m.membershipNumber} ${m.phone} ${m.email || ""} ${m.familyGroup} ${m.relationshipToMain || ""}`.toLowerCase()
+      searchNorm(
+        `${m.name} ${m.membershipNumber} ${m.phone} ${m.email || ""} ${m.familyGroup} ${m.relationshipToMain || ""} ` +
+          (m.dependents || []).map((d) => `${d.name || ""} ${d.phone || ""} ${d.email || ""}`).join(" ")
+      )
     );
     const dependentsHtml = m.dependents.length
       ? `<ul class="directory-list">${m.dependents
@@ -5944,7 +5962,7 @@ function renderDirectoryTable() {
 function directoryFilterState() {
   const v = (id) => document.getElementById(id).value;
   return {
-    query: v("directory-search").trim().toLowerCase(),
+    query: searchNorm(v("directory-search")),
     status: v("dir-f-status"),
     account: v("dir-f-account"),
     age: v("dir-f-age"),
