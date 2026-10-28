@@ -1459,7 +1459,7 @@ html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
 .ev-managers-list input { width: auto; margin: 0; }
 
 /* "Watch how" help videos (Member Profile) */
-.howto-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+.howto-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 12px; }
 @media (max-width: 640px) { .howto-grid { grid-template-columns: 1fr; } }
 .howto-item { margin: 0; }
 .howto-item video { width: 100%; display: block; border-radius: 10px; background: #1b0707; aspect-ratio: 1280 / 900; }
@@ -1499,3 +1499,28 @@ tr.dir-archived td { opacity: 0.6; }
 .dir-points-editor { max-width: 720px; }
 .dir-points-editor select.dir-pts-mode { max-width: none !important; width: auto; }
 .dir-points-editor .dir-pts-save { margin-top: 0; }
+
+/* WhatsApp community card inside the landing hero (under Upcoming Events). */
+.hero-wa-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 14px 18px;
+}
+.hero-wa-qr-link { flex: 0 0 auto; display: block; background: #fff; border-radius: 12px; padding: 6px; line-height: 0; }
+.hero-wa-qr { width: 118px; height: 118px; object-fit: contain; display: block; }
+.hero-wa-text { min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.hero-wa-card .hero-wa-title { margin: 0; color: #fff; font-size: 0.98rem; font-weight: 700; line-height: 1.25; }
+.hero-wa-card .hero-wa-sub { margin: 0; color: rgba(255, 255, 255, 0.78); font-size: 0.78rem; line-height: 1.4; }
+.hero-wa-btn { display: inline-block; background: #25d366; color: #0b3d1d; font-weight: 800; font-size: 0.8rem; padding: 8px 14px; border-radius: 999px; text-decoration: none; }
+.hero-wa-btn:hover { filter: brightness(1.06); }
+@media (max-width: 640px) {
+  .hero-wa-qr { width: 104px; height: 104px; }
+}
+
+.howto-langs { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
+.howto-lang { padding: 4px 14px; font-size: 0.82rem; background: #fff; color: var(--maroon, #7a0e0e); border: 1px solid var(--maroon, #7a0e0e); border-radius: 999px; cursor: pointer; }
+.howto-lang.active { background: var(--maroon, #7a0e0e); color: #fff; }
