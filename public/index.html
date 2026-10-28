@@ -1404,6 +1404,37 @@
         <div class="card">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.8l6 2.2v4.3c0 4-2.6 6.9-6 7.9-3.4-1-6-3.9-6-7.9V5l6-2.2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.3 10l1.9 1.9L13 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="adminStaffAccounts">Staff &amp; admin accounts</span></h2>
           <div id="staff-accounts-table-wrap" style="overflow-x:auto;margin-bottom:14px;"></div>
+          <div id="staff-wa-box" style="margin-bottom:14px;padding:12px;border:1px solid var(--border, #e3dcd2);border-radius:10px;">
+            <h3 style="margin:0 0 6px;" data-i18n="staffWaTitle">Message staff on WhatsApp</h3>
+            <p class="hint-note" style="margin:0 0 8px;" data-i18n="staffWaIntro">Tick the staff you want in the table above, choose what to send, then open the chats one by one. Staff need a phone number on file.</p>
+            <div class="grid-2">
+              <div>
+                <label for="staff-wa-kind" data-i18n="staffWaKind">What to send</label>
+                <select id="staff-wa-kind">
+                  <option value="creds" data-i18n="staffWaKindCreds">Login details (new temporary password)</option>
+                  <option value="reminder" data-i18n="staffWaKindReminder">Reminder of their duty at an event</option>
+                  <option value="free" data-i18n="staffWaKindFree">My own message</option>
+                </select>
+              </div>
+              <div id="staff-wa-event-wrap" class="hidden">
+                <label for="staff-wa-event" data-i18n="staffWaEvent">Event</label>
+                <select id="staff-wa-event"></select>
+                <button type="button" class="secondary small" id="staff-wa-pick-mgrs" style="margin-top:6px;" data-i18n="staffWaPickManagers">Tick this event's managers</button>
+              </div>
+            </div>
+            <div id="staff-wa-free-wrap" class="hidden" style="margin-top:8px;">
+              <label for="staff-wa-text" data-i18n="staffWaText">Message</label>
+              <textarea id="staff-wa-text" rows="4" style="width:100%;font-family:inherit;"></textarea>
+              <p class="hint-note" data-i18n="staffWaTextHint">Write {name} where you want each person's name to appear.</p>
+            </div>
+            <div class="dir-actions" style="margin-top:8px;">
+              <button type="button" class="secondary small" id="staff-wa-select-all" data-i18n="staffWaSelectAll">Tick all with a phone</button>
+              <button type="button" class="secondary small" id="staff-wa-clear" data-i18n="dirClearSel">Clear selection</button>
+              <span id="staff-wa-count" class="hint-note" style="margin:0;"></span>
+              <button type="button" class="roster-btn wa" id="staff-wa-send" data-i18n="staffWaSend">Open WhatsApp</button>
+            </div>
+            <div class="msg" id="staff-wa-msg"></div>
+          </div>
           <div style="margin-bottom:12px;">
             <label data-i18n="fieldPickCommittee">Pick from committee members (optional)</label>
             <select id="sa-committee"><option value="" data-i18n="optPickCommittee">— Choose a committee member —</option></select>
@@ -1413,6 +1444,7 @@
             <div><label class="required-label" data-i18n="fieldUsername">Username</label><input id="sa-username" /></div>
             <div><label class="required-label" data-i18n="fieldFullName">Full name</label><input id="sa-name" /></div>
             <div><label class="required-label" data-i18n="fieldPassword">Password</label><input id="sa-password" type="password" placeholder="At least 6 characters" /></div>
+            <div><label data-i18n="colPhone">Phone</label><input id="sa-phone" type="tel" placeholder="01xxxxxxxxx" /></div>
             <div>
               <label data-i18n="fieldRole">Role</label>
               <select id="sa-role">
@@ -1580,8 +1612,8 @@
 <div class="modal-overlay hidden" id="creds-modal" style="z-index:207;">
   <div class="modal-box" style="max-width:480px;">
     <button class="modal-close" id="creds-close" aria-label="Close">&times;</button>
-    <h2 data-i18n="credsTitle">Send login details</h2>
-    <p class="wa-hint" style="font-size:0.8rem;" data-i18n="credsWarn">Each member gets a NEW temporary password and must change it at first login. Their old password stops working. To protect your WhatsApp account, send in small batches (about 30 a day) and pause between messages.</p>
+    <h2 id="creds-title" data-i18n="credsTitle">Send login details</h2>
+    <p class="wa-hint" id="creds-warn" style="font-size:0.8rem;" data-i18n="credsWarn">Each member gets a NEW temporary password and must change it at first login. Their old password stops working. To protect your WhatsApp account, send in small batches (about 30 a day) and pause between messages.</p>
     <p id="creds-progress" style="color:var(--muted);font-size:0.9rem;"></p>
     <p id="creds-name" style="font-size:1.1rem;font-weight:700;margin:6px 0;"></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">

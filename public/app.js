@@ -5080,6 +5080,16 @@ const CREDS_COOLDOWN_SECONDS = 8;
 const CREDS_BIG_BATCH = 30;
 let CREDS = null;
 let CREDS_TIMER = null;
+// Generic one-chat-at-a-time WhatsApp queue shared by member credentials and
+// the staff messages. cfg = { title, warn, items:[{label,...}], prepare(item)
+// -> Promise<{phone,text}>, after(item) }.
+function waQueueStart(cfg) {
+  CREDS = { queue: cfg.items, idx: 0, sent: 0, skipped: 0, cfg };
+  document.getElementById("creds-title").textContent = cfg.title;
+  document.getElementById("creds-warn").textContent = cfg.warn;
+  document.getElementById("creds-modal").classList.remove("hidden");
+  credsRender();
+}
 function credsStart(numbers) {
   const msg = document.getElementById("dir-action-msg");
   const members = numbers.map((n) => DIRECTORY_DATA.find((m) => m.membershipNumber === n)).filter(Boolean);
@@ -5090,9 +5100,20 @@ function credsStart(numbers) {
   const hasPw = queue.filter((m) => m.hasLoggedInAccount).length;
   if (hasPw && !confirm(`${fmt(hasPw)} ${t("credsReplaceConfirm")}`)) return;
   if (queue.length > CREDS_BIG_BATCH && !confirm(`${fmt(queue.length)} — ${t("credsBigBatch")}`)) return;
-  CREDS = { queue, idx: 0, sent: 0, skipped: 0 };
-  document.getElementById("creds-modal").classList.remove("hidden");
-  credsRender();
+  waQueueStart({
+    title: t("credsTitle"),
+    warn: t("credsWarn"),
+    items: queue.map((m) => ({ label: `${m.name} (${m.membershipNumber})`, m })),
+    async prepare(item) {
+      const r = await api(`/api/admin/members/${encodeURIComponent(item.m.membershipNumber)}/send-credentials`, {
+        method: "POST",
+        body: JSON.stringify({ replaceExisting: true }),
+      });
+      item.m.hasLoggedInAccount = true;
+      item.m.mustChangePassword = true;
+      return { phone: r.phone || item.m.phone, text: waCredentialsMessage(r.name || item.m.name, r.membershipNumber, r.tempPassword, r.loginUrl) };
+    },
+  });
 }
 function credsStopTimer() {
   if (CREDS_TIMER) clearInterval(CREDS_TIMER);
@@ -5111,9 +5132,9 @@ function credsRender() {
     skipBtn.textContent = t("waBulkClose");
     return;
   }
-  const m = c.queue[c.idx];
+  const item = c.queue[c.idx];
   document.getElementById("creds-progress").textContent = `${t("credsProgress")} ${fmt(c.idx + 1)} / ${fmt(c.queue.length)}`;
-  document.getElementById("creds-name").textContent = `${m.name} (${m.membershipNumber})`;
+  document.getElementById("creds-name").textContent = item.label;
   openBtn.classList.remove("hidden");
   openBtn.disabled = false;
   openBtn.textContent = t("credsOpen");
@@ -5139,8 +5160,10 @@ function credsCooldown() {
 function credsClose() {
   credsStopTimer();
   document.getElementById("creds-modal").classList.add("hidden");
+  const after = CREDS && CREDS.cfg && CREDS.cfg.onClose;
   CREDS = null;
-  loadAdminDirectory();
+  if (after) after();
+  else loadAdminDirectory();
 }
 document.getElementById("creds-close").addEventListener("click", credsClose);
 document.getElementById("creds-skip").addEventListener("click", () => {
@@ -5154,19 +5177,14 @@ document.getElementById("creds-skip").addEventListener("click", () => {
 document.getElementById("creds-open").addEventListener("click", async () => {
   const c = CREDS;
   if (!c || c.idx >= c.queue.length) return;
-  const m = c.queue[c.idx];
+  const item = c.queue[c.idx];
   const btn = document.getElementById("creds-open");
   const msg = document.getElementById("creds-msg");
   btn.disabled = true;
   try {
-    const r = await api(`/api/admin/members/${encodeURIComponent(m.membershipNumber)}/send-credentials`, {
-      method: "POST",
-      body: JSON.stringify({ replaceExisting: true }),
-    });
-    const href = waLink(r.phone || m.phone, waCredentialsMessage(r.name || m.name, r.membershipNumber, r.tempPassword, r.loginUrl));
+    const { phone, text } = await c.cfg.prepare(item);
+    const href = waLink(phone, text);
     if (!href) throw new Error(t("waNoPhoneNote"));
-    m.hasLoggedInAccount = true;
-    m.mustChangePassword = true;
     window.open(href, "_blank", "noopener");
     c.sent++;
     c.idx++;
@@ -5176,6 +5194,137 @@ document.getElementById("creds-open").addEventListener("click", async () => {
     showMsg(msg, e.message, false);
     btn.disabled = false;
   }
+});
+
+// ---- Staff accounts: phone numbers + WhatsApp messages ----------------------
+let STAFF_ACCOUNTS_DATA = [];
+function waStaffCredentialsMessage(name, username, pw, url) {
+  const ar = `مرحبًا ${name}،\nبيانات دخولك إلى منصة أهلاوي (لجنة الرياضة الترفيهية - فرع القاهرة الجديدة):\nرابط الموقع: ${url}\nاضغط على تبويب «الإدارة» أو «ماسح البوابة» ثم سجّل الدخول.\nاسم المستخدم: ${username}\nكلمة المرور المؤقتة: ${pw}\nسيُطلب منك تغيير كلمة المرور عند أول دخول. من فضلك لا تشارك هذه البيانات مع أحد.`;
+  const en = `Hi ${name},\nYour MyAhlawy staff login (Recreational Sports Committee — New Cairo Branch):\nWebsite: ${url}\nOpen the "Admin" or "Gate Scanner" tab and sign in.\nUsername: ${username}\nTemporary password: ${pw}\nYou will be asked to change the password the first time you sign in. Please do not share these details.`;
+  return `${ar}\n\n${en}`;
+}
+function waStaffReminderMessage(name, ev) {
+  const eventDate = ev.date;
+  const ar = `مرحبًا ${name}، تذكير بأنك مكلّف بإدارة "${ev.nameAr || ev.nameEn}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. من فضلك أكّد جاهزيتك. - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
+  const en = `Hi ${name}, a reminder that you are assigned to run "${ev.nameEn || ev.nameAr}"${eventDate ? ` on ${eventDate}` : ""}. Please confirm you are ready. - Recreational Sports Committee — New Cairo Branch`;
+  return `${ar}\n\n${en}`;
+}
+function staffWaSelected() {
+  return Array.from(document.querySelectorAll("#staff-accounts-table-wrap .staff-sel:checked")).map((cb) => cb.value);
+}
+function staffWaUpdateUI() {
+  const el = document.getElementById("staff-wa-count");
+  if (!el) return;
+  const n = staffWaSelected().length;
+  el.textContent = n ? `${fmt(n)} ${t("dirSelected")}` : "";
+  const kind = document.getElementById("staff-wa-kind").value;
+  document.getElementById("staff-wa-event-wrap").classList.toggle("hidden", kind !== "reminder");
+  document.getElementById("staff-wa-free-wrap").classList.toggle("hidden", kind !== "free");
+}
+function staffWaFillEvents() {
+  const sel = document.getElementById("staff-wa-event");
+  if (!sel) return;
+  const keep = sel.value;
+  const evs = EVENTS_DATA.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  sel.innerHTML = evs.map((e) => `<option value="${e.id}">${escapeAttr(bilingual(e.nameEn, e.nameAr))} — ${escapeAttr(e.date || "")}</option>`).join("");
+  if (keep) sel.value = keep;
+}
+document.getElementById("staff-wa-kind").addEventListener("change", staffWaUpdateUI);
+document.getElementById("staff-wa-select-all").addEventListener("click", () => {
+  document.querySelectorAll("#staff-accounts-table-wrap .staff-sel").forEach((cb) => (cb.checked = !cb.disabled));
+  staffWaUpdateUI();
+});
+document.getElementById("staff-wa-clear").addEventListener("click", () => {
+  document.querySelectorAll("#staff-accounts-table-wrap .staff-sel").forEach((cb) => (cb.checked = false));
+  staffWaUpdateUI();
+});
+document.getElementById("staff-wa-pick-mgrs").addEventListener("click", () => {
+  const ev = EVENTS_DATA.find((e) => String(e.id) === document.getElementById("staff-wa-event").value);
+  const mgrs = (ev && ev.managerUsernames) || [];
+  document.querySelectorAll("#staff-accounts-table-wrap .staff-sel").forEach((cb) => (cb.checked = mgrs.includes(cb.value)));
+  staffWaUpdateUI();
+  if (!mgrs.length) showMsg(document.getElementById("staff-wa-msg"), t("staffWaNoManagers"), false);
+});
+document.getElementById("staff-accounts-table-wrap").addEventListener("change", (e) => {
+  if (e.target.classList.contains("staff-sel")) staffWaUpdateUI();
+});
+document.getElementById("staff-accounts-table-wrap").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".staff-phone-save");
+  if (!btn) return;
+  const u = btn.dataset.u;
+  const input = document.querySelector(`#staff-accounts-table-wrap .staff-phone-input[data-u="${CSS.escape(u)}"]`);
+  const msg = document.getElementById("staff-wa-msg");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/staff/accounts/${encodeURIComponent(u)}/phone`, { method: "PUT", body: JSON.stringify({ phone: input.value }) });
+    const acc = STAFF_ACCOUNTS_DATA.find((s) => s.username === u);
+    if (acc) acc.phone = r.phone;
+    input.value = r.phone;
+    showMsg(msg, t("staffPhoneSaved"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+  btn.disabled = false;
+});
+document.getElementById("staff-wa-send").addEventListener("click", () => {
+  const msg = document.getElementById("staff-wa-msg");
+  const kind = document.getElementById("staff-wa-kind").value;
+  const picked = staffWaSelected();
+  if (!picked.length) return showMsg(msg, t("staffWaNone"), false);
+  const me = CURRENT_SESSION && CURRENT_SESSION.type === "staff" ? CURRENT_SESSION.staff.username : "";
+  // Read the phone from the (possibly just edited) input, so an unsaved number still works for messages.
+  const accounts = picked
+    .map((u) => {
+      const acc = STAFF_ACCOUNTS_DATA.find((s) => s.username === u);
+      const input = document.querySelector(`#staff-accounts-table-wrap .staff-phone-input[data-u="${CSS.escape(u)}"]`);
+      return acc ? { ...acc, phone: acc.phone || "" , typedPhone: input ? input.value.trim() : "" } : null;
+    })
+    .filter(Boolean);
+  if (accounts.some((a) => a.typedPhone !== a.phone)) return showMsg(msg, t("staffWaUnsavedPhone"), false);
+  let list = accounts.filter((a) => a.phone);
+  const missing = accounts.filter((a) => !a.phone);
+  if (missing.length) {
+    return showMsg(msg, `${t("staffWaNoPhone")} ${missing.map((a) => a.name).join("، ")}`, false);
+  }
+  let cfg;
+  if (kind === "creds") {
+    const self = list.some((a) => a.username === me);
+    list = list.filter((a) => a.username !== me);
+    if (!list.length) return showMsg(msg, self ? t("staffWaSelfCreds") : t("staffWaNoPhone"), false);
+    if (!confirm(`${fmt(list.length)} ${t("staffWaCredsConfirm")}`)) return;
+    cfg = {
+      title: t("credsTitle"),
+      warn: t("credsWarn"),
+      items: list.map((a) => ({ label: `${a.name} (${a.username})`, a })),
+      async prepare(item) {
+        const r = await api(`/api/staff/accounts/${encodeURIComponent(item.a.username)}/send-credentials`, { method: "POST", body: JSON.stringify({ replaceExisting: true }) });
+        return { phone: r.phone || item.a.phone, text: waStaffCredentialsMessage(r.name || item.a.name, r.username, r.tempPassword, r.loginUrl) };
+      },
+    };
+  } else {
+    if (!list.length) return showMsg(msg, t("staffWaNoPhone"), false);
+    let build;
+    if (kind === "reminder") {
+      const ev = EVENTS_DATA.find((e) => String(e.id) === document.getElementById("staff-wa-event").value);
+      if (!ev) return showMsg(msg, t("staffWaNoEvent"), false);
+      build = (a) => waStaffReminderMessage(a.name, ev);
+    } else {
+      const text = document.getElementById("staff-wa-text").value.trim();
+      if (!text) return showMsg(msg, t("staffWaNoText"), false);
+      build = (a) => text.replace(/\{name\}/g, a.name);
+    }
+    cfg = {
+      title: t("staffWaModalTitle"),
+      warn: t("staffWaWarn"),
+      items: list.map((a) => ({ label: `${a.name} (${a.username})`, a })),
+      async prepare(item) {
+        return { phone: item.a.phone, text: build(item.a) };
+      },
+    };
+  }
+  cfg.onClose = () => loadStaffAccountsTable();
+  msg.classList.remove("show");
+  waQueueStart(cfg);
 });
 
 // ---- Points & Rewards: the date points start counting ----------------------
@@ -8664,14 +8813,19 @@ async function loadStaffAccountsTable() {
   EVENT_MANAGER_CHOICES = list.filter((s) => s.role === "tournament");
   renderEventManagerPicker("ev-managers-add", null);
   renderEventManagerPicker("ev-managers-edit", null);
+  STAFF_ACCOUNTS_DATA = list;
+  staffWaFillEvents();
+  const checked = new Set(staffWaSelected());
+  const me = CURRENT_SESSION && CURRENT_SESSION.type === "staff" ? CURRENT_SESSION.staff.username : "";
   wrap.innerHTML = `<table>
-    <thead><tr><th>${t("fieldUsername")}</th><th>${t("fieldFullName")}</th><th>${t("fieldRole")}</th><th>${t("colActions")}</th></tr></thead>
+    <thead><tr><th></th><th>${t("fieldUsername")}</th><th>${t("fieldFullName")}</th><th>${t("fieldRole")}</th><th>${t("colPhone")}</th><th>${t("colActions")}</th></tr></thead>
     <tbody>
       ${list
         .map(
           (s) => `<tr>
+        <td><input type="checkbox" class="staff-sel" value="${escapeAttr(s.username)}" aria-label="${escapeAttr(s.username)}"${checked.has(s.username) ? " checked" : ""} /></td>
         <td>${escapeAttr(s.username)}</td>
-        <td>${escapeAttr(s.name)}</td>
+        <td>${escapeAttr(s.name)}${s.mustChangePassword ? ` <span class="dir-badge temp">${t("tempPasswordBadge")}</span>` : ""}</td>
         <td>${
           s.role === "admin"
             ? t("roleAdmin")
@@ -8681,8 +8835,9 @@ async function loadStaffAccountsTable() {
             ? t("roleManagement")
             : t("roleStaff")
         }</td>
+        <td style="white-space:nowrap;"><input class="staff-phone-input" data-u="${escapeAttr(s.username)}" type="tel" value="${escapeAttr(s.phone || "")}" placeholder="01xxxxxxxxx" style="width:140px;padding:4px 6px;font-size:0.8rem;" /> <button class="secondary staff-phone-save" data-u="${escapeAttr(s.username)}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button></td>
         <td>${
-          CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.username === s.username
+          me === s.username
             ? ""
             : `<button class="secondary" data-remove-staff="${escapeAttr(s.username)}">${t("btnRemove")}</button>`
         }</td>
@@ -8691,6 +8846,7 @@ async function loadStaffAccountsTable() {
         .join("")}
     </tbody>
   </table>`;
+  staffWaUpdateUI();
 }
 document.getElementById("staff-accounts-table-wrap").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-remove-staff]");
@@ -8740,6 +8896,7 @@ document.getElementById("sa-submit").addEventListener("click", async () => {
   const name = document.getElementById("sa-name").value.trim();
   const password = document.getElementById("sa-password").value;
   const role = document.getElementById("sa-role").value;
+  const phone = document.getElementById("sa-phone").value.trim();
   const msg = document.getElementById("sa-msg");
   if (!username || !name || !password) {
     highlightMissingFields(["sa-username", "sa-name", "sa-password"]);
@@ -8753,12 +8910,13 @@ document.getElementById("sa-submit").addEventListener("click", async () => {
   try {
     await api("/api/staff/accounts", {
       method: "POST",
-      body: JSON.stringify({ username, password, name, role }),
+      body: JSON.stringify({ username, password, name, role, phone }),
     });
     showMsg(msg, t("okStaffAdded"), true);
     document.getElementById("sa-username").value = "";
     document.getElementById("sa-name").value = "";
     document.getElementById("sa-password").value = "";
+    document.getElementById("sa-phone").value = "";
     document.getElementById("sa-committee").value = "";
     loadStaffAccountsTable();
     loadAdminOverview();
