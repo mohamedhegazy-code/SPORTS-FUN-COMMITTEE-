@@ -18,8 +18,9 @@ const XLSX = require("xlsx");
 const helmet = require("helmet");
 const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
-const { renderEventSheet, renderAgeReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
+const { renderEventSheet, renderAgeReport, renderCustomReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
 const AgeUtils = require("./age_utils");
+const CustomReport = require("./custom_report");
 const {
   Document,
   Packer,
@@ -211,7 +212,7 @@ app.use((req, res, next) => {
 // Server-side source files must never be downloadable, even if one is
 // uploaded into public/ by mistake (it happened once with server.js).
 app.use((req, res, next) => {
-  if (/^\/(server|swiss|swiss_print|report_print|age_utils)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+  if (/^\/(server|swiss|swiss_print|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
     return res.status(404).end();
   }
   next();
@@ -754,6 +755,9 @@ function readDb() {
   if (db.settings.pointsStartEventId === undefined) db.settings.pointsStartEventId = null;
   // Manual point corrections made by the admin (+/- with a reason).
   db.pointAdjustments = db.pointAdjustments || [];
+  // Custom reports the admin saved from the report builder.
+  if (!Array.isArray(db.savedReports)) db.savedReports = [];
+  db.nextIds.savedReport = db.nextIds.savedReport || 1;
   db.nextIds.pointAdjustment = db.nextIds.pointAdjustment || 1;
   // Branding: admin-set primary/accent colors and an optional logo, applied
   // across every page (they're just CSS custom properties overridden at
@@ -1483,6 +1487,10 @@ app.post("/api/auth/signup", async (req, res) => {
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
     phone: trimmedPhone,
     birthDate: finalBirthDate,
+    // The member typed their own date at sign-up, so it counts as confirmed -
+    // unless the committee's pre-loaded date was used instead; then they are
+    // asked to confirm it at first login.
+    birthConfirmedAt: claiming && AgeUtils.parseBirthDate(claiming.birthDate) ? "" : new Date().toISOString(),
     ageGroup: AgeUtils.ageInfo({ birthDate: finalBirthDate }).ageGroup,
     email: trimmedEmail || (claiming ? claiming.email : "") || "",
     passwordHash,
@@ -3242,13 +3250,22 @@ app.patch("/api/me/profile", requireMember, (req, res) => {
   const member = db.members[req.member.membershipNumber];
   if (name) member.name = name;
   if (familyGroup !== undefined) member.familyGroup = familyGroup;
-  if (phone !== undefined) member.phone = phone;
+  if (phone !== undefined) {
+    // The mobile number is mandatory at sign-up, so it can be changed but not blanked.
+    const newPhone = String(phone || "").trim().slice(0, 30);
+    if (!newPhone) return res.status(400).json({ error: "Please enter your mobile phone number" });
+    if (newPhone !== (member.phone || "")) {
+      logActivity(db, { actorType: "member", actorId: member.membershipNumber, actorName: member.name, action: "member_phone_changed", details: `${member.phone || "-"} -> ${newPhone}` });
+    }
+    member.phone = newPhone;
+  }
   if (req.body.birthDate !== undefined) {
     // Date of birth can be corrected but never cleared or set to nonsense;
     // the age group is recalculated from it.
     const bd = AgeUtils.parseBirthDate(req.body.birthDate);
     if (!bd) return res.status(400).json({ error: "Please enter a valid date of birth" });
     member.birthDate = bd;
+    member.birthConfirmedAt = new Date().toISOString();
     member.ageGroup = AgeUtils.ageInfo(member).ageGroup;
   } else if (ageGroup !== undefined && member.birthDate) {
     // With a date of birth on file the group is calculated - ignore a manual pick.
@@ -3259,6 +3276,29 @@ app.patch("/api/me/profile", requireMember, (req, res) => {
     if (!ag) return res.status(400).json({ error: "Please select a valid age group" });
     member.ageGroup = ag;
   }
+  writeDb(db);
+  res.json({ member: publicMember(member) });
+});
+
+// First-login confirmation of the date of birth: the member checks the date
+// on file (typed by them, or loaded by the committee from the club's records)
+// and confirms or corrects it. Until then the app keeps asking.
+app.post("/api/me/birth-date/confirm", requireMember, (req, res) => {
+  const db = req.db;
+  const member = db.members[req.member.membershipNumber];
+  const bd = AgeUtils.parseBirthDate(req.body && req.body.birthDate);
+  if (!bd) return res.status(400).json({ error: "Please enter a valid date of birth" });
+  const before = member.birthDate || "";
+  member.birthDate = bd;
+  member.ageGroup = AgeUtils.ageInfo(member).ageGroup;
+  member.birthConfirmedAt = new Date().toISOString();
+  logActivity(db, {
+    actorType: "member",
+    actorId: member.membershipNumber,
+    actorName: member.name,
+    action: before && before !== bd ? "member_birthdate_changed" : "member_birthdate_confirmed",
+    details: before && before !== bd ? `${before} -> ${bd}` : bd,
+  });
   writeDb(db);
   res.json({ member: publicMember(member) });
 });
@@ -7113,6 +7153,157 @@ app.get("/admin/print/age-report", requireStaffRole(["tournament"]), (req, res) 
       generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC",
     })
   );
+});
+
+// ------------------------------------------------- custom report builder --
+// Admin-only. The browser sends a "spec" (source, columns, filters, sort,
+// group-by); custom_report.js whitelists it and runs it against the live
+// data. Used by the on-screen preview, the Excel download, the A4 print
+// page and the saved (re-usable) reports.
+function customReportEnv(db) {
+  const poolCache = new Map();
+  return {
+    db,
+    // Points balance is pooled per family; cache by pool so a big list
+    // does not recompute the same family balance for every person.
+    balanceOf(mn) {
+      let key;
+      try { key = poolingKey(db, mn); } catch (e) { key = mn; }
+      if (poolCache.has(key)) return poolCache.get(key);
+      const snap = balanceSnapshot(db, mn);
+      const v = snap ? Number(snap.balance) || 0 : 0;
+      poolCache.set(key, v);
+      return v;
+    },
+    pointsOf: (reg) => registrationPoints(db, reg),
+  };
+}
+const CUSTOM_REPORT_PREVIEW_LIMIT = 1000;
+const CUSTOM_REPORT_EXPORT_LIMIT = 20000;
+const SAVED_REPORTS_MAX = 100;
+const customReportLang = (v) => (v === "en" ? "en" : "ar");
+const eventNameMap = (db, lang) => new Map(db.events.map((e) => [e.id, (lang === "ar" ? e.nameAr || e.nameEn : e.nameEn || e.nameAr) || `#${e.id}`]));
+
+app.get("/api/admin/report-builder/meta", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const lang = customReportLang(req.query.lang);
+  res.json({
+    meta: CustomReport.meta(lang),
+    events: db.events
+      .slice()
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.id - a.id)
+      .map((e) => ({ id: e.id, name: (lang === "ar" ? e.nameAr || e.nameEn : e.nameEn || e.nameAr) || `#${e.id}`, date: String(e.date || "") })),
+    saved: db.savedReports.map((r) => ({ id: r.id, name: r.name, spec: r.spec, updatedAt: r.updatedAt })).sort((a, b) => a.name.localeCompare(b.name)),
+  });
+});
+
+app.post("/api/admin/report-builder/run", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const lang = customReportLang(req.body && req.body.lang);
+  const out = CustomReport.runReport(customReportEnv(db), req.body && req.body.spec, lang, { limit: CUSTOM_REPORT_PREVIEW_LIMIT });
+  res.set("Cache-Control", "no-store");
+  res.json({ ...out, filters: CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang)) });
+});
+
+app.post("/api/admin/report-builder/export", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const lang = customReportLang(req.body && req.body.lang);
+  const out = CustomReport.runReport(customReportEnv(db), req.body && req.body.spec, lang, { limit: CUSTOM_REPORT_EXPORT_LIMIT });
+  const wb = XLSX.utils.book_new();
+  const safe = (v) => (typeof v === "string" && /^[=+\-@]/.test(v) && !/^[+-]?\d[\d\s().+-]*$/.test(v) ? "'" + v : v);
+  if (out.spec.layout !== "summary") {
+    const aoa = [out.columns.map((c) => c.label), ...out.rows.map((r) => r.map(safe))];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = out.columns.map((c, i) => ({ wch: Math.min(40, Math.max(String(c.label).length + 2, ...out.rows.slice(0, 200).map((r) => String(r[i] == null ? "" : r[i]).length + 2))) }));
+    XLSX.utils.book_append_sheet(wb, ws, lang === "ar" ? "التقرير" : "Report");
+  }
+  if (out.summary) {
+    const ws = XLSX.utils.aoa_to_sheet([out.summary.head, ...out.summary.rows, out.summary.total].map((r) => r.map(safe)));
+    ws["!cols"] = out.summary.head.map(() => ({ wch: 22 }));
+    XLSX.utils.book_append_sheet(wb, ws, lang === "ar" ? "الملخص" : "Summary");
+  }
+  const filters = CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang));
+  filters.push((lang === "ar" ? "عدد النتائج: " : "Results: ") + out.total + (out.truncated ? (lang === "ar" ? ` (المعروض أول ${out.rows.length})` : ` (first ${out.rows.length} exported)`) : ""));
+  filters.push((lang === "ar" ? "تاريخ الإنشاء: " : "Generated: ") + new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[lang === "ar" ? "المرشحات" : "Filters"], ...filters.map((f) => [safe(f)])]), lang === "ar" ? "المرشحات" : "Filters");
+  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="ahlawy-custom-report.xlsx"');
+  res.send(buffer);
+});
+
+// A4 print page. The spec travels in the URL as base64url JSON (?spec=) or
+// a saved report is opened by id (?id=). It is whitelisted like any other.
+app.get("/admin/print/custom-report", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const lang = customReportLang(req.query.lang);
+  let rawSpec = null;
+  if (req.query.id) {
+    const saved = db.savedReports.find((r) => r.id === Number(req.query.id));
+    if (!saved) return res.status(404).type("text/plain").send("No such saved report");
+    rawSpec = saved.spec;
+  } else {
+    const enc = String(req.query.spec || "");
+    if (!enc || enc.length > 8000 || !/^[A-Za-z0-9_-]+$/.test(enc)) return res.status(400).type("text/plain").send("Bad report definition");
+    try { rawSpec = JSON.parse(Buffer.from(enc, "base64url").toString("utf8")); } catch (e) { return res.status(400).type("text/plain").send("Bad report definition"); }
+  }
+  const out = CustomReport.runReport(customReportEnv(db), rawSpec, lang, { limit: 5000 });
+  const saved = req.query.id ? db.savedReports.find((r) => r.id === Number(req.query.id)) : null;
+  res.set("Cache-Control", "no-store");
+  res.type("html").send(
+    renderCustomReport({
+      result: out,
+      lang,
+      title: saved ? saved.name : "",
+      filtersText: CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang)),
+      generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC",
+    })
+  );
+});
+
+function savedReportInput(body) {
+  const name = String((body && body.name) || "").trim().slice(0, 80);
+  if (!name) return { error: "Please give the report a name" };
+  return { name, spec: CustomReport.normalizeSpec(body && body.spec) };
+}
+app.get("/api/admin/saved-reports", requireStaffRole("admin"), (req, res) => {
+  res.json(req.db.savedReports);
+});
+app.post("/api/admin/saved-reports", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const inp = savedReportInput(req.body);
+  if (inp.error) return res.status(400).json({ error: inp.error });
+  if (db.savedReports.length >= SAVED_REPORTS_MAX) return res.status(400).json({ error: `You can keep at most ${SAVED_REPORTS_MAX} saved reports` });
+  if (db.savedReports.some((r) => r.name.toLowerCase() === inp.name.toLowerCase())) return res.status(409).json({ error: "A saved report with this name already exists" });
+  const now = new Date().toISOString();
+  const rec = { id: db.nextIds.savedReport++, name: inp.name, spec: inp.spec, createdAt: now, createdBy: req.staff.username, updatedAt: now };
+  db.savedReports.push(rec);
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "saved_report_create", details: inp.name });
+  writeDb(db);
+  res.status(201).json(rec);
+});
+app.put("/api/admin/saved-reports/:id", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rec = db.savedReports.find((r) => r.id === Number(req.params.id));
+  if (!rec) return res.status(404).json({ error: "No such saved report" });
+  const inp = savedReportInput({ name: req.body && req.body.name != null ? req.body.name : rec.name, spec: req.body && req.body.spec });
+  if (inp.error) return res.status(400).json({ error: inp.error });
+  if (db.savedReports.some((r) => r.id !== rec.id && r.name.toLowerCase() === inp.name.toLowerCase())) return res.status(409).json({ error: "A saved report with this name already exists" });
+  rec.name = inp.name;
+  rec.spec = inp.spec;
+  rec.updatedAt = new Date().toISOString();
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "saved_report_update", details: inp.name });
+  writeDb(db);
+  res.json(rec);
+});
+app.delete("/api/admin/saved-reports/:id", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rec = db.savedReports.find((r) => r.id === Number(req.params.id));
+  if (!rec) return res.status(404).json({ error: "No such saved report" });
+  db.savedReports = db.savedReports.filter((r) => r !== rec);
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "saved_report_delete", details: rec.name });
+  writeDb(db);
+  res.json({ ok: true });
 });
 
 // Staff correction of a player's Women / Juniors ranking categories (e.g.

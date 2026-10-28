@@ -322,4 +322,57 @@ function renderAgeReport({ events, rows, ages, detail, lang, from, to, allEvents
 <body>${toolbar}${body}<script src="/print.js"></script></body></html>`;
 }
 
-module.exports = { renderEventSheet, renderAgeReport, aggregateAgeReport, AGE_KEYS };
+// Admin custom report (see custom_report.js). `result` is the output of
+// runReport(): { columns:[{key,label}], rows:[[cell]], total, truncated,
+// summary, spec }. Landscape when there are many columns.
+const NUMERIC_COLS = new Set(["membershipNumber", "birthYear", "age", "birthDate", "phone", "points", "registered", "attended", "lastEventDate", "joinedAt", "eventDate", "registeredAt", "checkedInAt"]);
+function renderCustomReport({ result, lang, title, filtersText, generatedAt }) {
+  const ar = lang === "ar";
+  const dir = ar ? "rtl" : "ltr";
+  const L = (a, e) => (ar ? a : e);
+  const cols = result.columns;
+  const wide = cols.length > 8;
+  const heading = title || L("تقرير مخصص", "Custom report");
+  const head = `<div class="head"><img src="/ahly-crest-logo.png" alt="" /><div class="t"><div class="org">${esc(L("النادي الأهلي · لجنة الرياضة الترفيهية – التجمع الخامس، القاهرة الجديدة", "Al Ahly Club · Recreational Sports Committee — Fifth Settlement, New Cairo"))}</div><h1>${esc(heading)}</h1><p>${esc(L("عدد النتائج", "Results"))}: ${esc(result.total)}</p></div></div>`;
+  const bar = `<div class="agebar">${(filtersText || []).map((f) => `<span>${esc(f)}</span>`).join("")}</div>`;
+  let summary = "";
+  if (result.summary) {
+    const sm = result.summary;
+    summary = `<h2 class="sec">${esc(L("ملخص حسب", "Summary by"))} ${esc(sm.by)}</h2>
+    <table class="grid"><thead><tr>${sm.head.map((h, i) => `<th${i ? ' class="c"' : ""}>${esc(h)}</th>`).join("")}</tr></thead><tbody>${sm.rows
+      .map((r) => `<tr>${r.map((c, i) => `<td${i ? ' class="num"' : ' class="name"'}>${esc(c)}</td>`).join("")}</tr>`)
+      .join("")}<tr class="total">${sm.total.map((c, i) => `<td${i ? ' class="num"' : ""}>${esc(c)}</td>`).join("")}</tr></tbody></table>`;
+  }
+  let detail = "";
+  if (result.spec.layout !== "summary") {
+    detail = `${result.summary ? `<h2 class="sec">${esc(L("التفاصيل", "Details"))}</h2>` : ""}
+    ${result.rows.length
+      ? `<table class="grid"><thead><tr><th class="c">#</th>${cols.map((c) => `<th>${esc(c.label)}</th>`).join("")}</tr></thead><tbody>${result.rows
+          .map((r, n) => `<tr><td class="num">${n + 1}</td>${r.map((c, i) => `<td class="${cols[i].key === "name" ? "name" : NUMERIC_COLS.has(cols[i].key) ? "num" : ""}">${esc(c)}</td>`).join("")}</tr>`)
+          .join("")}</tbody></table>`
+      : `<p class="empty">${esc(L("لا توجد نتائج مطابقة.", "No results match these filters."))}</p>`}
+    ${result.truncated ? `<p class="note">${esc(L(`المعروض أول ${result.rows.length} من ${result.total}. استخدم تصدير Excel للقائمة الكاملة.`, `Showing the first ${result.rows.length} of ${result.total}. Use the Excel download for the full list.`))}</p>` : ""}`;
+  }
+  const body = `<section class="sheet" dir="${dir}">${head}${bar}${summary}${detail}
+    <div class="sign"><div>${esc(L("المسؤول", "Prepared by"))}</div><div>${esc(L("ختم اللجنة", "Committee stamp"))}</div></div>
+    <p class="foot">${esc(L("أُنشئ في", "Generated"))} <bdi dir="ltr">${esc(generatedAt)}</bdi></p>
+  </section>`;
+  const toolbar = `<div class="toolbar"><button id="print-btn" type="button">${esc(L("طباعة / حفظ PDF", "Print / Save as PDF"))}</button><span class="hint">${esc(L("اختر «حفظ كـ PDF» من نافذة الطباعة لحفظ نسخة", "Choose “Save as PDF” in the print dialog to keep a copy"))}</span></div>`;
+  const landscape = wide
+    ? `@page { size: A4 landscape; margin: 8mm; } .sheet { width: 297mm; min-height: 210mm; } table.grid { font-size: 9pt; } @media print { .sheet { width: auto; } }`
+    : "";
+  return `<!doctype html>
+<html lang="${lang}" dir="${dir}"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${esc(heading)}</title>
+<style>${CSS}
+  h2.sec { margin: 6mm 0 1mm; font-size: 12pt; color: var(--red); border-bottom: 0.5mm solid var(--gold); padding-bottom: 1mm; }
+  p.note { margin: 1mm 0 0; font-size: 8.5pt; color: var(--muted); }
+  table.grid td { overflow-wrap: anywhere; }
+  table.grid td.num { white-space: nowrap; }
+  .agebar span:not(:last-child)::after { content: " ·"; color: var(--muted); }
+  ${landscape}
+</style></head>
+<body>${toolbar}${body}<script src="/print.js"></script></body></html>`;
+}
+
+module.exports = { renderEventSheet, renderAgeReport, renderCustomReport, aggregateAgeReport, AGE_KEYS };
