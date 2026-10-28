@@ -11046,11 +11046,11 @@ function setQrHowtoLang(l) {
   const fig = document.getElementById("howto-qr-entry");
   if (!fig) return;
   const v = fig.querySelector("video");
-  const src = "videos/how-to-qr-entry-" + l + ".mp4";
+  const src = "videos/how-to-qr-entry-" + l + ".mp4?v=2";
   if (v && v.getAttribute("src") !== src) {
     try { v.pause(); } catch (_) {}
     clearHowtoErr(fig);
-    v.setAttribute("poster", "videos/how-to-qr-entry-" + l + "-poster.jpg");
+    v.setAttribute("poster", "videos/how-to-qr-entry-" + l + "-poster.jpg?v=2");
     v.setAttribute("src", src);
     try { v.load(); } catch (_) {}
   }
