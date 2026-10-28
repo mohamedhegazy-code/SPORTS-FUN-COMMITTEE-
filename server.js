@@ -219,7 +219,14 @@ app.use((req, res, next) => {
 });
 app.use(
   express.static(path.join(__dirname, "public"), {
-    setHeaders: (res) => res.setHeader("Cache-Control", "no-store"),
+    // Everything is no-store so a deploy shows up immediately - except video:
+    // Safari (and some Chrome builds) refuse to play, or show a black 0:00
+    // player for, media served with no-store because they need to cache the
+    // stream to range-request / seek it. "no-cache" still re-validates with
+    // the ETag on every use (so a replaced video is picked up) but lets the
+    // browser keep the bytes it needs.
+    setHeaders: (res, filePath) =>
+      res.setHeader("Cache-Control", /\.(mp4|webm|m4v|mov|mp3|m4a|ogg)$/i.test(filePath) ? "no-cache" : "no-store"),
   })
 );
 // Uploaded photos (event covers/recaps/gallery, branding logo) live on the
