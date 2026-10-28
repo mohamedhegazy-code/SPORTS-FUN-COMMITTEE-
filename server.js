@@ -513,8 +513,9 @@ function ensureDbFile() {
     staffAccounts: {},
     registrations: [],
     redemptions: [],
-    nextIds: { event: 1, registration: 1, redemption: 1, dependent: 1, chatMessage: 1, newsPost: 1, spotlight: 1, publicInquiry: 1 },
+    nextIds: { event: 1, registration: 1, redemption: 1, dependent: 1, chatMessage: 1, newsPost: 1, spotlight: 1, publicInquiry: 1, pointAdjustment: 1 },
     chatMessages: [],
+    pointAdjustments: [],
     newsPosts: [],
     spotlights: [],
     publicInquiries: [],
@@ -727,6 +728,13 @@ function readDb() {
   // server-side either way; this only controls what members see.
   db.settings = db.settings || {};
   if (typeof db.settings.pointsVisibleToMembers !== "boolean") db.settings.pointsVisibleToMembers = true;
+  // Points start date (admin-controlled): events dated before it earn no
+  // points and redemptions requested before it are ignored. "" = no cutoff.
+  if (typeof db.settings.pointsStartDate !== "string") db.settings.pointsStartDate = "";
+  if (db.settings.pointsStartEventId === undefined) db.settings.pointsStartEventId = null;
+  // Manual point corrections made by the admin (+/- with a reason).
+  db.pointAdjustments = db.pointAdjustments || [];
+  db.nextIds.pointAdjustment = db.nextIds.pointAdjustment || 1;
   // Branding: admin-set primary/accent colors and an optional logo, applied
   // across every page (they're just CSS custom properties overridden at
   // runtime). Defaults match the original hardcoded styles.css values, so a
@@ -1040,7 +1048,7 @@ function requireMember(req, res, next) {
   if (!session || session.type !== "member") return res.status(401).json({ error: "Please log in" });
   const db = readDb();
   const member = db.members[session.id];
-  if (!member) return res.status(401).json({ error: "Please log in" });
+  if (!member || member.archivedAt) return res.status(401).json({ error: "Please log in" });
   req.db = db;
   req.member = member;
   next();
@@ -1159,8 +1167,22 @@ function ladderTier(db, tier) {
 // sheet in the spreadsheet toolkit: participation + early bonus + position bonus.
 // Points only count once the member is actually checked in at the event (QR
 // scan) - registering alone does not earn points, so no-shows earn nothing.
+function pointsStartDate(db) {
+  return (db.settings && typeof db.settings.pointsStartDate === "string" && db.settings.pointsStartDate) || "";
+}
+// Redemptions requested before the points start date belong to the old
+// scheme and no longer count (neither as spent nor as pending).
+function redemptionCounts(db, r) {
+  const start = pointsStartDate(db);
+  return !start || String(r.requestedAt || "").slice(0, 10) >= start;
+}
 function registrationPoints(db, reg) {
   if (!reg.checkedIn) return 0;
+  const start = pointsStartDate(db);
+  if (start) {
+    const ev = db.events.find((e) => e.id === reg.eventId);
+    if (!ev || String(ev.date) < start) return 0;
+  }
   const participation = db.rules.participation;
   const earlyBonus = reg.earlyRegistration ? db.rules.earlyBonus : 0;
   const positionBonus = reg.position ? (db.rules.positionBonus[String(reg.position)] || 0) : 0;
@@ -1191,20 +1213,26 @@ function poolingKey(db, membershipNumber) {
 }
 
 function membersInPool(db, key) {
-  return Object.values(db.members).filter((m) => poolingKey(db, m.membershipNumber) === key);
+  return Object.values(db.members).filter((m) => !m.archivedAt && poolingKey(db, m.membershipNumber) === key);
 }
 
+// Sum of the admin's manual +/- corrections for everyone in the pool.
+function adjustmentsTotal(db, memberNumbers) {
+  return (db.pointAdjustments || []).filter((a) => memberNumbers.has(a.membershipNumber)).reduce((sum, a) => sum + a.delta, 0);
+}
 function totalEarned(db, key) {
   const memberNumbers = new Set(membersInPool(db, key).map((m) => m.membershipNumber));
-  return db.registrations
-    .filter((r) => memberNumbers.has(r.membershipNumber))
-    .reduce((sum, r) => sum + registrationPoints(db, r), 0);
+  return (
+    db.registrations
+      .filter((r) => memberNumbers.has(r.membershipNumber))
+      .reduce((sum, r) => sum + registrationPoints(db, r), 0) + adjustmentsTotal(db, memberNumbers)
+  );
 }
 
 function totalRedeemed(db, key) {
   const memberNumbers = new Set(membersInPool(db, key).map((m) => m.membershipNumber));
   return db.redemptions
-    .filter((r) => memberNumbers.has(r.membershipNumber) && (r.status === "Approved" || r.status === "Fulfilled"))
+    .filter((r) => memberNumbers.has(r.membershipNumber) && (r.status === "Approved" || r.status === "Fulfilled") && redemptionCounts(db, r))
     .reduce((sum, r) => {
       const tier = ladderTier(db, r.tier);
       return sum + (tier ? tier.pointsRequired : 0);
@@ -1371,6 +1399,9 @@ app.post("/api/auth/signup", async (req, res) => {
   // readDb() further down). `existing`/`claiming` below both come from this
   // peek.
   const peekDb = readDb();
+  if (peekDb.members[clubId] && peekDb.members[clubId].archivedAt) {
+    return res.status(403).json({ error: "This membership is no longer active. Please contact the committee." });
+  }
   const peek = resolveSignupAccount(peekDb, clubId);
   // `claiming` with no passwordHash (only possible when accountId === clubId
   // above) means an admin imported this member ahead of time (see
@@ -1473,6 +1504,9 @@ app.post("/api/auth/login", async (req, res) => {
     recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect membership number or password" });
   }
+  if (member.archivedAt) {
+    return res.status(403).json({ error: "This account is no longer active. Please contact the committee." });
+  }
   // Re-read right before the write: nothing above this line has mutated
   // anything, so re-reading here - synchronously, with no further await
   // before writeDb() - picks up whatever any other request wrote to
@@ -1573,9 +1607,15 @@ app.post("/api/auth/change-password", async (req, res) => {
   // A staff account created with a committee-chosen starting password (see
   // POST /api/staff/accounts) is required to set its own before it can do
   // anything else - this is the moment that requirement is satisfied.
-  if (session.type === "staff") freshAccount.mustChangePassword = false;
+  // Members issued a temporary password by the admin (see send-credentials)
+  // are held at the same gate until they set their own.
+  freshAccount.mustChangePassword = false;
   writeDb(freshDb);
-  res.json({ ok: true, staff: session.type === "staff" ? publicStaff(freshAccount) : undefined });
+  res.json({
+    ok: true,
+    staff: session.type === "staff" ? publicStaff(freshAccount) : undefined,
+    member: session.type === "member" ? publicMember(freshAccount) : undefined,
+  });
 });
 
 // Admin-only: onboard more staff/admin accounts (replaces the old shared-key model).
@@ -1806,6 +1846,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     });
   }
   freshMember.passwordHash = newPasswordHash;
+  freshMember.mustChangePassword = false;
   writeDb(freshDb);
   const token = createSession("member", membershipNumber);
   setSessionCookie(req, res, token);
@@ -3761,7 +3802,7 @@ app.post("/api/checkin/undo", requireStaffRole("staff"), requireRegistrationAcce
     // what makes a still-pending reward request affordable.
     const pool = new Set(membersInPool(db, snap.poolingKey).map((m) => m.membershipNumber));
     const pendingCosts = db.redemptions
-      .filter((r) => pool.has(r.membershipNumber) && r.status === "Pending")
+      .filter((r) => pool.has(r.membershipNumber) && r.status === "Pending" && redemptionCounts(db, r))
       .map((r) => (ladderTier(db, r.tier) || { pointsRequired: 0 }).pointsRequired);
     const pendingNeed = pendingCosts.length ? Math.max(...pendingCosts) : 0;
     const wasCovered = snap.balance + pointsBefore >= pendingNeed;
@@ -4191,6 +4232,7 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
 app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
   const db = req.db;
   const rows = Object.values(db.members)
+    .filter((m) => !m.archivedAt)
     .map((m) => ({
       membershipNumber: m.membershipNumber,
       name: m.name,
@@ -4203,6 +4245,251 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   res.json(rows);
+});
+
+// ------------------------------------------------ member credentials (admin) --
+// Passwords are stored hashed, so an existing one can never be read back.
+// Instead the admin issues a NEW temporary password for a member right when
+// they are about to send it (WhatsApp click-to-chat on the admin's own
+// device); the member must replace it at first login. The temporary
+// password is returned once, never logged and never stored in clear.
+const TEMP_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"; // no 0/O/1/l/I
+function generateTempPassword(len = 10) {
+  const bytes = crypto.randomBytes(len);
+  let out = "";
+  for (let i = 0; i < len; i++) out += TEMP_PW_ALPHABET[bytes[i] % TEMP_PW_ALPHABET.length];
+  return out;
+}
+app.post("/api/admin/members/:membershipNumber/send-credentials", requireStaffRole("admin"), async (req, res) => {
+  const num = req.params.membershipNumber;
+  const peek = req.db.members[num];
+  if (!peek) return res.status(404).json({ error: "No member found with that membership number" });
+  if (peek.archivedAt) return res.status(409).json({ error: "This member is archived - restore the member first" });
+  if (!String(peek.phone || "").replace(/\D/g, "")) return res.status(400).json({ error: "This member has no phone number on file" });
+  if (peek.passwordHash && req.body && req.body.replaceExisting !== true) {
+    return res.status(409).json({
+      error: "This member already has a password. Issuing new login details will replace it.",
+      needsConfirm: true,
+    });
+  }
+  const tempPassword = generateTempPassword();
+  // Hash before re-reading the db - see the comment above POST /api/auth/signup.
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
+  const db = readDb();
+  const member = db.members[num];
+  if (!member || member.archivedAt) return res.status(404).json({ error: "No member found with that membership number" });
+  member.passwordHash = passwordHash;
+  member.mustChangePassword = true;
+  member.credentialsIssuedAt = new Date().toISOString();
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "member.credentials_issued",
+    details: `${member.name} (#${num})`,
+  });
+  writeDb(db);
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    membershipNumber: num,
+    name: member.name,
+    phone: member.phone || "",
+    tempPassword,
+    loginUrl: `${req.protocol}://${req.get("host")}/`,
+  });
+});
+
+// ------------------------------------------------------ points start date --
+// Non-destructive cutoff: events dated before the chosen start event earn no
+// points and redemptions requested before it are ignored. History stays in
+// the database, and clearing the setting brings every old point back.
+function pointsStartInfo(db) {
+  const ev = db.settings.pointsStartEventId != null ? db.events.find((e) => e.id === db.settings.pointsStartEventId) : null;
+  return {
+    eventId: ev ? ev.id : null,
+    date: db.settings.pointsStartDate || "",
+    nameEn: ev ? ev.nameEn : "",
+    nameAr: ev ? ev.nameAr : "",
+  };
+}
+app.get("/api/admin/points-start", requireStaffRole("admin"), (req, res) => {
+  res.json(pointsStartInfo(req.db));
+});
+// What would change if this event became the start: used for the confirm box.
+app.get("/api/admin/points-start/preview", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const ev = db.events.find((e) => e.id === Number(req.query.eventId));
+  if (!ev) return res.status(404).json({ error: "No such event" });
+  const date = String(ev.date);
+  const saved = db.settings.pointsStartDate;
+  db.settings.pointsStartDate = ""; // raw points, request-local copy (never written)
+  let pointsRemoved = 0;
+  let checkInsAffected = 0;
+  for (const r of db.registrations) {
+    if (!r.checkedIn) continue;
+    const rev = db.events.find((e) => e.id === r.eventId);
+    if (!rev || String(rev.date) >= date) continue;
+    checkInsAffected++;
+    pointsRemoved += registrationPoints(db, r);
+  }
+  db.settings.pointsStartDate = saved;
+  const redemptionsIgnored = db.redemptions.filter((r) => String(r.requestedAt || "").slice(0, 10) < date).length;
+  res.json({ eventId: ev.id, date, nameEn: ev.nameEn, nameAr: ev.nameAr, checkInsAffected, pointsRemoved, redemptionsIgnored });
+});
+app.put("/api/admin/points-start", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const raw = req.body && req.body.eventId;
+  if (raw === null || raw === undefined || raw === "") {
+    db.settings.pointsStartDate = "";
+    db.settings.pointsStartEventId = null;
+  } else {
+    const ev = db.events.find((e) => e.id === Number(raw));
+    if (!ev) return res.status(404).json({ error: "No such event" });
+    db.settings.pointsStartDate = String(ev.date);
+    db.settings.pointsStartEventId = ev.id;
+  }
+  const info = pointsStartInfo(db);
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "points.start_set",
+    details: info.date ? `Points count from ${info.nameEn} (${info.date})` : "Points start date cleared - all history counts again",
+  });
+  writeDb(db);
+  res.json(info);
+});
+
+// ------------------------------------------------- manual points editing --
+// Admin-only correction of a member's points: add / subtract a number, or set
+// the balance to a target. Points are shared inside a family pool, so the
+// change applies to the pooled balance. Every change keeps a reason and is
+// listed in the member's details and the activity log.
+app.post("/api/admin/members/:membershipNumber/points-adjust", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const num = req.params.membershipNumber;
+  const member = db.members[num];
+  if (!member) return res.status(404).json({ error: "No member found with that membership number" });
+  if (member.archivedAt) return res.status(409).json({ error: "This member is archived" });
+  if (req.body.mode !== "set" && req.body.mode !== "add") {
+    return res.status(400).json({ error: "Mode must be add or set" });
+  }
+  const mode = req.body.mode;
+  const amount = Number(req.body.amount);
+  if (!Number.isInteger(amount) || Math.abs(amount) > 1000000) return res.status(400).json({ error: "Enter a whole number of points" });
+  if (mode === "set" && amount < 0) return res.status(400).json({ error: "The balance can't be negative" });
+  const reason = String(req.body.reason || "").trim().slice(0, 200);
+  if (!reason) return res.status(400).json({ error: "Please write a reason for this change" });
+  const snap = balanceSnapshot(db, num);
+  const delta = mode === "set" ? amount - snap.balance : amount;
+  if (delta === 0) return res.status(400).json({ error: "That doesn't change the balance" });
+  if (snap.balance + delta < 0) return res.status(400).json({ error: "The balance can't go below zero" });
+  const adjustment = {
+    id: db.nextIds.pointAdjustment++,
+    membershipNumber: num,
+    delta,
+    reason,
+    createdAt: new Date().toISOString(),
+    by: req.staff.username,
+    byName: req.staff.name,
+  };
+  db.pointAdjustments.push(adjustment);
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "points.adjusted",
+    details: `${member.name} (#${num}): ${delta > 0 ? "+" : ""}${delta} - ${reason}`,
+  });
+  writeDb(db);
+  const after = balanceSnapshot(db, num);
+  res.json({ ok: true, balance: after.balance, familyPooled: after.familyPooled, adjustment });
+});
+
+// ---------------------------------------- archive / restore / delete members --
+// Archive hides a member and blocks login (reversible). Permanent delete is
+// only possible for an archived member, needs the word DELETE as typed
+// confirmation, and removes the member with their registrations, reward
+// requests, chat and point corrections. Both refuse while the member still has
+// upcoming registrations; delete also refuses for tournament participants
+// (their results are part of the tournament record).
+function dropMemberSessions(num) {
+  let changed = false;
+  for (const [token, sess] of sessions) {
+    if (sess.type === "member" && sess.id === num) {
+      sessions.delete(token);
+      changed = true;
+    }
+  }
+  if (changed) persistSessions();
+}
+app.post("/api/admin/members/bulk", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const action = req.body.action;
+  if (!["archive", "restore", "delete"].includes(action)) return res.status(400).json({ error: "Unknown action" });
+  const list = Array.isArray(req.body.membershipNumbers) ? [...new Set(req.body.membershipNumbers.map((x) => String(x)))] : [];
+  if (!list.length) return res.status(400).json({ error: "Choose at least one member" });
+  if (list.length > 500) return res.status(400).json({ error: "Choose at most 500 members at a time" });
+  if (action === "delete" && req.body.confirm !== "DELETE") return res.status(400).json({ error: "Type DELETE to confirm" });
+  const today = todayStr();
+  const results = [];
+  const droppedSessions = [];
+  for (const num of list) {
+    const m = db.members[num];
+    if (!m) { results.push({ membershipNumber: num, ok: false, error: "Not found" }); continue; }
+    const regs = db.registrations.filter((r) => r.membershipNumber === num);
+    if (action === "restore") {
+      if (!m.archivedAt) { results.push({ membershipNumber: num, ok: false, error: "Not archived" }); continue; }
+      delete m.archivedAt;
+      delete m.archivedBy;
+      logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "member.restored", details: `${m.name} (#${num})` });
+      results.push({ membershipNumber: num, ok: true });
+      continue;
+    }
+    if (action === "archive") {
+      if (m.archivedAt) { results.push({ membershipNumber: num, ok: false, error: "Already archived" }); continue; }
+    } else if (!m.archivedAt) {
+      results.push({ membershipNumber: num, ok: false, error: "Archive the member first" });
+      continue;
+    }
+    const upcoming = regs.filter((r) => {
+      const ev = db.events.find((e) => e.id === r.eventId);
+      return ev && eventEndDate(ev) >= today;
+    });
+    if (upcoming.length) {
+      results.push({ membershipNumber: num, ok: false, error: `Has ${upcoming.length} upcoming registration(s) - cancel them first` });
+      continue;
+    }
+    if (action === "archive") {
+      if (db.redemptions.some((r) => r.membershipNumber === num && r.status === "Pending")) {
+        results.push({ membershipNumber: num, ok: false, error: "Has a pending reward request - resolve it first" });
+        continue;
+      }
+      m.archivedAt = new Date().toISOString();
+      m.archivedBy = req.staff.username;
+      droppedSessions.push(num);
+      logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "member.archived", details: `${m.name} (#${num})` });
+      results.push({ membershipNumber: num, ok: true });
+      continue;
+    }
+    // delete
+    if (regs.some((r) => findTournament(db, r.eventId))) {
+      results.push({ membershipNumber: num, ok: false, error: "Took part in a tournament - keep the member archived" });
+      continue;
+    }
+    db.registrations = db.registrations.filter((r) => r.membershipNumber !== num);
+    db.redemptions = db.redemptions.filter((r) => r.membershipNumber !== num);
+    db.chatMessages = db.chatMessages.filter((c) => c.membershipNumber !== num);
+    db.pointAdjustments = db.pointAdjustments.filter((a) => a.membershipNumber !== num);
+    delete db.members[num];
+    droppedSessions.push(num);
+    logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "member.deleted", details: `${m.name} (#${num}) - ${regs.length} registration(s) removed` });
+    results.push({ membershipNumber: num, ok: true });
+  }
+  writeDb(db);
+  droppedSessions.forEach(dropMemberSessions);
+  res.json({ results, done: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
 });
 
 // Adds a single new member directly - for the common "just one or two
@@ -4717,7 +5004,15 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         memberType: m.memberType || "main",
         relationshipToMain: m.relationshipToMain || "",
         hasLoggedInAccount: !!m.passwordHash,
+        mustChangePassword: !!m.mustChangePassword,
+        credentialsIssuedAt: m.credentialsIssuedAt || null,
+        archivedAt: m.archivedAt || null,
         balance: snap ? snap.balance : 0,
+        familyPooled: snap ? snap.familyPooled : false,
+        adjustments: (db.pointAdjustments || [])
+          .filter((a) => a.membershipNumber === m.membershipNumber)
+          .sort((a, b) => b.id - a.id)
+          .slice(0, 20),
         dependents: (m.dependents || []).map((d) => ({
           id: d.id,
           name: d.name,
