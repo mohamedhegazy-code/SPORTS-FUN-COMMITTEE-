@@ -1721,12 +1721,23 @@ document.getElementById("reg-event").addEventListener("change", () => {
 function isEventFull(ev) {
   return ev.maxCapacity != null && (ev.confirmedCount || 0) >= ev.maxCapacity;
 }
+// "Waiting list: 3" - shown next to the capacity badge, and inside the
+// "event is full" note, whenever somebody is on the waiting list.
+function waitlistCountBadgeHtml(ev) {
+  const n = Number(ev.waitlistCount) || 0;
+  return n > 0 ? `<span class="capacity-badge waitlist">${escapeAttr(t("waitlistLabel"))}: ${fmt(n)}</span>` : "";
+}
+function eventFullNoteHtml(ev, withCount) {
+  const n = Number(ev.waitlistCount) || 0;
+  const count = withCount !== false && n > 0 ? ` <strong>${escapeAttr(t("waitlistLabel"))}: ${fmt(n)}</strong>` : "";
+  return `<p class="event-full-note">${escapeAttr(t("eventFullWaitlistNote"))}${count}</p>`;
+}
 function capacityBadgeHtml(ev) {
   if (ev.maxCapacity == null) return "";
   if (isEventFull(ev)) {
-    return `<span class="capacity-badge full">${escapeAttr(t("badgeFull"))}</span>`;
+    return `<span class="capacity-badge full">${escapeAttr(t("badgeFull"))}</span>${waitlistCountBadgeHtml(ev)}`;
   }
-  return `<span class="capacity-badge ok">${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)}</span>`;
+  return `<span class="capacity-badge ok">${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)}</span>${waitlistCountBadgeHtml(ev)}`;
 }
 // Builds the inline "activities" list shown on a parent event day's card -
 // one row per sub-activity, each with its own capacity badge and its own
@@ -1768,7 +1779,7 @@ function eventCardHtml(ev, isPast, featured) {
     isParent ? "" : capacityBadgeHtml(ev)
   }</div>
         <div class="snippet">${eventCardDescHtml(ev, isPast, 110)}</div>
-        ${!isPast && !isParent && isEventFull(ev) ? `<p class="event-full-note">${escapeAttr(t("eventFullWaitlistNote"))}</p>` : ""}
+        ${!isPast && !isParent && isEventFull(ev) ? eventFullNoteHtml(ev, false) : ""}
         ${
           isParent
             ? `<div class="activities-list"><div class="activities-title">${escapeAttr(
@@ -2068,7 +2079,7 @@ function openEventModal(ev, isPast) {
             isPast
           )}</div>`
         : !isPast
-        ? `${isEventFull(ev) ? `<p class="event-full-note">${escapeAttr(t("eventFullWaitlistNote"))}</p>` : ""}<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`
+        ? `${isEventFull(ev) ? eventFullNoteHtml(ev) : ""}<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`
         : ""
     }
   `;
@@ -10591,6 +10602,11 @@ function eventReminderOpen(ev) {
   return n === null ? true : n >= 1 && n <= 3;
 }
 function waStatusCellHtml(r, eventName, eventDate, ev) {
+  // No WhatsApp messages (confirmation, reminder, event-day) to anyone still on
+  // the waiting list: they only become eligible once confirmed (promoted).
+  if (r.waitlisted) {
+    return `<small style="color:var(--muted);">${escapeAttr(t("waWaitlistNote"))}</small>`;
+  }
   const hasPhoneNow = !!r.phone;
   // Tournament Manager: the list carries no phone numbers (hasPhone only);
   // the number is fetched from the server at the moment of sending.
@@ -10954,6 +10970,7 @@ document.getElementById("wa-bulk-open").addEventListener("click", async () => {
   const b = WA_BULK;
   if (!b || b.idx >= b.queue.length) return;
   const r = b.queue[b.idx];
+  if (r.waitlisted) { b.skipped++; b.idx++; return waBulkRender(); } // never message the waiting list
   const def = WA_BULK_TYPES[b.type];
   const btn = document.getElementById("wa-bulk-open");
   const msg = document.getElementById("wa-bulk-msg");
