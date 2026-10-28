@@ -7306,6 +7306,83 @@ app.delete("/api/admin/saved-reports/:id", requireStaffRole("admin"), (req, res)
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------- birthday cards --
+// Admin-only list of upcoming birthdays (members and, optionally, family
+// members) for the Birthday cards tool. The card itself is drawn in the
+// browser; the admin sends it through WhatsApp click-to-chat, one chat at a
+// time, and each send is recorded here so the list shows who already got
+// this year's card.
+const isLeapYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+function birthdayInfo(birthISO, todayISO) {
+  const [by, bm, bdy] = birthISO.split("-").map(Number);
+  const [ty, tm, td] = todayISO.split("-").map(Number);
+  const occurrence = (y) => Date.UTC(y, bm - 1, bm === 2 && bdy === 29 && !isLeapYear(y) ? 28 : bdy);
+  const t0 = Date.UTC(ty, tm - 1, td);
+  let y = ty;
+  let n = occurrence(y);
+  if (n < t0) { y++; n = occurrence(y); }
+  return { daysUntil: Math.round((n - t0) / 86400000), year: y, month: bm, day: bdy, turning: y - by, nextDate: new Date(n).toISOString().slice(0, 10) };
+}
+app.get("/api/admin/birthdays", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const today = AgeUtils.todayCairoISO();
+  const scope = ["today", "week", "month", "all"].includes(req.query.scope) ? req.query.scope : "week";
+  const month = Number(req.query.month) >= 1 && Number(req.query.month) <= 12 ? Number(req.query.month) : Number(today.slice(5, 7));
+  const family = req.query.family !== "0";
+  const all = [];
+  for (const m of Object.values(db.members)) {
+    if (m.archivedAt) continue;
+    const mk = (kind, p, dep) => {
+      const bd = AgeUtils.parseBirthDate(p.birthDate, today);
+      if (!bd) return;
+      const info = birthdayInfo(bd, today);
+      all.push({
+        membershipNumber: m.membershipNumber,
+        dependentId: dep ? dep.id : null,
+        kind,
+        name: p.name || "",
+        parentName: dep ? m.name : "",
+        phone: ((p.phone || (dep ? m.phone : "") || "") + "").trim(),
+        birthDate: bd,
+        month: info.month,
+        day: info.day,
+        turning: info.turning,
+        daysUntil: info.daysUntil,
+        nextDate: info.nextDate,
+        year: info.year,
+        sentAt: p.birthdayCardYear === info.year ? p.birthdayCardAt || "" : "",
+      });
+    };
+    mk("member", m, null);
+    if (family) for (const d of m.dependents || []) mk("dependent", d, d);
+  }
+  const counts = { today: all.filter((x) => x.daysUntil === 0).length, week: all.filter((x) => x.daysUntil <= 7).length, total: all.length };
+  let items = all;
+  if (scope === "today") items = all.filter((x) => x.daysUntil === 0);
+  else if (scope === "week") items = all.filter((x) => x.daysUntil <= 7);
+  else if (scope === "month") items = all.filter((x) => x.month === month);
+  const collator = new Intl.Collator("ar", { sensitivity: "base", numeric: true });
+  items.sort((a, b) => (scope === "month" ? a.day - b.day : a.daysUntil - b.daysUntil) || collator.compare(a.name, b.name));
+  res.set("Cache-Control", "no-store");
+  res.json({ today, scope, month, counts, items: items.slice(0, 5000) });
+});
+app.post("/api/admin/birthdays/sent", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const m = db.members[String((req.body && req.body.membershipNumber) || "")];
+  if (!m) return res.status(404).json({ error: "No such member" });
+  const depId = req.body.dependentId == null || req.body.dependentId === "" ? null : Number(req.body.dependentId);
+  const person = depId == null ? m : (m.dependents || []).find((d) => d.id === depId);
+  if (!person) return res.status(404).json({ error: "No such family member" });
+  const bd = AgeUtils.parseBirthDate(person.birthDate);
+  if (!bd) return res.status(400).json({ error: "No date of birth on file" });
+  const info = birthdayInfo(bd, AgeUtils.todayCairoISO());
+  person.birthdayCardYear = info.year;
+  person.birthdayCardAt = new Date().toISOString();
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "birthday_card_sent", details: `${person.name} (${m.membershipNumber})` });
+  writeDb(db);
+  res.json({ ok: true, sentAt: person.birthdayCardAt, phone: ((person.phone || (depId != null ? m.phone : "") || "") + "").trim() });
+});
+
 // Staff correction of a player's Women / Juniors ranking categories (e.g.
 // after checking age or ID at the door). Allowed at any time.
 app.put("/api/admin/tournaments/:eventId/categories", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
