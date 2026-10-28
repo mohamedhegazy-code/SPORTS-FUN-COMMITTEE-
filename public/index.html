@@ -77,6 +77,16 @@
             <span data-i18n="heroViewCalendar">View full calendar</span> <span aria-hidden="true">&rarr;</span>
           </button>
         </div>
+        <div class="hero-wa-card hidden" id="hero-wa-card">
+          <a id="hero-wa-qr-link" class="hero-wa-qr-link hidden" href="#" target="_blank" rel="noopener" aria-label="WhatsApp QR">
+            <img id="hero-wa-qr" class="hero-wa-qr" alt="" />
+          </a>
+          <div class="hero-wa-text">
+            <h3 class="hero-wa-title" id="hero-wa-title" data-i18n="whatsappCommunityTitle">Join our WhatsApp Community</h3>
+            <p class="hero-wa-sub" data-i18n="heroWaScan">Scan the QR code with your phone camera, or tap the button.</p>
+            <a id="hero-wa-link" class="hero-wa-btn hidden" href="#" target="_blank" rel="noopener" data-i18n="btnJoinWhatsapp">Open WhatsApp</a>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -244,14 +254,9 @@
         <label data-i18n="fieldClaimCode">Claim code (optional)</label>
         <input id="su-claimcode" placeholder="e.g. 482913" />
         <p class="hint-note" data-i18n="claimCodeHint">Only needed if the committee gave you a claim code for this membership number - leave blank otherwise.</p>
-        <label class="required-label" data-i18n="fieldAgeGroupRequired">Age group</label>
-        <select id="su-age-group" required>
-          <option value="" data-i18n="ageGroupPlaceholderRequired">— Select age group —</option>
-          <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
-          <option value="12to17" data-i18n="ageGroupTeens">Youth (12–17)</option>
-          <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
-          <option value="46plus" data-i18n="ageGroupSeniors">Masters (46+)</option>
-        </select>
+        <label class="required-label" data-i18n="fieldBirthDateRequired">Date of birth</label>
+        <input id="su-birthdate" type="date" min="1900-01-01" required />
+        <p class="hint-note" data-i18n="birthDateHint">Your age and age group are calculated automatically from your date of birth, and update on their own every year.</p>
         <label data-i18n="fieldEmail">Email (optional)</label>
         <input id="su-email" type="email" placeholder="e.g. ahmed@example.com" />
         <label class="checkbox-row" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:0.85rem;">
@@ -326,6 +331,7 @@
     <div class="card hidden" id="reg-qr-card">
       <h2 data-i18n="qrTitle">Your entry QR code(s)</h2>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="qrIntro">Show this at the event entrance to check in. Points are awarded the moment it's scanned — take a screenshot so you have it even offline. You can also come back and view it any time from Member Profile → My Registrations, until the event is over.</p>
+      <p class="hint-note"><a href="#" class="howto-link" data-howto="qr-entry" data-i18n="howToLinkQrEntry">▶ Watch how to use your entry QR code at the gate</a></p>
       <div id="reg-qr-list"></div>
     </div>
   </section>
@@ -345,6 +351,14 @@
       <h2 data-i18n="howToCardTitle">Watch how</h2>
       <p class="hint-note" data-i18n="howToCardSub">Two short videos (about a minute each) — narrated in Arabic with Arabic on-screen captions.</p>
       <div class="howto-grid">
+        <figure class="howto-item" id="howto-qr-entry">
+          <video controls preload="metadata" playsinline poster="videos/how-to-qr-entry-ar-poster.jpg" src="videos/how-to-qr-entry-ar.mp4"></video>
+          <figcaption data-i18n="howToQrEntryTitle">Your entry QR code: where to find it and how to use it</figcaption>
+          <div class="howto-langs">
+            <button type="button" class="howto-lang" data-vlang="ar" data-i18n="howToVideoLangAr">العربية</button>
+            <button type="button" class="howto-lang" data-vlang="en" data-i18n="howToVideoLangEn">English</button>
+          </div>
+        </figure>
         <figure class="howto-item" id="howto-add-family">
           <video controls preload="metadata" playsinline poster="videos/how-to-add-family-poster.jpg" src="videos/how-to-add-family-ar.mp4"></video>
           <figcaption data-i18n="howToAddFamilyTitle">How to add a family member</figcaption>
@@ -400,14 +414,8 @@
       <h2 data-i18n="ageGroupTitle">Age group</h2>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="ageGroupIntro">Let the club know your age group so events and tournaments can be organized appropriately. This is optional and only visible to staff.</p>
       <p class="hint-note" id="mp-agegroup-status"></p>
-      <label class="required-label" data-i18n="fieldAgeGroupRequired">Age group</label>
-      <select id="mp-agegroup-select">
-        <option value="" data-i18n="ageGroupPlaceholderRequired">— Select age group —</option>
-        <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
-        <option value="12to17" data-i18n="ageGroupTeens">Youth (12–17)</option>
-        <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
-        <option value="46plus" data-i18n="ageGroupSeniors">Masters (46+)</option>
-      </select>
+      <label class="required-label" data-i18n="fieldBirthDateRequired">Date of birth</label>
+      <input id="mp-birthdate" type="date" min="1900-01-01" />
       <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
         <button class="primary" id="mp-agegroup-save" data-i18n="btnSaveAgeGroup">Save age group</button>
       </div>
@@ -456,14 +464,8 @@
           <input id="fam-relationship-other" class="hidden" style="margin-top:8px;" placeholder="e.g. Cousin, Uncle, Grandparent" />
         </div>
         <div>
-          <label class="required-label" data-i18n="fieldAgeGroupRequired">Age group</label>
-          <select id="fam-age-group">
-            <option value="" data-i18n="ageGroupPlaceholderRequired">— Select age group —</option>
-            <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
-            <option value="12to17" data-i18n="ageGroupTeens">Youth (12–17)</option>
-            <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
-            <option value="46plus" data-i18n="ageGroupSeniors">Masters (46+)</option>
-          </select>
+          <label class="required-label" data-i18n="fieldBirthDateRequired">Date of birth</label>
+          <input id="fam-birthdate" type="date" min="1900-01-01" />
         </div>
         <div><label data-i18n="fieldFamilyMemberPhone">Mobile (optional)</label><input id="fam-phone" type="tel" /></div>
         <div><label data-i18n="fieldFamilyMemberEmail">Email (optional)</label><input id="fam-email" type="email" /></div>
@@ -476,6 +478,7 @@
     <div class="card hidden" id="mp-registrations-card">
       <h2 data-i18n="myRegistrationsTitle">My registrations</h2>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="myRegistrationsIntro">Your entry QR codes stay available here until each event is over.</p>
+      <p class="hint-note"><a href="#" class="howto-link" data-howto="qr-entry" data-i18n="howToLinkQrEntry">▶ Watch how to use your entry QR code at the gate</a></p>
       <div id="mp-registrations-list"></div>
     </div>
 
@@ -958,7 +961,9 @@
               <input id="member-add-family" type="text" />
             </div>
             <div>
-              <label data-i18n="fieldAgeGroup">Age group (optional)</label>
+              <label data-i18n="fieldBirthDate">Date of birth (optional)</label>
+              <input id="member-add-birthdate" type="date" min="1900-01-01" />
+              <label data-i18n="fieldAgeGroup" style="margin-top:8px;">Age group (optional)</label>
               <select id="member-add-age-group">
                 <option value="" data-i18n="ageGroupPlaceholder">— Select age group (optional) —</option>
                 <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
@@ -991,6 +996,21 @@
           </div>
           <p class="hint-note" data-i18n="importFormatHint">Columns expected: Membership Number, Name, Phone (optional), Family Group (optional). Existing membership numbers get updated; new ones are added.</p>
           <div class="msg" id="members-import-msg"></div>
+
+          <h3 style="margin-top:22px;" data-i18n="birthToolTitle">Match a birthdates file</h3>
+          <p class="hint-note" data-i18n="birthToolHint">Upload an .xlsx with a name and a date of birth on each row (no header row needed). Every name is matched to the members and family members on the platform. Exact matches are saved automatically; anything else is listed below for you to confirm - nothing is guessed.</p>
+          <div class="grid-2" style="align-items:end;">
+            <div>
+              <label data-i18n="fieldBirthFile">Birthdates file (.xlsx)</label>
+              <input type="file" id="birth-file" accept=".xlsx,.xls" />
+            </div>
+            <div>
+              <button class="secondary" id="birth-match-btn" data-i18n="btnBirthMatch">Match &amp; save</button>
+              <button class="secondary hidden" id="birth-csv-btn" data-i18n="btnBirthCsv">Download report (CSV)</button>
+            </div>
+          </div>
+          <div class="msg" id="birth-msg"></div>
+          <div id="birth-result"></div>
 
           <h3 style="margin-top:18px;" data-i18n="inviteToEventTitle">Invite members to an event</h3>
           <div class="grid-2">

@@ -454,6 +454,7 @@ document.getElementById("lang-ar").addEventListener("click", () => setLang("ar")
 function setLang(lang) {
   currentLang = lang;
   applyI18n();
+  setQrHowtoLang(lang === "ar" ? "ar" : "en");
   renderEventDropdowns();
   renderEventsGrid();
   renderRegisterEventsGrid();
@@ -879,6 +880,26 @@ function applyLandingPageToUI() {
     } else {
       waLinkEl.classList.add("hidden");
     }
+  }
+  // Same community QR, repeated inside the landing-page hero so members see
+  // it on the very first screen. Shown whenever a QR image or invite link is
+  // set, independent of the lower "WhatsApp" section's on/off switch.
+  const heroWaCard = document.getElementById("hero-wa-card");
+  if (heroWaCard) {
+    const heroQr = document.getElementById("hero-wa-qr");
+    const heroQrLink = document.getElementById("hero-wa-qr-link");
+    const heroLink = document.getElementById("hero-wa-link");
+    const hasQr = !!lp.whatsapp.qrImage;
+    const hasLink = !!lp.whatsapp.link;
+    heroWaCard.classList.toggle("hidden", !hasQr && !hasLink);
+    document.getElementById("hero-wa-title").textContent = bilingual(lp.whatsapp.titleEn, lp.whatsapp.titleAr) || t("whatsappCommunityTitle");
+    if (hasQr) {
+      heroQr.src = lp.whatsapp.qrImage;
+      heroQrLink.href = lp.whatsapp.qrImage;
+    }
+    heroQrLink.classList.toggle("hidden", !hasQr);
+    if (hasLink) heroLink.href = lp.whatsapp.link;
+    heroLink.classList.toggle("hidden", !hasLink);
   }
   renderMpWhatsappCard();
 
@@ -2107,7 +2128,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const familyGroup = document.getElementById("su-family").value.trim();
   const phone = document.getElementById("su-phone").value.trim();
   const claimCode = document.getElementById("su-claimcode").value.trim();
-  const ageGroup = document.getElementById("su-age-group").value;
+  const birthDate = document.getElementById("su-birthdate").value;
   const email = document.getElementById("su-email").value.trim();
   const agreeTerms = document.getElementById("su-agree-terms").checked;
   const memberType = document.getElementById("su-type-follower").checked ? "follower" : "main";
@@ -2119,9 +2140,14 @@ document.getElementById("su-submit").addEventListener("click", async () => {
     showMsg(msg, t("errFillFields"), false);
     return;
   }
-  if (!ageGroup) {
-    highlightMissingFields(["su-age-group"]);
-    showMsg(msg, t("errAgeGroupRequired"), false);
+  if (!birthDate) {
+    highlightMissingFields(["su-birthdate"]);
+    showMsg(msg, t("errBirthDateRequired"), false);
+    return;
+  }
+  if (birthDate > todayISO() || birthDate < "1900-01-01") {
+    highlightMissingFields(["su-birthdate"]);
+    showMsg(msg, t("errBirthDateInvalid"), false);
     return;
   }
   if (password.length < 6) {
@@ -2141,7 +2167,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, claimCode, ageGroup, email, agreeTerms, memberType, relationshipToMain }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, claimCode, birthDate, email, agreeTerms, memberType, relationshipToMain }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;
@@ -2547,10 +2573,10 @@ function renderFamilyList() {
           (d) => `<div class="family-item" data-dep-id="${d.id}">
         <span class="name">${escapeAttr(d.name)}${
             d.relationship ? ` <span class="fam-rel-badge">(${escapeAttr(d.relationship)})</span>` : ""
-          } <span class="fam-rel-badge ${d.ageGroup ? "" : "fam-age-missing"}">${d.ageGroup ? escapeAttr(ageGroupLabel(d.ageGroup)) : escapeAttr(t("famAgeGroupMissing"))}</span>${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
+          } <span class="fam-rel-badge ${d.birthDate ? "" : "fam-age-missing"}">${d.birthDate ? escapeAttr(ageGroupLabel(effectiveAgeGroup(d)) + " · " + bornAgeText(d)) : escapeAttr(t("famBirthMissing"))}</span>${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
         <span class="fam-rel-edit">
           <select class="fam-rel-select" data-dep-id="${d.id}">${familyRelationSelectHtml(d.relationship || "")}</select>
-          <select class="fam-age-select" data-dep-id="${d.id}" style="margin-top:6px;">${ageGroupOptionsHtml(d.ageGroup || "")}</select>
+          <input class="fam-birth-input" type="date" data-dep-id="${d.id}" value="${escapeAttr(d.birthDate || "")}" min="1900-01-01" max="${todayISO()}" title="${escapeAttr(t("fieldBirthDateRequired"))}" style="margin-top:6px;" />
           <input class="fam-rel-other-input ${
             !!d.relationship && !FAMILY_RELATIONS.includes(d.relationship) ? "" : "hidden"
           }" data-dep-id="${d.id}" value="${
@@ -2603,11 +2629,14 @@ function renderFamilyList() {
       const otherInput = wrap.querySelector(`.fam-rel-other-input[data-dep-id="${btn.dataset.depId}"]`);
       const phoneInput = wrap.querySelector(`.fam-phone-input[data-dep-id="${btn.dataset.depId}"]`);
       const emailInput = wrap.querySelector(`.fam-email-input[data-dep-id="${btn.dataset.depId}"]`);
-      const ageSel = wrap.querySelector(`.fam-age-select[data-dep-id="${btn.dataset.depId}"]`);
+      const birthInput = wrap.querySelector(`.fam-birth-input[data-dep-id="${btn.dataset.depId}"]`);
       const relationship = sel.value === "other" ? otherInput.value.trim() : sel.value;
       const msg = document.getElementById("fam-msg");
       const payload = { relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() };
-      if (ageSel && ageSel.value) payload.ageGroup = ageSel.value;
+      if (birthInput && birthInput.value) {
+        if (birthInput.value > todayISO() || birthInput.value < "1900-01-01") return showMsg(msg, t("errBirthDateInvalid"), false);
+        payload.birthDate = birthInput.value;
+      }
       try {
         const result = await api("/api/me/dependents/" + btn.dataset.depId, {
           method: "PUT",
@@ -2637,7 +2666,7 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   const relOtherInput = document.getElementById("fam-relationship-other");
   const phoneInput = document.getElementById("fam-phone");
   const emailInput = document.getElementById("fam-email");
-  const ageSelect = document.getElementById("fam-age-group");
+  const birthInputEl = document.getElementById("fam-birthdate");
   const name = nameInput.value.trim();
   const relationship = relSelect.value === "other" ? relOtherInput.value.trim() : relSelect.value;
   const msg = document.getElementById("fam-msg");
@@ -2646,19 +2675,24 @@ document.getElementById("fam-add").addEventListener("click", async () => {
     showMsg(msg, t("errFillFields"), false);
     return;
   }
-  if (!ageSelect.value) {
-    highlightMissingFields(["fam-age-group"]);
-    showMsg(msg, t("errFamilyAgeGroupRequired"), false);
+  if (!birthInputEl.value) {
+    highlightMissingFields(["fam-birthdate"]);
+    showMsg(msg, t("errFamilyBirthDateRequired"), false);
+    return;
+  }
+  if (birthInputEl.value > todayISO() || birthInputEl.value < "1900-01-01") {
+    highlightMissingFields(["fam-birthdate"]);
+    showMsg(msg, t("errBirthDateInvalid"), false);
     return;
   }
   try {
     const result = await api("/api/me/dependents", {
       method: "POST",
-      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim(), ageGroup: ageSelect.value }),
+      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim(), birthDate: birthInputEl.value }),
     });
     CURRENT_SESSION.member.dependents = result.dependents;
     renderAgeReminder();
-    ageSelect.value = "";
+    birthInputEl.value = "";
     nameInput.value = "";
     relSelect.value = "";
     relOtherInput.value = "";
@@ -4506,6 +4540,8 @@ function renderMembersTable() {
       <td>${escapeAttr(m.phone)}</td>
       <td>${escapeAttr(m.familyGroup)}</td>
       <td>${escapeAttr(ageGroupLabel(m.ageGroup))}</td>
+      <td class="num">${m.birthYear ? escapeAttr(m.birthYear) : "—"}</td>
+      <td class="num">${m.age != null ? escapeAttr(m.age) : "—"}</td>
       <td>${m.hasLoggedInAccount ? t("yesLabel") : t("noLabel")}</td>
       <td>${m.hasClaimCode ? t("yesLabel") : t("noLabel")}</td>
     </tr>`;
@@ -4514,7 +4550,7 @@ function renderMembersTable() {
     <thead><tr>
       <th><input type="checkbox" data-select-all-members title="${escapeAttr(t("selectAllLabel"))}" aria-label="${escapeAttr(t("selectAllLabel"))}" /></th>
       <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th>
-      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colAgeGroup")}</th><th>${t("colHasAccount")}</th><th>${t("colHasClaimCode")}</th>
+      <th>${t("colPhone")}</th><th>${t("colFamilyGroup")}</th><th>${t("colAgeGroup")}</th><th>${t("colBirthYear")}</th><th>${t("colAge")}</th><th>${t("colHasAccount")}</th><th>${t("colHasClaimCode")}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -4570,6 +4606,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   const phone = document.getElementById("member-add-phone").value.trim();
   const familyGroup = document.getElementById("member-add-family").value.trim();
   const ageGroup = document.getElementById("member-add-age-group").value;
+  const birthDate = document.getElementById("member-add-birthdate").value;
   const claimCode = document.getElementById("member-add-claimcode").value.trim();
   const eventId = document.getElementById("member-add-event").value;
   if (!membershipNumber || !name) {
@@ -4579,7 +4616,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
   try {
     const result = await api("/api/admin/members", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, phone, familyGroup, ageGroup, claimCode }),
+      body: JSON.stringify({ membershipNumber, name, phone, familyGroup, ageGroup, birthDate, claimCode }),
     });
     let text = `${t("memberAddedLabel")} ${escapeAttr(result.member.name)}.`;
     // Registering the brand-new member for an event is a second, independent
@@ -4607,6 +4644,7 @@ document.getElementById("member-add-btn").addEventListener("click", async () => 
     document.getElementById("member-add-phone").value = "";
     document.getElementById("member-add-family").value = "";
     document.getElementById("member-add-age-group").value = "";
+    document.getElementById("member-add-birthdate").value = "";
     document.getElementById("member-add-claimcode").value = "";
     document.getElementById("member-add-event").value = "";
     await loadAdminMembers();
@@ -4704,7 +4742,7 @@ function renderDirectoryTable() {
     const dependentsHtml = m.dependents.length
       ? `<ul class="directory-list">${m.dependents
           .map((d) => {
-            const bits = [d.relationship, d.ageGroup ? ageGroupLabel(d.ageGroup) : "", d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ");
+            const bits = [d.relationship, d.birthDate ? ageGroupLabel(effectiveAgeGroup(d)) : d.ageGroup ? ageGroupLabel(d.ageGroup) : "", d.birthDate ? bornAgeText(d) : "", d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ");
             return `<li>${escapeAttr(d.name)}${bits ? ` <span style="color:var(--muted);">(${bits})</span>` : ""}</li>`;
           })
           .join("")}</ul>`
@@ -4712,16 +4750,21 @@ function renderDirectoryTable() {
     // Admin age-group editor: one row for the member plus one per family
     // member, so accounts created before age group became mandatory can be
     // completed from here (PUT /api/admin/members/:n/age-group).
-    const ageRow = (label, current, depId) =>
+    const ageRow = (label, person, depId) =>
       `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0;">
         <span style="min-width:120px;">${escapeAttr(label)}</span>
-        <select class="dir-age-select" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="max-width:200px;padding:4px 6px;font-size:0.8rem;">${ageGroupOptionsHtml(current || "")}</select>
+        <input type="date" class="dir-birth-input" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" value="${escapeAttr(person.birthDate || "")}" min="1900-01-01" max="${todayISO()}" style="max-width:160px;padding:4px 6px;font-size:0.8rem;" />
+        ${
+          person.birthDate
+            ? `<span class="fam-rel-badge">${escapeAttr(ageGroupLabel(effectiveAgeGroup(person)) + " · " + bornAgeText(person))}</span>`
+            : `<select class="dir-age-select" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="max-width:200px;padding:4px 6px;font-size:0.8rem;">${ageGroupOptionsHtml(person.ageGroup || "")}</select>`
+        }
         <button class="secondary dir-age-save" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button>
       </div>`;
     const ageEditorHtml = `<div style="margin-top:14px;">
         <h4 style="margin:6px 0;">${t("directoryAgeGroupsTitle")}</h4>
-        ${ageRow(m.name, m.ageGroup, null)}
-        ${m.dependents.map((d) => ageRow(d.name, d.ageGroup, d.id)).join("")}
+        ${ageRow(m.name, m, null)}
+        ${m.dependents.map((d) => ageRow(d.name, d, d.id)).join("")}
         <div class="msg dir-age-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
       </div>`;
     const regsHtml = m.registrations.length
@@ -4825,6 +4868,8 @@ function renderDirectoryTable() {
         <td>${escapeAttr(m.membershipNumber)}</td>
         <td>${escapeAttr(m.name)}${memberTypeBadge}${badges}</td>
         <td style="white-space:nowrap;">${m.ageGroup ? escapeAttr(ageGroupLabel(m.ageGroup)) : `<span class="fam-age-missing">—</span>`}</td>
+        <td class="num">${m.birthYear ? escapeAttr(m.birthYear) : `<span class="fam-age-missing">—</span>`}</td>
+        <td class="num">${m.age != null ? escapeAttr(m.age) : `<span class="fam-age-missing">—</span>`}</td>
         <td>${escapeAttr(m.phone)}</td>
         <td>${escapeAttr(m.email || "")}</td>
         <td>${escapeAttr(m.familyGroup)}</td>
@@ -4834,7 +4879,7 @@ function renderDirectoryTable() {
         <td><button class="secondary" data-directory-toggle="${i}" style="padding:3px 10px;font-size:0.78rem;">${t("btnDetails")}</button></td>
       </tr>
       <tr data-directory-row data-search="${searchBlob}" ${dataAttrs} data-directory-detail="${i}" data-open="false" class="hidden">
-        <td colspan="11">
+        <td colspan="13">
           <div class="grid-2">
             <div><h4 style="margin:6px 0;">${t("colFamilyMembers")}</h4>${dependentsHtml}</div>
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
@@ -4848,7 +4893,7 @@ function renderDirectoryTable() {
   }).join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
-      <th></th><th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colAgeGroup")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
+      <th></th><th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colAgeGroup")}</th><th>${t("colBirthYear")}</th><th>${t("colAge")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
       <th>${t("colFamilyGroup")}</th><th>${t("colPointsBalance")}</th><th>${t("colRegistrations")}</th>
       <th>${t("colCheckedIn")}</th><th></th>
     </tr></thead>
@@ -4868,21 +4913,28 @@ function renderDirectoryTable() {
       const me = btn.dataset.me;
       const dep = btn.dataset.dep;
       const sel = wrap.querySelector(`.dir-age-select[data-me="${me}"][data-dep="${dep}"]`);
+      const birthIn = wrap.querySelector(`.dir-birth-input[data-me="${me}"][data-dep="${dep}"]`);
       const msg = wrap.querySelector(`.dir-age-msg[data-me="${me}"]`);
-      if (!sel.value) return showMsg(msg, t("errAgeGroupRequired"), false);
+      const depId = dep === "" ? undefined : Number(dep);
       try {
+        const m = DIRECTORY_DATA.find((x) => x.membershipNumber === me);
+        const holder = m ? (dep === "" ? m : m.dependents.find((x) => String(x.id) === dep)) : null;
+        if (birthIn && birthIn.value && (!holder || birthIn.value !== holder.birthDate)) {
+          if (birthIn.value > todayISO() || birthIn.value < "1900-01-01") return showMsg(msg, t("errBirthDateInvalid"), false);
+          const r = await api(`/api/admin/members/${encodeURIComponent(me)}/birth-date`, {
+            method: "PUT",
+            body: JSON.stringify({ birthDate: birthIn.value, dependentId: depId }),
+          });
+          if (holder) Object.assign(holder, { birthDate: r.birthDate, birthYear: r.birthYear, age: r.age, ageGroup: r.ageGroup });
+          showMsg(msg, `${t("okAgeGroupSavedShort")} — ${ageGroupLabel(r.ageGroup)} · ${bornAgeText({ birthDate: r.birthDate })}`, true);
+          return;
+        }
+        if (!sel || !sel.value) return showMsg(msg, t("errBirthDateRequired"), false);
         await api(`/api/admin/members/${encodeURIComponent(me)}/age-group`, {
           method: "PUT",
-          body: JSON.stringify({ ageGroup: sel.value, dependentId: dep === "" ? undefined : Number(dep) }),
+          body: JSON.stringify({ ageGroup: sel.value, dependentId: depId }),
         });
-        const m = DIRECTORY_DATA.find((x) => x.membershipNumber === me);
-        if (m) {
-          if (dep === "") m.ageGroup = sel.value;
-          else {
-            const d = m.dependents.find((x) => String(x.id) === dep);
-            if (d) d.ageGroup = sel.value;
-          }
-        }
+        if (holder) holder.ageGroup = sel.value;
         showMsg(msg, t("okAgeGroupSavedShort"), true);
       } catch (e) {
         showMsg(msg, e.message, false);
@@ -9174,6 +9226,51 @@ function ageGroupOptionsHtml(selected) {
       .join("")
   );
 }
+// ------------------------------------------------------ date of birth helpers --
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function ageFromBirth(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return null;
+  const n = new Date();
+  let age = n.getFullYear() - Number(m[1]);
+  const mo = n.getMonth() + 1;
+  if (mo < Number(m[2]) || (mo === Number(m[2]) && n.getDate() < Number(m[3]))) age--;
+  return Math.max(0, age);
+}
+function ageGroupFromYears(a) {
+  return a == null ? "" : a < 12 ? "under12" : a < 18 ? "12to17" : a < 46 ? "18to45" : "46plus";
+}
+// With a date of birth the group is always recalculated here too, so a long
+// open session never shows yesterday's group after a birthday.
+function effectiveAgeGroup(p) {
+  if (p && p.birthDate) {
+    const a = ageFromBirth(p.birthDate);
+    if (a != null) return ageGroupFromYears(a);
+  }
+  return (p && p.ageGroup) || "";
+}
+function birthDateText(iso) {
+  const d = new Date(String(iso || "") + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return String(iso || "");
+  try {
+    return d.toLocaleDateString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  } catch (e) {
+    return String(iso);
+  }
+}
+function bornAgeText(p) {
+  if (!p || !p.birthDate) return "";
+  return t("bornAge").replace("{year}", p.birthDate.slice(0, 4)).replace("{age}", String(ageFromBirth(p.birthDate)));
+}
+function initBirthInputs() {
+  const max = todayISO();
+  document.querySelectorAll('input[type="date"][min="1900-01-01"]').forEach((i) => (i.max = max));
+}
+initBirthInputs();
+
 // Non-blocking reminder banner: lists whoever on this account (the member
 // and/or their family members) still has no age group. Accounts created
 // before the field became mandatory simply see this until it is filled in.
@@ -9183,9 +9280,9 @@ function renderAgeReminder() {
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
   const missing = [];
   if (member) {
-    if (!member.ageGroup) missing.push(t("ageReminderYou"));
+    if (!member.birthDate) missing.push(t("ageReminderYou"));
     (member.dependents || []).forEach((d) => {
-      if (!d.ageGroup) missing.push(d.name);
+      if (!d.birthDate) missing.push(d.name);
     });
   }
   box.classList.toggle("hidden", !missing.length);
@@ -9201,24 +9298,36 @@ function renderAgeGroupStatus() {
   const el = document.getElementById("mp-agegroup-status");
   if (!el) return;
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
-  const ageGroup = member && member.ageGroup;
-  el.textContent = ageGroup ? `${t("ageGroupStatusSet")} ${ageGroupLabel(ageGroup)}` : t("ageGroupStatusNotSet");
-  const select = document.getElementById("mp-agegroup-select");
-  if (select && document.activeElement !== select) select.value = ageGroup || "";
+  if (member && member.birthDate) {
+    el.textContent = t("ageStatusLine")
+      .replace("{date}", birthDateText(member.birthDate))
+      .replace("{age}", String(ageFromBirth(member.birthDate)))
+      .replace("{group}", ageGroupLabel(effectiveAgeGroup(member)));
+  } else {
+    el.textContent = member && member.ageGroup ? `${t("ageGroupStatusSet")} ${ageGroupLabel(member.ageGroup)} — ${t("ageGroupStatusNotSet")}` : t("ageGroupStatusNotSet");
+  }
+  const input = document.getElementById("mp-birthdate");
+  if (input && document.activeElement !== input) input.value = (member && member.birthDate) || "";
 }
 
 document.getElementById("mp-agegroup-save").addEventListener("click", async () => {
-  const select = document.getElementById("mp-agegroup-select");
+  const input = document.getElementById("mp-birthdate");
   const msg = document.getElementById("mp-agegroup-msg");
-  const ageGroup = select.value;
-  if (!ageGroup) {
-    highlightMissingFields(["mp-agegroup-select"]);
-    showMsg(msg, t("errAgeGroupRequired"), false);
+  const birthDate = input.value;
+  if (!birthDate) {
+    highlightMissingFields(["mp-birthdate"]);
+    showMsg(msg, t("errBirthDateRequired"), false);
+    return;
+  }
+  if (birthDate > todayISO() || birthDate < "1900-01-01") {
+    highlightMissingFields(["mp-birthdate"]);
+    showMsg(msg, t("errBirthDateInvalid"), false);
     return;
   }
   try {
-    const result = await api("/api/me/profile", { method: "PATCH", body: JSON.stringify({ ageGroup }) });
+    const result = await api("/api/me/profile", { method: "PATCH", body: JSON.stringify({ birthDate }) });
     CURRENT_SESSION.member.ageGroup = result.member.ageGroup;
+    CURRENT_SESSION.member.birthDate = result.member.birthDate;
     renderAgeGroupStatus();
     renderAgeReminder();
     showMsg(msg, t("okAgeGroupSaved"), true);
@@ -9930,7 +10039,7 @@ document.addEventListener("click", (ev) => {
   const link = ev.target.closest && ev.target.closest(".howto-link");
   if (!link) return;
   ev.preventDefault();
-  const which = link.dataset.howto === "register-family" ? "howto-register-family" : "howto-add-family";
+  const which = link.dataset.howto === "qr-entry" ? "howto-qr-entry" : link.dataset.howto === "register-family" ? "howto-register-family" : "howto-add-family";
   switchTab("mypoints");
   const fig = document.getElementById(which);
   if (!fig) return;
@@ -9944,4 +10053,206 @@ document.addEventListener("click", (ev) => {
       if (p && p.catch) p.catch(() => {});
     } catch (_) {}
   }
+});
+
+
+// Entry-QR help video exists in Arabic and English. It follows the UI language
+// by default; the two small buttons under it let a member pick the other one.
+function setQrHowtoLang(l) {
+  const fig = document.getElementById("howto-qr-entry");
+  if (!fig) return;
+  const v = fig.querySelector("video");
+  const src = "videos/how-to-qr-entry-" + l + ".mp4";
+  if (v && v.getAttribute("src") !== src) {
+    try { v.pause(); } catch (_) {}
+    v.setAttribute("poster", "videos/how-to-qr-entry-" + l + "-poster.jpg");
+    v.setAttribute("src", src);
+    try { v.load(); } catch (_) {}
+  }
+  fig.querySelectorAll(".howto-lang").forEach((b) => b.classList.toggle("active", b.dataset.vlang === l));
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest && ev.target.closest(".howto-lang");
+  if (b) setQrHowtoLang(b.dataset.vlang);
+});
+setQrHowtoLang(typeof currentLang !== "undefined" && currentLang === "ar" ? "ar" : "en");
+
+// ----------------------------------------- admin: match a birthdates file --
+// Upload a "name + date of birth" sheet. The server saves every EXACT name
+// match straight away and sends back the rest; the admin then confirms each
+// remaining name here (pick the person, fix the date if needed, Link & save).
+let BIRTH_REPORT = null;
+
+function birthIssueText(row) {
+  if (row.status === "invalid") {
+    const why = { future: "birthProblemFuture", year: "birthProblemYear", format: "birthProblemFormat", empty: "birthProblemEmpty", noname: "birthProblemNoname" }[row.problem];
+    return `${t("birthIssueInvalid")}${why ? " — " + t(why) : ""}`;
+  }
+  return {
+    near: t("birthIssueNear"),
+    ambiguous: t("birthIssueAmbiguous"),
+    conflict: t("birthIssueConflict"),
+    none: t("birthIssueNone"),
+    "dup-diff": t("birthIssueDupDiff"),
+  }[row.status] || row.status;
+}
+function birthPersonLabel(p) {
+  const kind = p.kind === "dependent" ? `${t("birthKindDep")} ${p.parentName}` : t("birthKindMember");
+  const has = p.currentBirthDate ? ` · ${t("birthHasDate")} ${p.currentBirthDate}` : "";
+  return `${p.name} — ${kind} (#${p.membershipNumber})${has}${p.archived ? " · " + t("birthArchivedTag") : ""}`;
+}
+const BIRTH_OPEN = new Set(["near", "ambiguous", "conflict", "none", "invalid", "dup-diff"]);
+
+function renderBirthResult() {
+  const box = document.getElementById("birth-result");
+  const csvBtn = document.getElementById("birth-csv-btn");
+  if (!BIRTH_REPORT) {
+    box.innerHTML = "";
+    csvBtn.classList.add("hidden");
+    return;
+  }
+  csvBtn.classList.remove("hidden");
+  const rows = BIRTH_REPORT.rows;
+  const s = BIRTH_REPORT.summary;
+  const manual = rows.filter((r) => r.resolved).length;
+  const open = rows.filter((r) => BIRTH_OPEN.has(r.status) && !r.resolved);
+  const total = s.total - s.dupFile;
+  const matched = s.applied + s.already + s.linked + manual;
+  const pct = total ? Math.round((matched / total) * 1000) / 10 : 0;
+  const chips = [
+    [t("birthStatSaved"), s.applied],
+    [t("birthStatAlready"), s.already],
+    [t("birthStatLinked"), s.linked + manual],
+    [t("birthStatNeeds"), open.length],
+  ]
+    .map(([k, v]) => `<span class="fam-rel-badge" style="margin-inline-end:6px;">${escapeAttr(k)}: <b>${fmt(v)}</b></span>`)
+    .join("");
+  const summaryLine = t("birthSummary").replace("{matched}", fmt(matched)).replace("{total}", fmt(total)).replace("{pct}", String(pct));
+  let html = `<div style="margin:10px 0;"><b style="font-size:1.05rem;">${escapeAttr(summaryLine)}</b><div style="margin-top:6px;">${chips}</div></div>`;
+  if (!open.length && matched === total) html += `<p class="msg ok" style="display:block;">${escapeAttr(t("birthAllDone"))}</p>`;
+  if (open.length) {
+    const today = todayISO();
+    const body = open
+      .map((r) => {
+        const idx = BIRTH_REPORT.rows.indexOf(r);
+        let pick;
+        if (r.candidates.length) {
+          const ph = r.status === "ambiguous" || r.status === "dup-diff" ? `<option value="">${escapeAttr(t("birthPickPerson"))}</option>` : "";
+          pick = `<select class="birth-pick" data-i="${idx}" style="max-width:340px;">${ph}${r.candidates
+            .map((c, k) => `<option value="${escapeAttr(c.membershipNumber)}|${c.dependentId == null ? "" : c.dependentId}"${k === 0 && !ph ? " selected" : ""}>${escapeAttr(birthPersonLabel(c))}${c.score < 100 ? " · " + c.score + "%" : ""}</option>`)
+            .join("")}</select>`;
+        } else if (r.status === "conflict" && r.target) {
+          pick = `<span>${escapeAttr(birthPersonLabel(r.target))}</span><input type="hidden" class="birth-pick" data-i="${idx}" value="${escapeAttr(r.target.membershipNumber)}|${r.target.dependentId == null ? "" : r.target.dependentId}" />`;
+        } else {
+          pick = `<input class="birth-mn" data-i="${idx}" placeholder="${escapeAttr(t("birthMnPlaceholder"))}" style="max-width:150px;" />`;
+        }
+        return `<tr data-birth-row="${idx}">
+          <td class="num">${escapeAttr(r.rowNum)}</td>
+          <td><bdi>${escapeAttr(r.name)}</bdi></td>
+          <td><input type="date" class="birth-date" data-i="${idx}" value="${escapeAttr(r.birthDate || "")}" min="1900-01-01" max="${today}" style="max-width:150px;" /></td>
+          <td>${escapeAttr(birthIssueText(r))}</td>
+          <td>${pick}</td>
+          <td><button class="secondary birth-link" data-i="${idx}" style="padding:4px 10px;font-size:0.78rem;">${escapeAttr(t("btnBirthLink"))}</button><div class="msg birth-row-msg" data-i="${idx}"></div></td>
+        </tr>`;
+      })
+      .join("");
+    html += `<h4 style="margin:12px 0 6px;">${escapeAttr(t("birthNeedsTitle"))} (${fmt(open.length)})</h4>
+      <div class="dashboard-table-wrap"><table class="dashboard-table"><thead><tr>
+        <th>${escapeAttr(t("birthColRow"))}</th><th>${escapeAttr(t("birthColName"))}</th><th>${escapeAttr(t("birthColDate"))}</th><th>${escapeAttr(t("birthColIssue"))}</th><th>${escapeAttr(t("birthColMatch"))}</th><th></th>
+      </tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll(".birth-link").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const i = Number(btn.dataset.i);
+      const row = BIRTH_REPORT.rows[i];
+      const msg = box.querySelector(`.birth-row-msg[data-i="${i}"]`);
+      const dateVal = box.querySelector(`.birth-date[data-i="${i}"]`).value;
+      let mn;
+      let dep = "";
+      const pickEl = box.querySelector(`.birth-pick[data-i="${i}"]`);
+      const mnEl = box.querySelector(`.birth-mn[data-i="${i}"]`);
+      if (pickEl) {
+        if (!pickEl.value) return showMsg(msg, t("birthPickPerson"), false);
+        [mn, dep] = pickEl.value.split("|");
+      } else {
+        mn = (mnEl && mnEl.value.trim()) || "";
+        if (!mn) return showMsg(msg, t("birthMnPlaceholder"), false);
+      }
+      if (!dateVal) return showMsg(msg, t("errBirthDateRequired"), false);
+      if (dateVal > todayISO() || dateVal < "1900-01-01") return showMsg(msg, t("errBirthDateInvalid"), false);
+      const cand = (row.candidates || []).concat(row.target ? [row.target] : []).find((c) => String(c.membershipNumber) === mn && String(c.dependentId == null ? "" : c.dependentId) === dep);
+      if (cand && cand.currentBirthDate && cand.currentBirthDate !== dateVal) {
+        if (!confirm(t("birthOverwriteConfirm").replace("{date}", cand.currentBirthDate))) return;
+      }
+      try {
+        const r = await api(`/api/admin/members/${encodeURIComponent(mn)}/birth-date`, {
+          method: "PUT",
+          body: JSON.stringify({ birthDate: dateVal, dependentId: dep === "" ? undefined : Number(dep) }),
+        });
+        row.resolved = true;
+        row.savedDate = r.birthDate;
+        row.savedTo = cand ? birthPersonLabel(cand) : `#${mn}`;
+        row.savedMn = mn;
+        row.savedDep = dep;
+        renderBirthResult();
+        loadAdminMembers();
+        loadAdminDirectory();
+      } catch (e) {
+        showMsg(msg, e.message, false);
+      }
+    });
+  });
+}
+
+document.getElementById("birth-match-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("birth-msg");
+  const fileInput = document.getElementById("birth-file");
+  const file = fileInput.files[0];
+  if (!file) return showMsg(msg, t("pleaseChooseFile"), false);
+  const fd = new FormData();
+  fd.append("file", file);
+  showMsg(msg, t("birthBusy"), true);
+  try {
+    BIRTH_REPORT = await api("/api/admin/members/birthdates/import", { method: "POST", body: fd });
+    msg.textContent = "";
+    msg.className = "msg";
+    renderBirthResult();
+    loadAdminMembers();
+    loadAdminDirectory();
+  } catch (e) {
+    BIRTH_REPORT = null;
+    renderBirthResult();
+    showMsg(msg, e.message, false);
+  }
+});
+
+document.getElementById("birth-csv-btn").addEventListener("click", () => {
+  if (!BIRTH_REPORT) return;
+  const q = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  const head = ["Row", "Name in file", "Date in file", "Result", "Matched to", "Membership no.", "Date saved"];
+  const lines = [head.map(q).join(",")];
+  for (const r of BIRTH_REPORT.rows) {
+    let result = r.status;
+    let to = r.target ? r.target.name : "";
+    let mn = r.target ? r.target.membershipNumber : "";
+    let saved = r.status === "applied" || r.status === "already" || r.status === "linked" ? r.birthDate : "";
+    if (r.resolved) {
+      result = "linked-by-admin";
+      to = r.savedTo || "";
+      mn = r.savedMn || "";
+      saved = r.savedDate || "";
+    }
+    lines.push([r.rowNum, r.name, r.birthDate, result, to, mn, saved].map(q).join(","));
+  }
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "birthdates-match-report.csv";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 500);
 });
