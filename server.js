@@ -19,6 +19,7 @@ const helmet = require("helmet");
 const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
 const { renderEventSheet, renderAgeReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
+const AgeUtils = require("./age_utils");
 const {
   Document,
   Packer,
@@ -210,7 +211,7 @@ app.use((req, res, next) => {
 // Server-side source files must never be downloadable, even if one is
 // uploaded into public/ by mistake (it happened once with server.js).
 app.use((req, res, next) => {
-  if (/^\/(server|swiss|swiss_print|report_print)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+  if (/^\/(server|swiss|swiss_print|report_print|age_utils)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
     return res.status(404).end();
   }
   next();
@@ -579,6 +580,23 @@ The committee may update these Terms & Conditions from time to time as the platf
 6. Acknowledgment of agreement
 By creating an account on the platform, or by clicking "I Agree" when an updated version is shown, the member acknowledges that they have read, understood, and fully agree to these Terms & Conditions.`;
 
+// Date of birth: stored as YYYY-MM-DD on a member or a family member
+// (dependent). When one is on file the age group is DERIVED from it - so it
+// rolls over by itself when someone has a birthday - and the stored ageGroup
+// is simply refreshed on every read. People without a date of birth keep the
+// age group they (or an admin) chose.
+function syncBirthAndAgeGroup(person) {
+  const birth = AgeUtils.parseBirthDate(person.birthDate);
+  person.birthDate = birth;
+  if (birth) person.ageGroup = AgeUtils.ageInfo(person).ageGroup;
+}
+
+// { birthDate, birthYear, age } for API output (age as of today, Cairo).
+function ageFields(person) {
+  const i = AgeUtils.ageInfo(person);
+  return { birthDate: i.birthDate, birthYear: i.birthYear, age: i.age };
+}
+
 function readDb() {
   const db = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
   db.staffAccounts = db.staffAccounts || {};
@@ -631,7 +649,9 @@ function readDb() {
       // Age group is mandatory for new family members; ones added earlier
       // simply have none yet ("") and get a non-blocking reminder.
       if (typeof dep.ageGroup !== "string") dep.ageGroup = "";
+      syncBirthAndAgeGroup(dep);
     }
+    syncBirthAndAgeGroup(db.members[key]);
     // Terms & Conditions acceptance: a member who signed up before this
     // feature existed has never accepted anything, so they default to
     // version 0 - always behind the real db.termsAndConditions.version
@@ -1338,6 +1358,7 @@ app.post("/api/auth/signup", async (req, res) => {
   // phone-number guesses against the check below with no rate limit at all.
   if (loginRateLimitCheck(req, res)) return;
   const { membershipNumber, name, password, familyGroup, phone, ageGroup, email, agreeTerms, memberType, relationshipToMain } = req.body;
+  const birthDateIn = String(req.body.birthDate == null ? "" : req.body.birthDate).trim();
   if (!membershipNumber || !name || !password) {
     return res.status(400).json({ error: "membershipNumber, name, and password are required" });
   }
@@ -1371,8 +1392,12 @@ app.post("/api/auth/signup", async (req, res) => {
   // age-group breakdown on the printable event/tournament reports). Existing
   // accounts created before this rule are NOT blocked - they just get a
   // reminder in the app until they (or an admin) fill it in.
-  if (!sanitizeAgeGroup(ageGroup)) {
-    return res.status(400).json({ error: "Please select your age group" });
+  // Now driven by the date of birth (the age group and age are calculated
+  // from it automatically). A bad date is rejected right away; whether one is
+  // REQUIRED is decided after the claim check below, because an admin may
+  // already have loaded a verified date of birth onto a pre-imported profile.
+  if (birthDateIn && !AgeUtils.parseBirthDate(birthDateIn)) {
+    return res.status(400).json({ error: "Please enter a valid date of birth" });
   }
   // Optional - only a light shape check (not full RFC validation) so a
   // genuine typo like "ahmed@gmail" is caught without rejecting anything
@@ -1443,6 +1468,12 @@ app.post("/api/auth/signup", async (req, res) => {
   // clubId in the meantime.
   const db = readDb();
   const { accountId, claiming, joiningExistingFamily } = resolveSignupAccount(db, clubId);
+  // A date of birth the committee already loaded for this profile wins over
+  // what is typed here (it was verified against the club's own records).
+  const finalBirthDate = (claiming && AgeUtils.parseBirthDate(claiming.birthDate)) || AgeUtils.parseBirthDate(birthDateIn);
+  if (!finalBirthDate) {
+    return res.status(400).json({ error: "Please enter your date of birth" });
+  }
   db.members[accountId] = {
     membershipNumber: accountId,
     clubId,
@@ -1451,7 +1482,8 @@ app.post("/api/auth/signup", async (req, res) => {
     relationshipToMain: memberType === "follower" ? trimmedRelationship : "",
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
     phone: trimmedPhone,
-    ageGroup: sanitizeAgeGroup(ageGroup),
+    birthDate: finalBirthDate,
+    ageGroup: AgeUtils.ageInfo({ birthDate: finalBirthDate }).ageGroup,
     email: trimmedEmail || (claiming ? claiming.email : "") || "",
     passwordHash,
     dependents: (claiming && claiming.dependents) || [],
@@ -3211,7 +3243,16 @@ app.patch("/api/me/profile", requireMember, (req, res) => {
   if (name) member.name = name;
   if (familyGroup !== undefined) member.familyGroup = familyGroup;
   if (phone !== undefined) member.phone = phone;
-  if (ageGroup !== undefined) {
+  if (req.body.birthDate !== undefined) {
+    // Date of birth can be corrected but never cleared or set to nonsense;
+    // the age group is recalculated from it.
+    const bd = AgeUtils.parseBirthDate(req.body.birthDate);
+    if (!bd) return res.status(400).json({ error: "Please enter a valid date of birth" });
+    member.birthDate = bd;
+    member.ageGroup = AgeUtils.ageInfo(member).ageGroup;
+  } else if (ageGroup !== undefined && member.birthDate) {
+    // With a date of birth on file the group is calculated - ignore a manual pick.
+  } else if (ageGroup !== undefined) {
     // Age group is mandatory - it can be changed to another valid value but
     // never cleared or set to something unknown.
     const ag = sanitizeAgeGroup(ageGroup);
@@ -3249,11 +3290,12 @@ app.post("/api/me/dependents", requireMember, (req, res) => {
   const email = (req.body.email || "").trim();
   // Mandatory: every family member needs an age group (used for the
   // age-group breakdown on printed reports and age-based tournaments).
-  const depAgeGroup = sanitizeAgeGroup(req.body.ageGroup);
-  if (!depAgeGroup) return res.status(400).json({ error: "Please select an age group for this family member" });
+  const depBirth = AgeUtils.parseBirthDate(req.body.birthDate);
+  if (!depBirth) return res.status(400).json({ error: "Please enter a valid date of birth for this family member" });
+  const depAgeGroup = AgeUtils.ageInfo({ birthDate: depBirth }).ageGroup;
   const member = db.members[req.member.membershipNumber];
   member.dependents = member.dependents || [];
-  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email, ageGroup: depAgeGroup };
+  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email, birthDate: depBirth, ageGroup: depAgeGroup };
   member.dependents.push(dependent);
   writeDb(db);
   res.status(201).json({ dependents: member.dependents });
@@ -3273,7 +3315,12 @@ app.put("/api/me/dependents/:id", requireMember, (req, res) => {
   if (typeof req.body.relationship === "string") dependent.relationship = req.body.relationship.trim();
   if (typeof req.body.phone === "string") dependent.phone = req.body.phone.trim();
   if (typeof req.body.email === "string") dependent.email = req.body.email.trim();
-  if (req.body.ageGroup !== undefined) {
+  if (req.body.birthDate !== undefined) {
+    const bd = AgeUtils.parseBirthDate(req.body.birthDate);
+    if (!bd) return res.status(400).json({ error: "Please enter a valid date of birth for this family member" });
+    dependent.birthDate = bd;
+    dependent.ageGroup = AgeUtils.ageInfo(dependent).ageGroup;
+  } else if (req.body.ageGroup !== undefined && !dependent.birthDate) {
     const ag = sanitizeAgeGroup(req.body.ageGroup);
     if (!ag) return res.status(400).json({ error: "Please select a valid age group for this family member" });
     dependent.ageGroup = ag;
@@ -4313,6 +4360,7 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
       phone: m.phone || "",
       familyGroup: m.familyGroup || "",
       ageGroup: m.ageGroup || "",
+      ...ageFields(m),
       hasLoggedInAccount: !!m.passwordHash,
       hasClaimCode: !!m.claimCodeHash,
       dependentsCount: (m.dependents || []).length,
@@ -4578,7 +4626,9 @@ app.post("/api/admin/members", requireStaffRole("admin"), async (req, res) => {
   const name = String(req.body.name || "").trim();
   const phone = String(req.body.phone || "").trim();
   const familyGroup = String(req.body.familyGroup || "").trim();
-  const ageGroup = sanitizeAgeGroup(req.body.ageGroup);
+  const birthDate = AgeUtils.parseBirthDate(req.body.birthDate);
+  if (req.body.birthDate && !birthDate) return res.status(400).json({ error: "Please enter a valid date of birth" });
+  const ageGroup = birthDate ? AgeUtils.ageInfo({ birthDate }).ageGroup : sanitizeAgeGroup(req.body.ageGroup);
   // Optional claim code - a secret the committee hands this member through
   // some channel OTHER than their printed club card (text message, a slip
   // of paper, in person), separate from the membershipNumber itself (which
@@ -4607,6 +4657,7 @@ app.post("/api/admin/members", requireStaffRole("admin"), async (req, res) => {
     familyGroup,
     phone,
     ageGroup,
+    birthDate,
     passwordHash: null,
     claimCodeHash,
     dependents: [],
@@ -4641,6 +4692,41 @@ app.post("/api/admin/members", requireStaffRole("admin"), async (req, res) => {
 // for events themselves) but should still share the family's points - link
 // them here once, or call this again with a third/fourth account to grow
 // the same group.
+// Sets (or clears, with "") the date of birth of a member or one of their
+// family members. The age group follows automatically. Body: { birthDate,
+// dependentId? }. Used by the Members editor and by the birthdates file tool.
+function setBirthDate(db, staff, membershipNumber, dependentId, rawBirth) {
+  const member = db.members[String(membershipNumber)];
+  if (!member) return { status: 404, error: "Member not found" };
+  const clearing = rawBirth === "" || rawBirth === null;
+  const bd = clearing ? "" : AgeUtils.parseBirthDate(rawBirth);
+  if (!clearing && !bd) return { status: 400, error: "Please enter a valid date of birth (not in the future, year 1900 or later)" };
+  let target = member;
+  if (dependentId !== undefined && dependentId !== null && dependentId !== "") {
+    target = (member.dependents || []).find((d) => d.id === Number(dependentId));
+    if (!target) return { status: 404, error: "Family member not found" };
+  }
+  const before = target.birthDate || "";
+  target.birthDate = bd;
+  if (bd) target.ageGroup = AgeUtils.ageInfo(target).ageGroup;
+  logActivity(db, {
+    actorType: "staff",
+    actorId: staff.id || staff.username,
+    actorName: staff.name,
+    action: "member.birth_date_set",
+    details: `${target.name} (${member.membershipNumber}) ${before || "-"} -> ${bd || "-"}`,
+  });
+  return { status: 200, birthDate: bd, ...ageFields(target), ageGroup: target.ageGroup || "" };
+}
+app.put("/api/admin/members/:membershipNumber/birth-date", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const r = setBirthDate(db, req.staff, req.params.membershipNumber, req.body.dependentId, req.body.birthDate === undefined ? undefined : req.body.birthDate);
+  if (r.status !== 200) return res.status(r.status).json({ error: r.error });
+  writeDb(db);
+  const { status, ...out } = r;
+  res.json({ ok: true, ...out });
+});
+
 // Lets an admin set/fix the age group of a member or one of their family
 // members (dependents) - used to fill in accounts created before age group
 // became mandatory. Body: { ageGroup, dependentId? }. Cannot be cleared.
@@ -4654,9 +4740,11 @@ app.put("/api/admin/members/:membershipNumber/age-group", requireStaffRole("admi
   if (req.body.dependentId !== undefined && req.body.dependentId !== null && req.body.dependentId !== "") {
     const dep = (member.dependents || []).find((d) => d.id === Number(req.body.dependentId));
     if (!dep) return res.status(404).json({ error: "Family member not found" });
+    if (dep.birthDate) return res.status(409).json({ error: "This person has a date of birth on file - the age group is calculated from it" });
     dep.ageGroup = ag;
     targetName = dep.name;
   } else {
+    if (member.birthDate) return res.status(409).json({ error: "This person has a date of birth on file - the age group is calculated from it" });
     member.ageGroup = ag;
   }
   logActivity(db, {
@@ -4775,16 +4863,196 @@ app.get("/api/admin/members/export", requireStaffRole("admin"), (req, res) => {
     Name: m.name,
     Phone: m.phone || "",
     "Family Group": m.familyGroup || "",
-    "Age Group": AGE_GROUP_EXPORT_LABELS[m.ageGroup] || "",
+    "Age Group": AGE_GROUP_EXPORT_LABELS[AgeUtils.ageInfo(m).ageGroup] || "",
+    "Birth Date": AgeUtils.ageInfo(m).birthDate,
+    "Birth Year": AgeUtils.ageInfo(m).birthYear || "",
+    Age: AgeUtils.ageInfo(m).age == null ? "" : AgeUtils.ageInfo(m).age,
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "Members");
+  // Family members on a second sheet (the importer only reads the first one).
+  const famRows = [];
+  for (const m of Object.values(db.members)) {
+    for (const d of m.dependents || []) {
+      const i = AgeUtils.ageInfo(d);
+      famRows.push({
+        "Membership Number": m.membershipNumber,
+        "Member Name": m.name,
+        "Family Member": d.name,
+        Relationship: d.relationship || "",
+        "Age Group": AGE_GROUP_EXPORT_LABELS[i.ageGroup] || "",
+        "Birth Date": i.birthDate,
+        "Birth Year": i.birthYear || "",
+        Age: i.age == null ? "" : i.age,
+      });
+    }
+  }
+  if (famRows.length) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(famRows), "Family members");
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", 'attachment; filename="ahlawy-members.xlsx"');
   res.send(buffer);
 });
+
+// A spreadsheet cell (Excel serial number, JS Date or text) -> { iso, problem }.
+function sheetCellToISO(v) {
+  if (typeof v === "number" && v > 59 && v < 3000000) {
+    const o = XLSX.SSF.parse_date_code(v);
+    if (o) return AgeUtils.parseSheetDate({ y: o.y, m: o.m, d: o.d });
+  }
+  if (typeof v === "string" && /^\d{5,7}(\.\d+)?$/.test(v.trim())) {
+    const o = XLSX.SSF.parse_date_code(Number(v));
+    if (o) return AgeUtils.parseSheetDate({ y: o.y, m: o.m, d: o.d });
+  }
+  return AgeUtils.parseSheetDate(v);
+}
+
+// Reads a "name + date of birth" sheet. Works with or without a header row
+// (the club's list has none): the name is the first text cell that is not a
+// date, the date is the first cell that is a date. An optional membership
+// number column (header "Membership Number") pins a row to one account.
+function parseBirthSheet(workbook) {
+  const sheetName = workbook.SheetNames[0];
+  const grid = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: true, defval: "" });
+  const isDateCell = (c) => c !== "" && (typeof c === "number" ? c > 59 : c instanceof Date || (typeof c === "string" && AgeUtils.parseSheetDate(c).problem !== "format"));
+  const HEADER_RE = /name|الاسم|اسم|birth|dob|date|ميلاد|تاريخ|membership|عضوية/i;
+  let start = 0;
+  let cols = null;
+  if (grid.length) {
+    const first = grid[0].map((c) => (typeof c === "string" ? c.trim() : c));
+    const looksHeader = first.some((c) => typeof c === "string" && HEADER_RE.test(c)) && !first.some((c) => typeof c === "number" || c instanceof Date);
+    if (looksHeader) {
+      start = 1;
+      cols = { name: -1, date: -1, mn: -1 };
+      first.forEach((c, i) => {
+        const k = String(c).toLowerCase().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
+        if (cols.mn < 0 && /membership|عضوية|member no|^id$/.test(k)) cols.mn = i;
+        else if (cols.date < 0 && /birth|dob|date|ميلاد|تاريخ/.test(k)) cols.date = i;
+        else if (cols.name < 0 && /name|الاسم|اسم/.test(k)) cols.name = i;
+      });
+    }
+  }
+  const rows = [];
+  for (let i = start; i < grid.length; i++) {
+    const cells = grid[i];
+    if (!cells.some((c) => String(c).trim() !== "")) continue;
+    let name = "";
+    let dateCell = "";
+    let mn = "";
+    if (cols && cols.name >= 0) {
+      name = String(cells[cols.name] == null ? "" : cells[cols.name]).trim();
+      dateCell = cols.date >= 0 ? cells[cols.date] : "";
+      mn = cols.mn >= 0 ? String(cells[cols.mn] == null ? "" : cells[cols.mn]).trim() : "";
+    } else {
+      for (const c of cells) {
+        if (!name && typeof c === "string" && c.trim() && !isDateCell(c)) name = c.trim();
+        else if (dateCell === "" && isDateCell(c)) dateCell = c;
+      }
+    }
+    const d = dateCell === "" ? { iso: "", problem: "empty" } : sheetCellToISO(dateCell);
+    rows.push({ rowNum: i + 1, name, iso: d.iso, problem: name ? d.problem : "noname", membershipNumber: mn });
+  }
+  return rows;
+}
+
+// Everyone a name from the file could belong to: all members + their family
+// members, archived ones included (flagged).
+function peopleForMatching(db) {
+  const people = [];
+  for (const m of Object.values(db.members)) {
+    people.push({ membershipNumber: m.membershipNumber, dependentId: null, name: m.name, kind: "member", parentName: "", archived: !!m.archivedAt, birthDate: m.birthDate || "" });
+    for (const d of m.dependents || []) {
+      people.push({ membershipNumber: m.membershipNumber, dependentId: d.id, name: d.name, kind: "dependent", parentName: m.name, archived: !!m.archivedAt, birthDate: d.birthDate || "" });
+    }
+  }
+  return people;
+}
+const personView = (p) => ({
+  membershipNumber: p.membershipNumber,
+  dependentId: p.dependentId,
+  name: p.name,
+  kind: p.kind,
+  parentName: p.parentName,
+  archived: p.archived,
+  currentBirthDate: p.birthDate,
+});
+
+// Upload a "name + date of birth" sheet. Every row is matched against the
+// platform's members and family members by NAME. Rows with one exact match
+// (same name after normalising spelling/case/spaces) and no date on file yet
+// are saved straight away; everything else comes back for the admin to
+// resolve, so nothing is ever guessed. Re-uploading the same file is safe.
+app.post(
+  "/api/admin/members/birthdates/import",
+  requireStaffRole("admin"),
+  uploadMembersFile.single("file"),
+  (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    let workbook;
+    try {
+      workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    } catch (e) {
+      return res.status(400).json({ error: "Couldn't read that file - please upload a valid .xlsx file" });
+    }
+    if (!workbook.SheetNames[0]) return res.status(400).json({ error: "That file has no sheets" });
+    const rows = parseBirthSheet(workbook);
+    if (!rows.length) return res.status(400).json({ error: "No rows found - the sheet needs a name and a date of birth on each row" });
+    if (rows.length > 5000) return res.status(400).json({ error: "Too many rows (max 5000)" });
+    const db = readDb();
+    const people = peopleForMatching(db);
+    const results = AgeUtils.analyzeBirthRows(rows, people);
+    let applied = 0;
+    const appliedNames = [];
+    for (const r of results) {
+      if (r.status !== "exact") continue;
+      const t = r.target;
+      const member = db.members[t.membershipNumber];
+      const holder = t.dependentId == null ? member : (member.dependents || []).find((d) => d.id === t.dependentId);
+      if (!holder || holder.birthDate) { r.status = "conflict"; continue; }
+      holder.birthDate = r.iso;
+      holder.ageGroup = AgeUtils.ageInfo(holder).ageGroup;
+      applied++;
+      appliedNames.push(holder.name);
+    }
+    if (applied) {
+      logActivity(db, {
+        actorType: "staff",
+        actorId: req.staff.username,
+        actorName: req.staff.name,
+        action: "birthdates_imported",
+        details: `${applied} date(s) of birth saved from a file of ${rows.length} row(s): ${appliedNames.slice(0, 15).join(", ")}${appliedNames.length > 15 ? ", ..." : ""}`,
+      });
+      writeDb(db);
+    }
+    const summary = { total: results.length, applied, already: 0, linked: 0, conflict: 0, ambiguous: 0, near: 0, none: 0, invalid: 0, dupFile: 0, dupDiff: 0 };
+    const out = results.map((r) => {
+      if (r.status === "exact") r.status = "applied";
+      if (r.status === "applied") { /* counted above */ }
+      else if (r.status === "already") summary.already++;
+      else if (r.status === "linked") summary.linked++;
+      else if (r.status === "conflict") summary.conflict++;
+      else if (r.status === "ambiguous") summary.ambiguous++;
+      else if (r.status === "near") summary.near++;
+      else if (r.status === "none") summary.none++;
+      else if (r.status === "invalid") summary.invalid++;
+      else if (r.status === "dup-file") summary.dupFile++;
+      else if (r.status === "dup-diff") summary.dupDiff++;
+      return {
+        rowNum: r.rowNum,
+        name: r.name,
+        birthDate: r.iso,
+        problem: r.problem,
+        status: r.status,
+        target: r.target ? personView(r.target) : null,
+        candidates: r.candidates.map((c) => ({ ...personView(c.p), score: Math.round(c.score * 100) })),
+      };
+    });
+    // Rows that are fully settled count towards the 100% target.
+    summary.matched = summary.applied + summary.already + summary.linked + summary.dupFile;
+    res.json({ summary, rows: out });
+  }
+);
 
 // Bulk-imports members from an .xlsx file. Expected columns (case-insensitive,
 // any order): "Membership Number", "Name", "Phone" (optional), "Family Group"
@@ -4854,6 +5122,14 @@ app.post(
       const phone = pick(row, ["phone", "phone number"]);
       const familyGroup = pick(row, ["family group", "familygroup"]);
       const ageGroup = parseAgeGroupCell(pick(row, ["age group", "agegroup", "age"]));
+      const birthCell = (() => {
+        for (const key of Object.keys(row)) {
+          const k = key.trim().toLowerCase().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
+          if (["birth date", "birthdate", "date of birth", "dob", "تاريخ الميلاد"].includes(k)) return row[key];
+        }
+        return "";
+      })();
+      const birthDate = birthCell === "" ? "" : sheetCellToISO(birthCell).iso && !sheetCellToISO(birthCell).problem ? sheetCellToISO(birthCell).iso : "";
       // Optional claim code column - see the comment on POST /api/admin/members
       // for why this exists. Never exported back out (it's a secret, hashed
       // on the way in, same as a password) - only a sheet the committee
@@ -4869,7 +5145,7 @@ app.post(
         errors.push({ row: rowNum, reason: `Claim code must be at least ${MIN_PIN_LENGTH} characters - member was still saved/updated without it` });
       }
       if (!groups.has(membershipNumber)) groups.set(membershipNumber, []);
-      groups.get(membershipNumber).push({ name, phone, familyGroup, ageGroup, claimCode: claimCode.length >= MIN_PIN_LENGTH ? claimCode : "", rowNum });
+      groups.get(membershipNumber).push({ name, phone, familyGroup, ageGroup, birthDate, claimCode: claimCode.length >= MIN_PIN_LENGTH ? claimCode : "", rowNum });
     });
 
     // Hashing is async, so every claim code in the sheet is hashed up front,
@@ -4898,7 +5174,8 @@ app.post(
         existing.name = primaryRow.name;
         if (primaryRow.phone) existing.phone = primaryRow.phone;
         if (primaryRow.familyGroup) existing.familyGroup = primaryRow.familyGroup;
-        if (primaryRow.ageGroup) existing.ageGroup = primaryRow.ageGroup;
+        if (primaryRow.ageGroup && !existing.birthDate) existing.ageGroup = primaryRow.ageGroup;
+        if (primaryRow.birthDate) { existing.birthDate = primaryRow.birthDate; existing.ageGroup = AgeUtils.ageInfo(existing).ageGroup; }
         if (newClaimCodeHash) existing.claimCodeHash = newClaimCodeHash;
         member = existing;
         updated.push({ membershipNumber, name: primaryRow.name });
@@ -4908,7 +5185,8 @@ app.post(
           name: primaryRow.name,
           familyGroup: primaryRow.familyGroup || "",
           phone: primaryRow.phone || "",
-          ageGroup: primaryRow.ageGroup || "",
+          ageGroup: primaryRow.birthDate ? AgeUtils.ageInfo({ birthDate: primaryRow.birthDate }).ageGroup : primaryRow.ageGroup || "",
+          birthDate: primaryRow.birthDate || "",
           passwordHash: null,
           claimCodeHash: newClaimCodeHash,
           dependents: [],
@@ -4935,7 +5213,7 @@ app.post(
           dependentsSkipped.push({ membershipNumber, name: row.name, reason: "Already a dependent on this account" });
           return;
         }
-        const dependent = { id: db.nextIds.dependent++, name: row.name, relationship: "", ageGroup: row.ageGroup || "" };
+        const dependent = { id: db.nextIds.dependent++, name: row.name, relationship: "", ageGroup: row.birthDate ? AgeUtils.ageInfo({ birthDate: row.birthDate }).ageGroup : row.ageGroup || "", birthDate: row.birthDate || "" };
         member.dependents.push(dependent);
         dependentsAdded.push({ membershipNumber, name: row.name, primaryName: member.name });
       });
@@ -5075,6 +5353,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         email: m.email || "",
         familyGroup: m.familyGroup || "",
         ageGroup: m.ageGroup || "",
+        ...ageFields(m),
         memberType: m.memberType || "main",
         relationshipToMain: m.relationshipToMain || "",
         hasLoggedInAccount: !!m.passwordHash,
@@ -5094,6 +5373,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
           phone: d.phone || "",
           email: d.email || "",
           ageGroup: d.ageGroup || "",
+          ...ageFields(d),
         })),
         registrations,
         registeredCount: registrations.filter((r) => !r.waitlisted).length,
@@ -6744,17 +7024,19 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), require
     .filter((r) => r.eventId === eventId)
     .map((r) => {
       const m = db.members[r.membershipNumber];
+      // A dependent's registration uses that family member's own details
+      // (each dependent has them); otherwise the account holder's. With a
+      // date of birth on file, age and age group are worked out as of the
+      // event's start date.
+      const person = m ? (r.dependentName ? (m.dependents || []).find((d) => d.id === r.dependentId) || null : m) : null;
+      const ai = AgeUtils.ageInfo(person || {}, String(event.date || ""));
       return {
         name: r.dependentName || (m ? m.name : "Member"),
         membershipNumber: r.membershipNumber,
         phone: isAdminViewer && m ? m.phone || "" : "",
-        // A dependent's registration uses that family member's own age group
-        // (each dependent has one); otherwise the account holder's.
-        ageGroup: m
-          ? r.dependentName
-            ? ((m.dependents || []).find((d) => d.id === r.dependentId) || {}).ageGroup || ""
-            : m.ageGroup || ""
-          : "",
+        ageGroup: ai.ageGroup,
+        birthYear: ai.birthYear,
+        age: ai.age,
         registeredAt: r.registeredAt,
         waitlisted: !!r.waitlisted,
         checkedIn: !!r.checkedIn,
@@ -6795,16 +7077,24 @@ app.get("/admin/print/age-report", requireStaffRole(["tournament"]), (req, res) 
     .slice()
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
   const ids = new Set(events.map((e) => e.id));
+  const eventDateById = new Map(events.map((ev) => [ev.id, String(ev.date || "")]));
   const rows = db.registrations
     .filter((r) => ids.has(r.eventId) && !r.waitlisted)
     .map((r) => {
       const m = db.members[r.membershipNumber];
       let ageKey = "none";
+      let ai = { birthYear: null, age: null };
       if (m) {
-        const raw = r.dependentName ? ((m.dependents || []).find((d) => d.id === r.dependentId) || {}).ageGroup : m.ageGroup;
+        const person = r.dependentName ? (m.dependents || []).find((d) => d.id === r.dependentId) || {} : m;
+        // Age and age group as of the event's start date.
+        ai = AgeUtils.ageInfo(person, eventDateById.get(r.eventId));
+        const raw = ai.ageGroup;
         if (REPORT_AGE_KEYS.includes(raw) && raw !== "none") ageKey = raw;
       }
       return {
+        eventDate: eventDateById.get(r.eventId) || "",
+        birthYear: ai.birthYear,
+        age: ai.age,
         eventId: r.eventId,
         personKey: `${r.membershipNumber}#${r.dependentName ? r.dependentId || r.dependentName : 0}`,
         name: r.dependentName || (m ? m.name : "Member"),

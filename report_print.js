@@ -55,6 +55,7 @@ const CSS = `
   .strip .v { font-size: 13pt; font-weight: 800; color: var(--red); }
   .agebar { display: flex; flex-wrap: wrap; gap: 1mm 5mm; align-items: baseline; padding: 2mm 3mm; font-size: 9pt; background: #faf6e6; border-bottom: 0.4mm solid var(--border); }
   .agebar b { color: var(--red); }
+  .agebar .muted { color: var(--muted); }
   table.grid { width: 100%; border-collapse: collapse; margin-top: 4mm; font-size: 10.5pt; }
   table.grid th { background: #111; color: var(--gold); font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.04em; padding: 2mm; text-align: start; }
   table.grid thead { display: table-header-group; }
@@ -117,7 +118,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt, showPhone = tr
   const ageUnset = confirmed.filter((r) => !AGE_LABELS[r.ageGroup]).length;
   const ageBar = `<div class="agebar"><b>${esc(L("الفئات العمرية", "Age groups"))}:</b> ${ageCounts
     .map((a) => `<span>${esc(ageLabel(a.code, ar))} <b>${a.n}</b></span>`)
-    .join("")}<span>${esc(L("غير محدد", "Not set"))} <b>${ageUnset}</b></span></div>`;
+    .join("")}<span>${esc(L("غير محدد", "Not set"))} <b>${ageUnset}</b></span><span class="muted">${esc(L("العمر والفئة محسوبان بتاريخ بدء الفعالية", "Age and age group are calculated as of the event start date"))}</span></div>`;
 
   let table;
   if (view === "attendance") {
@@ -125,11 +126,11 @@ function renderEventSheet({ event, rows, view, lang, generatedAt, showPhone = tr
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          ${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("الحضور", "Present"))}</th><th>${esc(L("التوقيع", "Signature"))}</th></tr></thead><tbody>
+          ${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("سنة الميلاد", "Birth year"))}</th><th class="c">${esc(L("العمر", "Age"))}</th><th class="c">${esc(L("الحضور", "Present"))}</th><th>${esc(L("التوقيع", "Signature"))}</th></tr></thead><tbody>
           ${list
             .map(
               (r, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              ${showPhone ? `<td class="num">${esc(r.phone || "")}</td>` : ""}<td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="c">${r.checkedIn ? "✓" : ""}</td><td class="sig"></td></tr>`
+              ${showPhone ? `<td class="num">${esc(r.phone || "")}</td>` : ""}<td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${r.birthYear ? esc(r.birthYear) : "—"}</td><td class="num">${r.age != null ? esc(r.age) : "—"}</td><td class="c">${r.checkedIn ? "✓" : ""}</td><td class="sig"></td></tr>`
             )
             .join("")}</tbody></table>`
       : `<p class="empty">${esc(L("لا يوجد مسجّلون بعد.", "No registrations yet."))}</p>`;
@@ -139,21 +140,21 @@ function renderEventSheet({ event, rows, view, lang, generatedAt, showPhone = tr
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          <th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("تسجيل مبكر", "Early"))}</th><th class="c">${esc(L("المركز", "Position"))}</th><th class="c">${esc(L("النقاط", "Points"))}</th></tr></thead><tbody>
+          <th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("سنة الميلاد", "Birth year"))}</th><th class="c">${esc(L("العمر", "Age"))}</th><th class="c">${esc(L("تسجيل مبكر", "Early"))}</th><th class="c">${esc(L("المركز", "Position"))}</th><th class="c">${esc(L("النقاط", "Points"))}</th></tr></thead><tbody>
           ${list
             .map(
               (r, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              <td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="c">${r.earlyRegistration ? "✓" : ""}</td><td class="c">${r.position ? esc(r.position) : ""}</td><td class="num"><b>${esc(r.points)}</b></td></tr>`
+              <td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${r.birthYear ? esc(r.birthYear) : "—"}</td><td class="num">${r.age != null ? esc(r.age) : "—"}</td><td class="c">${r.earlyRegistration ? "✓" : ""}</td><td class="c">${r.position ? esc(r.position) : ""}</td><td class="num"><b>${esc(r.points)}</b></td></tr>`
             )
             .join("")}
-          <tr class="total"><td colspan="6">${esc(L("إجمالي النقاط الممنوحة", "Total points awarded"))}</td><td class="num">${esc(total)}</td></tr></tbody></table>`
+          <tr class="total"><td colspan="8">${esc(L("إجمالي النقاط الممنوحة", "Total points awarded"))}</td><td class="num">${esc(total)}</td></tr></tbody></table>`
       : `<p class="empty">${esc(L("لم يتم تسجيل حضور أحد بعد، فلا توجد نقاط.", "Nobody has been checked in yet, so there are no points to show."))}</p>`;
   } else {
     const list = confirmed.slice().sort(byName).concat(waitlisted.slice().sort(byName));
     table = list.length
       ? `<table class="grid"><thead><tr>
           <th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>
-          ${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("تاريخ التسجيل", "Registered"))}</th><th class="c">${esc(L("الحالة", "Status"))}</th></tr></thead><tbody>
+          ${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("الفئة العمرية", "Age group"))}</th><th class="c">${esc(L("سنة الميلاد", "Birth year"))}</th><th class="c">${esc(L("العمر", "Age"))}</th><th class="c">${esc(L("تاريخ التسجيل", "Registered"))}</th><th class="c">${esc(L("الحالة", "Status"))}</th></tr></thead><tbody>
           ${list
             .map((r, i) => {
               const status = r.waitlisted
@@ -162,7 +163,7 @@ function renderEventSheet({ event, rows, view, lang, generatedAt, showPhone = tr
                 ? `<span class="tag ok">${esc(L("حضر", "Checked in"))}</span>`
                 : `<span class="tag">${esc(L("مؤكد", "Confirmed"))}</span>`;
               return `<tr class="${r.waitlisted ? "wait" : ""}"><td class="c">${i + 1}</td><td class="name"><bdi>${esc(r.name)}</bdi></td><td class="num">${esc(r.membershipNumber)}</td>
-              ${showPhone ? `<td class="num">${esc(r.phone || "")}</td>` : ""}<td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${esc(shortDate(r.registeredAt))}</td><td class="c">${status}</td></tr>`;
+              ${showPhone ? `<td class="num">${esc(r.phone || "")}</td>` : ""}<td class="c">${esc(ageLabel(r.ageGroup, ar) || "—")}</td><td class="num">${r.birthYear ? esc(r.birthYear) : "—"}</td><td class="num">${r.age != null ? esc(r.age) : "—"}</td><td class="num">${esc(shortDate(r.registeredAt))}</td><td class="c">${status}</td></tr>`;
             })
             .join("")}</tbody></table>`
       : `<p class="empty">${esc(L("لا يوجد مسجّلون بعد.", "No registrations yet."))}</p>`;
@@ -206,9 +207,11 @@ function aggregateAgeReport(events, rows, ageKeys) {
     const cell = matrix.get(r.eventId).get(r.ageKey);
     cell.reg++;
     const pm = persons.get(r.ageKey);
-    if (!pm.has(r.personKey)) pm.set(r.personKey, { name: r.name, membershipNumber: r.membershipNumber, phone: r.phone || "", reg: 0, att: 0 });
+    if (!pm.has(r.personKey)) pm.set(r.personKey, { name: r.name, membershipNumber: r.membershipNumber, phone: r.phone || "", reg: 0, att: 0, birthYear: null, age: null, lastDate: "" });
     const p = pm.get(r.personKey);
     p.reg++;
+    // Show the age as of the person's most recent event in the selection.
+    if (r.birthYear && String(r.eventDate || "") >= p.lastDate) { p.birthYear = r.birthYear; p.age = r.age; p.lastDate = String(r.eventDate || ""); }
     if (r.checkedIn) {
       a.att++; a.attPeople.add(r.personKey); total.att++; total.attPeople.add(r.personKey);
       cell.att++; p.att++;
@@ -244,7 +247,7 @@ function renderAgeReport({ events, rows, ages, detail, lang, from, to, allEvents
     <div><div class="k">${esc(L("حضور", "Check-ins"))}</div><div class="v">${T.att}</div></div>
     <div><div class="k">${esc(L("نسبة الحضور", "Attendance rate"))}</div><div class="v">${esc(pct(T.att, T.reg))}</div></div>
   </div>`;
-  const filterBar = `<div class="agebar"><b>${esc(L("الفئات المشمولة", "Age groups included"))}:</b> ${agg.keys.map((k) => `<span>${esc(label(k))}</span>`).join("")}<span>${esc(L("يُحتسب المؤكَّدون فقط (دون قائمة الانتظار)", "Confirmed registrations only (no waiting list)"))}</span></div>`;
+  const filterBar = `<div class="agebar"><b>${esc(L("الفئات المشمولة", "Age groups included"))}:</b> ${agg.keys.map((k) => `<span>${esc(label(k))}</span>`).join("")}<span>${esc(L("يُحتسب المؤكَّدون فقط (دون قائمة الانتظار)", "Confirmed registrations only (no waiting list)"))}</span><span>${esc(L("العمر والفئة بتاريخ بدء كل فعالية", "Age and group as of each event's start date"))}</span></div>`;
 
   // 1. summary by age group
   const sumRows = agg.keys
@@ -291,8 +294,8 @@ function renderAgeReport({ events, rows, ages, detail, lang, from, to, allEvents
         if (!list.length) return head + `<p class="empty">${esc(L("لا يوجد أشخاص في هذه الفئة.", "Nobody in this age group."))}</p>`;
         return (
           head +
-          `<table class="grid"><thead><tr><th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("سجّل في", "Registered for"))}</th><th class="c">${esc(L("حضر", "Attended"))}</th><th class="c">${esc(L("النسبة", "Rate"))}</th></tr></thead><tbody>${list
-            .map((p, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(p.name)}</bdi></td><td class="num">${esc(p.membershipNumber)}</td>${showPhone ? `<td class="num">${esc(p.phone)}</td>` : ""}<td class="num">${p.reg}</td><td class="num">${p.att}</td><td class="num">${esc(pct(p.att, p.reg))}</td></tr>`)
+          `<table class="grid"><thead><tr><th class="c">#</th><th>${esc(L("الاسم", "Name"))}</th><th class="c">${esc(L("رقم العضوية", "Membership no."))}</th>${showPhone ? `<th class="c">${esc(L("الهاتف", "Phone"))}</th>` : ""}<th class="c">${esc(L("سنة الميلاد", "Birth year"))}</th><th class="c">${esc(L("العمر", "Age"))}</th><th class="c">${esc(L("سجّل في", "Registered for"))}</th><th class="c">${esc(L("حضر", "Attended"))}</th><th class="c">${esc(L("النسبة", "Rate"))}</th></tr></thead><tbody>${list
+            .map((p, i) => `<tr><td class="c">${i + 1}</td><td class="name"><bdi>${esc(p.name)}</bdi></td><td class="num">${esc(p.membershipNumber)}</td>${showPhone ? `<td class="num">${esc(p.phone)}</td>` : ""}<td class="num">${p.birthYear ? esc(p.birthYear) : "—"}</td><td class="num">${p.age != null ? esc(p.age) : "—"}</td><td class="num">${p.reg}</td><td class="num">${p.att}</td><td class="num">${esc(pct(p.att, p.reg))}</td></tr>`)
             .join("")}</tbody></table>`
         );
       })
