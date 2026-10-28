@@ -11049,6 +11049,7 @@ function setQrHowtoLang(l) {
   const src = "videos/how-to-qr-entry-" + l + ".mp4";
   if (v && v.getAttribute("src") !== src) {
     try { v.pause(); } catch (_) {}
+    clearHowtoErr(fig);
     v.setAttribute("poster", "videos/how-to-qr-entry-" + l + "-poster.jpg");
     v.setAttribute("src", src);
     try { v.load(); } catch (_) {}
@@ -11060,6 +11061,27 @@ document.addEventListener("click", (ev) => {
   if (b) setQrHowtoLang(b.dataset.vlang);
 });
 setQrHowtoLang(typeof currentLang !== "undefined" && currentLang === "ar" ? "ar" : "en");
+
+// If a help video cannot be loaded (file missing on the server, blocked, or an
+// unsupported format) show a short note under it instead of a silent black box.
+// "error" does not bubble, so listen in the capture phase.
+document.addEventListener(
+  "error",
+  (ev) => {
+    const v = ev.target;
+    if (!v || v.tagName !== "VIDEO" || !v.closest || !v.closest(".howto-item")) return;
+    const fig = v.closest(".howto-item");
+    if (fig.querySelector(".howto-err")) return;
+    const p = document.createElement("p");
+    p.className = "howto-err";
+    p.setAttribute("data-i18n", "howToVideoError");
+    p.textContent = t("howToVideoError");
+    v.insertAdjacentElement("afterend", p);
+  },
+  true
+);
+// A new source (language switch) gets a fresh chance: drop the old note.
+function clearHowtoErr(fig) { const e = fig && fig.querySelector(".howto-err"); if (e) e.remove(); }
 
 // ----------------------------------------- admin: match a birthdates file --
 // Upload a "name + date of birth" sheet. The server saves every EXACT name

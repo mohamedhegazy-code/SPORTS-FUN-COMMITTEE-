@@ -1572,3 +1572,5 @@ tr.dir-archived td { opacity: 0.6; }
 .bd-list .rb-table td:last-child { padding-inline-end: 10px; }
 .hero-wa-qr.fitted { transform: none; object-fit: contain; }
 .hero-wa-qr-link { box-shadow: 0 0 0 3px #d4a82a, 0 6px 18px rgba(0, 0, 0, 0.35); }
+
+.howto-err { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: #fdeaea; border: 1px solid #f0b4b4; color: var(--red); font-size: 0.85rem; text-align: center; }
