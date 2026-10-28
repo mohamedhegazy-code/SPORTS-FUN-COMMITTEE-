@@ -850,6 +850,54 @@ document.getElementById("mcp-submit").addEventListener("click", async () => {
 // and section order/visibility onto the public Events landing page. Called
 // after every settings load and after every landing-page admin save, so the
 // public page and the admin form never drift out of sync with each other.
+// The uploaded WhatsApp image is a QR with a caption and wide white margins.
+// Find the QR itself (jsQR) and crop to it, so the code fills the same box and
+// is as large as possible. If it can't be found the image is shown as it is.
+function fitHeroQr(img) {
+  if (img.classList.contains("fitted") || String(img.src).startsWith("data:") || typeof jsQR !== "function") return;
+  try {
+    const nw = img.naturalWidth, nh = img.naturalHeight;
+    if (!nw || !nh) return;
+    const scale = Math.min(1, 1000 / Math.max(nw, nh));
+    const w = Math.round(nw * scale), h = Math.round(nh * scale);
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const code = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+    if (!code) return;
+    const pts = [code.location.topLeftCorner, code.location.topRightCorner, code.location.bottomLeftCorner, code.location.bottomRightCorner];
+    const minX = Math.min(...pts.map((p) => p.x)), maxX = Math.max(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y)), maxY = Math.max(...pts.map((p) => p.y));
+    const side = Math.max(maxX - minX, maxY - minY) * 1.14; // small quiet zone around the code
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const out = document.createElement("canvas");
+    out.width = out.height = 420;
+    const octx = out.getContext("2d");
+    octx.fillStyle = "#fff";
+    octx.fillRect(0, 0, 420, 420);
+    octx.imageSmoothingEnabled = false;
+    octx.drawImage(c, cx - side / 2, cy - side / 2, side, side, 0, 0, 420, 420);
+    // Gold code: dark modules become deep gold, white stays warm white. It is
+    // only used if the recoloured code still decodes, so it can never break scanning.
+    const px = octx.getImageData(0, 0, 420, 420);
+    const gold = px.data.slice();
+    const G = [150, 112, 6], W0 = [255, 252, 242];
+    for (let i = 0; i < gold.length; i += 4) {
+      const lum = (0.299 * gold[i] + 0.587 * gold[i + 1] + 0.114 * gold[i + 2]) / 255;
+      const k = Math.min(1, Math.max(0, (lum - 0.15) / 0.7));
+      for (let ch = 0; ch < 3; ch++) gold[i + ch] = Math.round(G[ch] + (W0[ch] - G[ch]) * k);
+    }
+    if (jsQR(gold, 420, 420, { inversionAttempts: "dontInvert" })) {
+      octx.putImageData(new ImageData(gold, 420, 420), 0, 0);
+      img.classList.add("gold");
+    }
+    img.classList.add("fitted");
+    img.src = out.toDataURL("image/png");
+  } catch (e) { /* tainted or unreadable image: keep the original */ }
+}
 function applyLandingPageToUI() {
   const lp = SETTINGS && SETTINGS.landingPage;
   if (!lp) return;
@@ -944,6 +992,8 @@ function applyLandingPageToUI() {
     heroWaCard.classList.toggle("hidden", !hasQr && !hasLink);
     document.getElementById("hero-wa-title").textContent = bilingual(lp.whatsapp.titleEn, lp.whatsapp.titleAr) || t("whatsappCommunityTitle");
     if (hasQr) {
+      heroQr.classList.remove("fitted");
+      heroQr.onload = () => fitHeroQr(heroQr);
       heroQr.src = lp.whatsapp.qrImage;
       heroQrLink.href = lp.whatsapp.qrImage;
     }

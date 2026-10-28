@@ -1570,3 +1570,5 @@ tr.dir-archived td { opacity: 0.6; }
 @media (max-width: 860px) { .bd-layout { grid-template-columns: 1fr; } .bd-preview-col { position: static; order: -1; } }
 .bd-list .rb-table th, .bd-list .rb-table td { padding: 6px 7px; }
 .bd-list .rb-table td:last-child { padding-inline-end: 10px; }
+.hero-wa-qr.fitted { transform: none; object-fit: contain; }
+.hero-wa-qr-link { box-shadow: 0 0 0 3px #d4a82a, 0 6px 18px rgba(0, 0, 0, 0.35); }
