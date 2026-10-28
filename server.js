@@ -1626,8 +1626,14 @@ app.post("/api/auth/change-password", async (req, res) => {
 // non-dismissible gate right after that account's first login (see
 // applyMaybeShowMustChangePasswordGate() in app.js); it's cleared below the
 // moment /api/auth/change-password succeeds for that account.
+// Optional phone number on a staff account, used only to open WhatsApp chats
+// from the admin panel. Keeps digits, +, spaces, dashes and brackets.
+function sanitizeStaffPhone(raw) {
+  return String(raw || "").replace(/[^\d+\s()-]/g, "").trim().slice(0, 30);
+}
 app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   const { username, password, name, role } = req.body;
+  const phone = sanitizeStaffPhone(req.body.phone);
   if (!username || !password || !name || !["admin", "staff", "tournament", "management"].includes(role)) {
     return res.status(400).json({ error: "username, password, name, and a valid role are required" });
   }
@@ -1640,6 +1646,7 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
     username,
     name,
     role,
+    phone,
     passwordHash,
     mustChangePassword: true,
   };
@@ -1652,6 +1659,73 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   });
   writeDb(db);
   res.status(201).json({ staff: publicStaff(db.staffAccounts[username]) });
+});
+
+app.put("/api/staff/accounts/:username/phone", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const account = db.staffAccounts[req.params.username];
+  if (!account) return res.status(404).json({ error: "Account not found" });
+  account.phone = sanitizeStaffPhone(req.body.phone);
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "staff.phone_updated",
+    details: account.username,
+  });
+  writeDb(db);
+  res.json({ ok: true, username: account.username, phone: account.phone });
+});
+
+// Issues a NEW temporary password for a staff account so the admin can send
+// it over WhatsApp. The account must change it at its next sign-in; its
+// existing sessions are dropped. The admin cannot reset their own account here.
+app.post("/api/staff/accounts/:username/send-credentials", requireStaffRole("admin"), async (req, res) => {
+  const username = req.params.username;
+  const peek = req.db.staffAccounts[username];
+  if (!peek) return res.status(404).json({ error: "Account not found" });
+  if (username === req.staff.username) return res.status(400).json({ error: "You can't reset your own account this way" });
+  if (!String(peek.phone || "").replace(/\D/g, "")) return res.status(400).json({ error: "This account has no phone number on file" });
+  if (req.body && req.body.replaceExisting !== true) {
+    return res.status(409).json({
+      error: "Issuing new login details will replace this account's current password.",
+      needsConfirm: true,
+    });
+  }
+  const tempPassword = generateTempPassword();
+  // Hash before re-reading the db - see the comment above POST /api/auth/signup.
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
+  const db = readDb();
+  const account = db.staffAccounts[username];
+  if (!account) return res.status(404).json({ error: "Account not found" });
+  account.passwordHash = passwordHash;
+  account.mustChangePassword = true;
+  account.credentialsIssuedAt = new Date().toISOString();
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "staff.credentials_issued",
+    details: `${account.name} (${username})`,
+  });
+  writeDb(db);
+  let dropped = false;
+  for (const [token, sess] of sessions) {
+    if (sess.type === "staff" && sess.id === username) {
+      sessions.delete(token);
+      dropped = true;
+    }
+  }
+  if (dropped) persistSessions();
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    username,
+    name: account.name,
+    phone: account.phone || "",
+    tempPassword,
+    loginUrl: `${req.protocol}://${req.get("host")}/`,
+  });
 });
 
 app.get("/api/staff/accounts", requireStaffRole("admin"), (req, res) => {
