@@ -3581,7 +3581,7 @@ app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
     promoted = db.registrations
       .filter((r) => r.eventId === reg.eventId && r.waitlisted)
       .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
-    if (promoted) promoted.waitlisted = false;
+    if (promoted) { promoted.waitlisted = false; promoted.whatsappConfirmedAt = null; promoted.whatsappReminderAt = null; promoted.whatsappDayOfAt = null; }
   }
   const event = db.events.find((e) => e.id === reg.eventId);
   logActivity(db, {
@@ -3902,6 +3902,13 @@ app.post("/api/staff/registrations/:id/whatsapp-confirmed", requireStaffRole("st
   const db = req.db;
   const reg = db.registrations.find((r) => r.id === Number(req.params.id));
   if (!reg) return res.status(404).json({ error: "Registration not found" });
+  // Nothing goes to someone still on the waiting list - they have not been
+  // confirmed a place yet, so a confirmation / reminder / event-day message
+  // would be wrong. The buttons only appear once the registration is confirmed
+  // (promoted); this refuses direct calls too.
+  if (reg.waitlisted) {
+    return res.status(409).json({ error: "This registration is still on the waiting list. WhatsApp messages are only sent after it is confirmed." });
+  }
   // Three kinds of WhatsApp message, each tracked separately: the booking
   // confirmation, a reminder before the event, and an event-day attendance
   // check. (The date windows for reminder / event day are enforced in the UI.)
@@ -4333,6 +4340,9 @@ app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]
   if (!reg) return res.status(404).json({ error: "No such registration" });
   if (!reg.waitlisted) return res.status(400).json({ error: "This registration isn't on a waiting list" });
   reg.waitlisted = false;
+  // Any WhatsApp stamp from before the promotion no longer counts as a real
+  // confirmation - the person is only confirmed from now on.
+  reg.whatsappConfirmedAt = null; reg.whatsappReminderAt = null; reg.whatsappDayOfAt = null;
   writeDb(db);
   res.json(reg);
 });
@@ -4367,7 +4377,7 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
     promoted = db.registrations
       .filter((r) => r.eventId === reg.eventId && r.waitlisted)
       .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
-    if (promoted) promoted.waitlisted = false;
+    if (promoted) { promoted.waitlisted = false; promoted.whatsappConfirmedAt = null; promoted.whatsappReminderAt = null; promoted.whatsappDayOfAt = null; }
   }
   const event = db.events.find((e) => e.id === reg.eventId);
   logActivity(db, {
