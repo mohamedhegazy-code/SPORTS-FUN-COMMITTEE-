@@ -74,7 +74,7 @@ async function ensurePool(n) {
   while (pool.length < n) {
     const i = pool.length + 1;
     const jar = await prime(newJar());
-    const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `TM${i}`, name: `Matrix Player ${i}`, password: "abc12345", phone: `0105${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: "18to45" } });
+    const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `TM${i}`, name: `Matrix Player ${i}`, password: "abc12345", phone: `0105${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", birthDate: "1990-06-15" } });
     if (r.status !== 200 && r.status !== 201) throw new Error("signup failed " + JSON.stringify(r.json));
     pool.push({ jar, num: i, regByEvent: {} });
   }
@@ -851,6 +851,7 @@ async function roleMatrix() {
     ok(lg.status === 200, `${role} login`, lg.json);
     roles[role] = jar;
   }
+  for (const id of [ev, ev2]) await A(`/api/admin/events/${id}/managers`, "PUT", { managerUsernames: ["rm_tournament"] });
   const member = pool[0].jar;
   const anon = await prime(newJar());
   const eps = [

@@ -45,7 +45,7 @@ async function main() {
 
   async function signup(num, name) {
     const jar = await prime(newJar());
-    const res = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `SW${num}`, name: name || `Swiss Player ${num}`, password: "abc12345", phone: `0111${String(num).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: "18to45" } });
+    const res = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `SW${num}`, name: name || `Swiss Player ${num}`, password: "abc12345", phone: `0111${String(num).padStart(7, "0")}`, agreeTerms: true, memberType: "main", birthDate: "1990-06-15" } });
     return { jar, res };
   }
   const form = new FormData();

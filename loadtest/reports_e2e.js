@@ -49,9 +49,11 @@ async function mkEvent(nameEn, nameAr, { date = "2026-12-15", max } = {}) {
   return r.json.id;
 }
 const members = [];
+const bd = (years) => new Date(Date.now() - (years * 365.25 + 40) * 86400000).toISOString().slice(0, 10); // a date that is exactly `years` old (40-day buffer from a birthday edge)
+const BDG = { under12: bd(8), "12to17": bd(14), "18to45": bd(30), "46plus": bd(60) };
 async function member(i, name, ageGroup) {
   const jar = await prime(newJar());
-  const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `RP${i}`, name, password: "abc12345", phone: `0106${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: ageGroup || "18to45" } });
+  const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `RP${i}`, name, password: "abc12345", phone: `0106${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", birthDate: BDG[ageGroup || "18to45"] } });
   if (r.status !== 200 && r.status !== 201) throw new Error("signup failed " + JSON.stringify(r.json));
   const m = { jar, num: `RP${i}`, name, regs: {} };
   members.push(m);
@@ -321,7 +323,7 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   // points: checked-in only, total = sum of rows
   res = await getHtml(`/admin/print/event/${evChess}?view=points&lang=en`);
   const cells = [...res.text.matchAll(/<td class="num"><b>(\d+)<\/b><\/td>/g)].map((m) => Number(m[1]));
-  const total = Number((res.text.match(/class="total"><td colspan="6">[^<]*<\/td><td class="num">(\d+)<\/td>/) || [])[1]);
+  const total = Number((res.text.match(/class="total"><td colspan="8">[^<]*<\/td><td class="num">(\d+)<\/td>/) || [])[1]);
   ok(cells.length === 6, "points: 6 rows (checked-in only)", cells);
   ok(cells.every((n) => n >= 100), "points: each at least the participation award", cells);
   ok(total === cells.reduce((a, b) => a + b, 0) && total > 0, "points: total equals the sum of the rows", [total, cells]);
@@ -336,7 +338,7 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   const aAdult = await member(23, "Adult Player", "18to45");
   const aSenior = await member(24, "Senior Player", "46plus");
   for (const m of [aKids, aTeen, aAdult, aSenior]) await register(m, evAge);
-  const dep = await api("/api/me/dependents", { method: "POST", jar: aSenior.jar, body: { name: "Dependent Child", relationship: "Son", ageGroup: "under12" } });
+  const dep = await api("/api/me/dependents", { method: "POST", jar: aSenior.jar, body: { name: "Dependent Child", relationship: "Son", birthDate: bd(8) } });
   ok(dep.status === 201, "add dependent", dep.json);
   const depId = dep.json && dep.json.dependents && dep.json.dependents[0] && dep.json.dependents[0].id;
   const dr = await api("/api/register", { method: "POST", jar: aSenior.jar, body: { eventId: evAge, dependentId: depId } });
@@ -358,8 +360,30 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   ok(depRow && !/Masters/.test(depRow) && /Kids \(under 12\)/.test(depRow), "dependent shows its own age group, not the parent's", depRow.slice(0, 300));
   const adultRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Adult Player(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
   ok(/Adults \(18–45\)/.test(adultRow), "own registration shows own age group", adultRow.slice(0, 200));
+  // birth year + age columns, calculated as of the event's start date
+  ok(/Birth year/.test(ageHtml) && /<th class="c">Age<\/th>/.test(ageHtml), "registrations sheet has Birth year and Age columns");
+  const yr30 = bd(30).slice(0, 4);
+  ok(new RegExp(yr30).test(adultRow) && />30<\/td>/.test(adultRow), "adult row shows birth year and age 30", adultRow.slice(0, 300));
+  const AU = require("../age_utils.js");
+  const evFutDate = new Date(Date.now() + 3 * 365.25 * 86400000).toISOString().slice(0, 10);
+  const evFut = await mkEvent("Reports Future Event", "فعالية مستقبلية", { date: evFutDate });
+  const youth = await member(25, "Almost Adult", "12to17");
+  const youthBirth = bd(17);
+  await api("/api/me/profile", { method: "PATCH", jar: youth.jar, body: { birthDate: youthBirth } });
+  await register(youth, evFut);
+  const todayAge = AU.ageInfo({ birthDate: youthBirth });
+  const futAge = AU.ageInfo({ birthDate: youthBirth }, evFutDate);
+  ok(todayAge.ageGroup === "12to17" && futAge.ageGroup === "18to45", "fixture: Youth today, Adult on the event date", [todayAge, futAge]);
+  const futHtml = (await getHtml(`/admin/print/event/${evFut}?view=registrations&lang=en`)).text;
+  const futRow = (futHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Almost Adult(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
+  ok(/Adults \(18–45\)/.test(futRow) && new RegExp(`>${futAge.age}</td>`).test(futRow), "event sheet: age and group are calculated as of the event start date", futRow.slice(0, 300));
+  const futRep = (await getHtml(`/admin/print/age-report?lang=en&detail=names&events=${evFut}`)).text;
+  ok(/Adults \(18–45\)/.test(futRep) && /Almost Adult/.test(futRep) && !/Youth \(12–17\) <span class="muted">\(1\)/.test(futRep), "age report: person counted in the group they will be in on the event date", futRep.slice(0, 200));
+  ok(/Birth year/.test(futRep) && new RegExp(`>${youthBirth.slice(0, 4)}</td>`).test(futRep), "age report names table shows birth year", null);
+  const futRepAr = (await getHtml(`/admin/print/age-report?lang=ar&detail=names&events=${evFut}`)).text;
+  ok(/سنة الميلاد/.test(futRepAr) && /العمر/.test(futRepAr), "age report (ar) has birth year / age headers");
   const ptsHtml = (await getHtml(`/admin/print/event/${evAge}?view=points&lang=en`)).text;
-  ok(/class="total"><td colspan="6">/.test(ptsHtml), "points total row spans the new column");
+  ok(/class="total"><td colspan="8">/.test(ptsHtml), "points total row spans the new column");
   for (const v of ["registrations", "attendance"]) {
     res = await getHtml(`/admin/print/event/${evEmpty}?view=${v}&lang=ar`);
     ok(res.status === 200 && /لا يوجد مسجّلون بعد/.test(res.text), `${v}: empty event message (ar)`);

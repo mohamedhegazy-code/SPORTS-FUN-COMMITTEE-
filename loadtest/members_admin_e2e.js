@@ -49,7 +49,7 @@ async function mkEvent(nameEn, nameAr, { date = "2026-12-15", max } = {}) {
 const members = [];
 async function member(i, name, ageGroup) {
   const jar = await prime(newJar());
-  const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `MA${i}`, name, password: "abc12345", phone: `0106${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: ageGroup || "18to45" } });
+  const r = await api("/api/auth/signup", { method: "POST", jar, body: { membershipNumber: `MA${i}`, name, password: "abc12345", phone: `0106${String(i).padStart(7, "0")}`, agreeTerms: true, memberType: "main", birthDate: "1990-06-15" } });
   if (r.status !== 200 && r.status !== 201) throw new Error("signup failed " + JSON.stringify(r.json));
   const m = { jar, num: `MA${i}`, name, regs: {} };
   members.push(m);
@@ -246,7 +246,7 @@ const login = async (num, pw) => { const jar = await prime(newJar()); const r = 
   const rep = await A("/api/admin/reports/events"); ok(rep.status === 200, "reports still work after delete", rep.status);
   // cannot sign up again as archived
   await A("/api/admin/members/bulk", "POST", { action: "archive", membershipNumbers: ["MA103"] });
-  const su = await api("/api/auth/signup", { method: "POST", jar: await prime(newJar()), body: { membershipNumber: "MA103", name: "Delta Family", password: "abc12345", phone: "01212345678", agreeTerms: true, memberType: "main", ageGroup: "18to45" } });
+  const su = await api("/api/auth/signup", { method: "POST", jar: await prime(newJar()), body: { membershipNumber: "MA103", name: "Delta Family", password: "abc12345", phone: "01212345678", agreeTerms: true, memberType: "main", birthDate: "1990-06-15" } });
   ok(su.status === 403, "archived membership cannot sign up", su.json);
   const d104b = await row("MA104");
   ok(d104b.balance === 2000 - 0 || d104b.balance >= 0, "balance sane", d104b.balance);

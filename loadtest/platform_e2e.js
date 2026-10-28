@@ -13,6 +13,8 @@ const BASE = process.env.BASE_URL || "http://localhost:3912";
 const ADMIN_USER = process.env.ADMIN_USER || "e2eadmin";
 const ADMIN_PASS = process.env.ADMIN_PASS || "E2ETest!2026xyz";
 const N = Number(process.env.N || 300);
+// a date that is exactly `years` old today (40-day buffer so a birthday edge never flips it)
+const bd = (years) => new Date(Date.now() - (years * 365.25 + 40) * 86400000).toISOString().slice(0, 10);
 
 let pass = 0;
 let fail = 0;
@@ -143,7 +145,7 @@ async function signupMember(prefix, extra) {
       phone: `01${String(Math.floor(Math.random() * 1e9)).padStart(9, "0")}`,
       agreeTerms: true,
       memberType: "main",
-      ageGroup: "18to45",
+      birthDate: "1990-06-15",
       ...extra,
     },
   });
@@ -188,7 +190,7 @@ async function main() {
   section("1. Auth: signup validation");
   // =========================================================================
   {
-    const base = { name: "Validator", password: "abc12345", phone: "01012345678", agreeTerms: true, memberType: "main", ageGroup: "18to45" };
+    const base = { name: "Validator", password: "abc12345", phone: "01012345678", agreeTerms: true, memberType: "main", birthDate: "1990-06-15" };
     const jar1 = await primeCsrf(newJar());
     const dupNum = `DUP${Date.now()}`;
     const first = await api("/api/auth/signup", { method: "POST", jar: jar1, body: { ...base, membershipNumber: dupNum } });
@@ -543,7 +545,7 @@ async function main() {
 
     // dependents: add then register a dependent
     const depParent = await signupMember("DEPPAR");
-    const addDep = await api("/api/me/dependents", { method: "POST", jar: depParent.jar, body: { name: "Junior Kid", relationship: "Son", ageGroup: "under12" } });
+    const addDep = await api("/api/me/dependents", { method: "POST", jar: depParent.jar, body: { name: "Junior Kid", relationship: "Son", birthDate: bd(8) } });
     ok(addDep.status === 201 && addDep.json.dependents.length === 1, "add dependent succeeds", addDep.json);
     const depId = addDep.json.dependents[0].id;
     const depEvent = await createEvent(admin, { nameEn: "Dependent Reg Event" });
@@ -1025,7 +1027,7 @@ async function main() {
 
     // dependents CRUD
     const depOwner = await signupMember("DEPCRUD");
-    const addDep = await api("/api/me/dependents", { method: "POST", jar: depOwner.jar, body: { name: "Dep One", relationship: "Daughter", ageGroup: "12to17" } });
+    const addDep = await api("/api/me/dependents", { method: "POST", jar: depOwner.jar, body: { name: "Dep One", relationship: "Daughter", birthDate: bd(14) } });
     ok(addDep.status === 201, "add a dependent", addDep.json);
     const depId = addDep.json.dependents[0].id;
     const updateDep = await api(`/api/me/dependents/${depId}`, { method: "PUT", jar: depOwner.jar, body: { name: "Dep One Updated", phone: "0101234567" } });
@@ -1035,67 +1037,187 @@ async function main() {
     const deleteDep = await api(`/api/me/dependents/${depId}`, { method: "DELETE", jar: depOwner.jar });
     ok(deleteDep.status === 200 && deleteDep.json.dependents.length === 0, "delete a dependent", deleteDep.json);
 
-    // ---- mandatory age group (signup, profile, dependents, admin editor) ----
+    // ---- date of birth: signup, profile, dependents, admin editor, file matching ----
     {
       const jarA = await primeCsrf(newJar());
       const baseA = { name: "Age Tester", password: "abc12345", phone: "01012345600", agreeTerms: true, memberType: "main" };
-      const noAge = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `NOAGE${Date.now()}` } });
-      ok(noAge.status === 400 && /age group/i.test((noAge.json || {}).error || ""), "signup without age group -> 400", noAge.json);
-      const badAge = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `BADAGE${Date.now()}`, ageGroup: "toddler" } });
-      ok(badAge.status === 400, "signup with unknown age group -> 400", badAge.json);
-      const okAge = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `OKAGE${Date.now()}`, ageGroup: "46plus" } });
-      ok(okAge.status === 201 && okAge.json.member.ageGroup === "46plus", "signup with valid age group stores it", okAge.json);
+      const noBirth = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `NOAGE${Date.now()}` } });
+      ok(noBirth.status === 400 && /date of birth/i.test((noBirth.json || {}).error || ""), "signup without date of birth -> 400", noBirth.json);
+      const oldStyle = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `OLDAGE${Date.now()}`, ageGroup: "46plus" } });
+      ok(oldStyle.status === 400, "signup with only an age group (no date of birth) -> 400", oldStyle.json);
+      for (const [label, v] of [["future", bd(-1)], ["format dd/mm/yyyy", "15/06/1990"], ["impossible day", "1990-02-30"], ["year 3016", "3016-03-05"], ["before 1900", "1850-01-01"]]) {
+        const r = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `BADB${Date.now()}`, birthDate: v } });
+        ok(r.status === 400, `signup with invalid date of birth (${label}) -> 400`, r.json);
+      }
+      const okB = await api("/api/auth/signup", { method: "POST", jar: jarA, body: { ...baseA, membershipNumber: `OKAGE${Date.now()}`, birthDate: bd(60) } });
+      ok(okB.status === 201 && okB.json.member.ageGroup === "46plus" && okB.json.member.birthDate === bd(60), "signup stores the date of birth and derives the age group", okB.json);
 
-      const owner = await signupMember("AGEDEP", { ageGroup: "18to45" });
-      const clear = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "" } });
-      ok(clear.status === 400, "profile: age group cannot be cleared", clear.json);
-      const junk = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "xyz" } });
-      ok(junk.status === 400, "profile: invalid age group rejected", junk.json);
-      const chg = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "46plus" } });
-      ok(chg.status === 200 && chg.json.member.ageGroup === "46plus", "profile: age group can be changed", chg.json);
+      const owner = await signupMember("AGEDEP", { birthDate: bd(30) });
+      ok(owner.res.json.member.ageGroup === "18to45", "age 30 -> Adults", owner.res.json);
+      const clear = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { birthDate: "" } });
+      ok(clear.status === 400, "profile: date of birth cannot be cleared", clear.json);
+      const junk = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { birthDate: "xyz" } });
+      ok(junk.status === 400, "profile: invalid date of birth rejected", junk.json);
+      const chg = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { birthDate: bd(60) } });
+      ok(chg.status === 200 && chg.json.member.ageGroup === "46plus" && chg.json.member.birthDate === bd(60), "profile: date of birth can be changed and the age group follows", chg.json);
+      const manual = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { ageGroup: "12to17" } });
+      ok(manual.status === 200 && manual.json.member.ageGroup === "46plus", "profile: a manual age group is ignored when a date of birth is on file", manual.json);
       const noName = await api("/api/me/profile", { method: "PATCH", jar: owner.jar, body: { phone: "01099998888" } });
-      ok(noName.status === 200 && noName.json.member.ageGroup === "46plus", "profile: other updates keep the age group", noName.json);
+      ok(noName.status === 200 && noName.json.member.ageGroup === "46plus" && noName.json.member.birthDate === bd(60), "profile: other updates keep the date of birth", noName.json);
 
       const depNo = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "No Age Kid", relationship: "Son" } });
-      ok(depNo.status === 400 && /age group/i.test((depNo.json || {}).error || ""), "dependent without age group -> 400", depNo.json);
-      const depBad = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "Bad Age Kid", ageGroup: "nope" } });
-      ok(depBad.status === 400, "dependent with invalid age group -> 400", depBad.json);
-      const depOk = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "Age Kid", relationship: "Son", ageGroup: "under12" } });
-      ok(depOk.status === 201 && depOk.json.dependents[0].ageGroup === "under12", "dependent with age group stored", depOk.json);
+      ok(depNo.status === 400 && /date of birth/i.test((depNo.json || {}).error || ""), "dependent without date of birth -> 400", depNo.json);
+      const depBad = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "Bad Age Kid", birthDate: "nope" } });
+      ok(depBad.status === 400, "dependent with invalid date of birth -> 400", depBad.json);
+      const depFuture = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: "Future Kid", birthDate: bd(-1) } });
+      ok(depFuture.status === 400, "dependent born in the future -> 400", depFuture.json);
+      const kidName = `Zed Kid ${Date.now()}`;
+      const depOk = await api("/api/me/dependents", { method: "POST", jar: owner.jar, body: { name: kidName, relationship: "Son", birthDate: bd(8) } });
+      ok(depOk.status === 201 && depOk.json.dependents[0].ageGroup === "under12" && depOk.json.dependents[0].birthDate === bd(8), "dependent: date of birth stored, age group derived", depOk.json);
       const dId = depOk.json.dependents[0].id;
-      const depPutBad = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { ageGroup: "" } });
-      ok(depPutBad.status === 400, "dependent age group cannot be cleared", depPutBad.json);
-      const depPutOk = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { ageGroup: "12to17" } });
-      ok(depPutOk.status === 200 && depPutOk.json.dependents[0].ageGroup === "12to17", "dependent age group editable", depPutOk.json);
+      const depPutBad = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { birthDate: "" } });
+      ok(depPutBad.status === 400, "dependent date of birth cannot be cleared", depPutBad.json);
+      const depPutOk = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { birthDate: bd(14) } });
+      ok(depPutOk.status === 200 && depPutOk.json.dependents[0].ageGroup === "12to17", "dependent date of birth editable, group follows", depPutOk.json);
       const depPutOther = await api(`/api/me/dependents/${dId}`, { method: "PUT", jar: owner.jar, body: { phone: "0100000111" } });
-      ok(depPutOther.status === 200 && depPutOther.json.dependents[0].ageGroup === "12to17", "editing other dependent fields keeps age group", depPutOther.json);
+      ok(depPutOther.status === 200 && depPutOther.json.dependents[0].ageGroup === "12to17" && depPutOther.json.dependents[0].birthDate === bd(14), "editing other dependent fields keeps the date of birth", depPutOther.json);
 
-      // admin editor + directory
+      // directory + admin editor
+      const yearOf = (n) => Number(bd(n).slice(0, 4));
       const dir = await api("/api/admin/directory", { jar: admin });
       const row = (dir.json || []).find((m) => m.membershipNumber === owner.membershipNumber);
-      ok(row && row.ageGroup === "46plus" && row.dependents[0].ageGroup === "12to17", "directory exposes member + dependent age groups", row && [row.ageGroup, row.dependents]);
-      const aMem = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "18to45" } });
-      ok(aMem.status === 200, "admin sets a member's age group", aMem.json);
-      const aDep = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "under12", dependentId: dId } });
-      ok(aDep.status === 200, "admin sets a dependent's age group", aDep.json);
-      const dir2 = await api("/api/admin/directory", { jar: admin });
-      const row2 = (dir2.json || []).find((m) => m.membershipNumber === owner.membershipNumber);
-      ok(row2 && row2.ageGroup === "18to45" && row2.dependents[0].ageGroup === "under12", "directory reflects admin edits", row2 && [row2.ageGroup, row2.dependents]);
-      const aBad = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "" } });
+      ok(row && row.birthDate === bd(60) && row.birthYear === yearOf(60) && row.age === 60 && row.ageGroup === "46plus", "directory exposes member birth date / year / age / group", row && [row.birthDate, row.birthYear, row.age, row.ageGroup]);
+      ok(row && row.dependents[0].age === 14 && row.dependents[0].birthYear === yearOf(14) && row.dependents[0].ageGroup === "12to17", "directory exposes the family member's birth year / age / group", row && row.dependents);
+      const list = await api("/api/admin/members", { jar: admin });
+      const lrow = (list.json || []).find((m) => m.membershipNumber === owner.membershipNumber);
+      ok(lrow && lrow.age === 60 && lrow.birthYear === yearOf(60), "members list exposes birth year and age", lrow);
+
+      const bMem = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: bd(30) } });
+      ok(bMem.status === 200 && bMem.json.ageGroup === "18to45" && bMem.json.age === 30, "admin sets a member's date of birth", bMem.json);
+      const bDep = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: bd(8), dependentId: dId } });
+      ok(bDep.status === 200 && bDep.json.ageGroup === "under12", "admin sets a dependent's date of birth", bDep.json);
+      const bBad = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: "3016-03-05" } });
+      ok(bBad.status === 400, "admin cannot save a date of birth in the future (3016)", bBad.json);
+      const bBad2 = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: "2016-02-30" } });
+      ok(bBad2.status === 400, "admin cannot save an impossible date", bBad2.json);
+      const bNoMember = await api(`/api/admin/members/NOPE-404/birth-date`, { method: "PUT", jar: admin, body: { birthDate: bd(30) } });
+      ok(bNoMember.status === 404, "admin birth date: unknown member -> 404", bNoMember.json);
+      const bNoDep = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: bd(30), dependentId: 99999999 } });
+      ok(bNoDep.status === 404, "admin birth date: unknown dependent -> 404", bNoDep.json);
+      const bAnon = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: await primeCsrf(newJar()), body: { birthDate: bd(30) } });
+      ok(bAnon.status === 401 || bAnon.status === 403, "admin birth date: anonymous rejected", bAnon.status);
+      const bMemberTry = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: owner.jar, body: { birthDate: bd(30) } });
+      ok(bMemberTry.status === 401 || bMemberTry.status === 403, "admin birth date: member session rejected", bMemberTry.status);
+      const bStaffTry = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: staffTournament, body: { birthDate: bd(30) } });
+      ok(bStaffTry.status === 403, "admin birth date: tournament role rejected", bStaffTry.status);
+
+      // the old manual age-group editor is blocked while a date of birth is on file
+      const aBlocked = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "46plus" } });
+      ok(aBlocked.status === 409, "admin age group: blocked when a date of birth is on file", aBlocked.json);
+      // ... but still works for someone with no date of birth (legacy accounts)
+      const legacyNum = `LEG${Date.now()}`;
+      const legacyAdd = await api("/api/admin/members", { method: "POST", jar: admin, body: { membershipNumber: legacyNum, name: "Legacy Person", phone: "", ageGroup: "18to45" } });
+      ok(legacyAdd.status === 201, "admin can still add a member with only an age group", legacyAdd.json);
+      const aLegacy = await api(`/api/admin/members/${encodeURIComponent(legacyNum)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "46plus" } });
+      ok(aLegacy.status === 200, "admin age group works for a member without a date of birth", aLegacy.json);
+      const aBad = await api(`/api/admin/members/${encodeURIComponent(legacyNum)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "" } });
       ok(aBad.status === 400, "admin cannot clear age group", aBad.json);
       const aNoMember = await api(`/api/admin/members/NOPE-404/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "18to45" } });
       ok(aNoMember.status === 404, "admin age group: unknown member -> 404", aNoMember.json);
-      const aNoDep = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: admin, body: { ageGroup: "18to45", dependentId: 99999999 } });
-      ok(aNoDep.status === 404, "admin age group: unknown dependent -> 404", aNoDep.json);
-      const aAnon = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: await primeCsrf(newJar()), body: { ageGroup: "18to45" } });
+      const aAnon = await api(`/api/admin/members/${encodeURIComponent(legacyNum)}/age-group`, { method: "PUT", jar: await primeCsrf(newJar()), body: { ageGroup: "18to45" } });
       ok(aAnon.status === 401 || aAnon.status === 403, "admin age group: anonymous rejected", aAnon.status);
-      const aMemberTry = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: owner.jar, body: { ageGroup: "46plus" } });
+      const aMemberTry = await api(`/api/admin/members/${encodeURIComponent(legacyNum)}/age-group`, { method: "PUT", jar: owner.jar, body: { ageGroup: "46plus" } });
       ok(aMemberTry.status === 401 || aMemberTry.status === 403, "admin age group: member session rejected", aMemberTry.status);
-      const aStaffTry = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/age-group`, { method: "PUT", jar: staffTournament, body: { ageGroup: "46plus" } });
+      const aStaffTry = await api(`/api/admin/members/${encodeURIComponent(legacyNum)}/age-group`, { method: "PUT", jar: staffTournament, body: { ageGroup: "46plus" } });
       ok(aStaffTry.status === 403, "admin age group: tournament role rejected", aStaffTry.status);
+      // admin can clear a wrong date of birth; the group then stays as last calculated
+      const bClear = await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: "" } });
+      ok(bClear.status === 200 && bClear.json.birthDate === "", "admin can clear a date of birth", bClear.json);
+      await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: bd(30) } });
+
+      // ---- birthdates file matcher ----
+      {
+        const XLSX = require("xlsx");
+        const tag = Date.now();
+        const nameA = `Zed Alpha ${tag}`, nameB = `Zed Beta ${tag}`, nameC = `Zed Gamma ${tag}`;
+        for (const [n, nm] of [[`BM1-${tag}`, nameA], [`BM2-${tag}`, nameB], [`BM3-${tag}`, nameC], [`BM4-${tag}`, nameC]]) {
+          const r = await api("/api/admin/members", { method: "POST", jar: admin, body: { membershipNumber: n, name: nm, phone: "", ageGroup: "18to45" } });
+          ok(r.status === 201, "birth matcher: seed member " + n, r.json);
+        }
+        // the kid (dependent of `owner`) already has a date; clear it so the file can set it
+        await api(`/api/admin/members/${encodeURIComponent(owner.membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: "", dependentId: dId } });
+        const D = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
+        const mkFile = (rows, header) => {
+          const aoa = (header ? [header] : []).concat(rows);
+          const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "S");
+          return XLSX.write(wb, { type: "buffer", bookType: "xlsx", cellDates: true });
+        };
+        const upload = (buf, jar) => {
+          const fd = new FormData();
+          fd.set("file", new Blob([buf]), "b.xlsx");
+          return api("/api/admin/members/birthdates/import", { method: "POST", jar: jar || admin, body: fd, isForm: true });
+        };
+        const rowsA = [
+          [`  zed   ALPHA ${tag} `, D(2011, 3, 9)],   // same name, different case/spacing -> exact
+          [`Zed Betta ${tag}`, D(1985, 12, 31)],      // misspelt -> needs confirmation
+          [kidName, D(2012, 7, 1)],                   // a family member -> exact
+          [`Nobody Atall ${tag}`, D(2000, 1, 1)],     // not on the platform
+          [`Zed Alpha ${tag}`, D(2011, 3, 9)],        // duplicate row in the file
+          [nameC, D(2001, 5, 5)],                     // two people with this exact name -> ambiguous
+          [`Wrong Year ${tag}`, D(3016, 3, 5)],       // impossible year
+        ];
+        const u1 = await upload(mkFile(rowsA));
+        ok(u1.status === 200 && u1.json && u1.json.summary, "birth matcher: upload accepted", u1.json);
+        const sm = (u1.json || {}).summary || {};
+        ok(sm.total === 7 && sm.applied === 2 && sm.near === 1 && sm.none === 1 && sm.ambiguous === 1 && sm.invalid === 1 && sm.dupFile === 1, "birth matcher: summary counts", sm);
+        const byName = (nm) => ((u1.json || {}).rows || []).find((r) => r.name.trim().toLowerCase().replace(/\s+/g, " ") === nm.toLowerCase());
+        ok(byName(nameA) && byName(nameA).status === "applied" && byName(nameA).birthDate === "2011-03-09", "birth matcher: exact name match (case/spacing ignored) is applied", byName(nameA));
+        ok(byName(kidName) && byName(kidName).status === "applied" && byName(kidName).target.kind === "dependent", "birth matcher: family member matched and applied", byName(kidName));
+        const near = (u1.json.rows || []).find((r) => r.status === "near");
+        ok(near && near.candidates[0].name === nameB && near.candidates[0].score >= 80, "birth matcher: misspelt name offered as a candidate (not applied)", near);
+        const inval = (u1.json.rows || []).find((r) => r.status === "invalid");
+        ok(inval && inval.problem === "future", "birth matcher: year 3016 flagged invalid", inval);
+        const amb = (u1.json.rows || []).find((r) => r.status === "ambiguous");
+        ok(amb && amb.candidates.length === 2, "birth matcher: duplicate names -> ambiguous, nothing saved", amb);
+        const dir3 = (await api("/api/admin/directory", { jar: admin })).json;
+        const mA = dir3.find((m) => m.name === nameA);
+        const mB = dir3.find((m) => m.name === nameB);
+        ok(mA && mA.birthDate === "2011-03-09" && mA.ageGroup === (mA.age < 12 ? "under12" : "12to17"), "birth matcher: saved date + derived group visible in the directory", mA);
+        ok(mB && mB.birthDate === "", "birth matcher: the misspelt match was NOT saved without confirmation", mB);
+        const kidRow = dir3.find((m) => m.membershipNumber === owner.membershipNumber).dependents.find((d) => d.id === dId);
+        ok(kidRow && kidRow.birthDate === "2012-07-01", "birth matcher: dependent date saved", kidRow);
+        // re-upload is idempotent
+        const u2 = await upload(mkFile(rowsA));
+        ok(u2.json.summary.applied === 0 && u2.json.summary.already === 2, "birth matcher: re-upload changes nothing", u2.json.summary);
+        // admin confirms the near match -> next upload recognises it as settled
+        const link = await api(`/api/admin/members/${encodeURIComponent(near.candidates[0].membershipNumber)}/birth-date`, { method: "PUT", jar: admin, body: { birthDate: near.birthDate } });
+        ok(link.status === 200, "birth matcher: admin confirms the near match", link.json);
+        const u3 = await upload(mkFile(rowsA));
+        ok(u3.json.summary.linked === 1 && u3.json.summary.near === 0, "birth matcher: confirmed match is remembered", u3.json.summary);
+        // a different date for a person who already has one -> conflict, never overwritten
+        const u4 = await upload(mkFile([[nameA, D(2010, 1, 1)]]));
+        ok(u4.json.summary.conflict === 1 && u4.json.summary.applied === 0, "birth matcher: conflicting date is not overwritten", u4.json.summary);
+        const dir4 = (await api("/api/admin/directory", { jar: admin })).json;
+        ok(dir4.find((m) => m.name === nameA).birthDate === "2011-03-09", "birth matcher: existing date untouched after conflict", null);
+        // header row + membership number column + Arabic digits text dates are understood
+        const u5 = await upload(mkFile([[`BM3-${tag}`, "Whatever", "٠٥/٠٥/٢٠٠١"]], ["Membership Number", "Name", "Date of Birth"]));
+        ok(u5.status === 200 && u5.json.summary.applied === 1, "birth matcher: header + membership number + Arabic-digit text date", u5.json);
+        // guards
+        const gStaff = await upload(mkFile(rowsA), staffTournament);
+        ok(gStaff.status === 403, "birth matcher: tournament role rejected", gStaff.status);
+        const gAnon = await upload(mkFile(rowsA), await primeCsrf(newJar()));
+        ok(gAnon.status === 401 || gAnon.status === 403, "birth matcher: anonymous rejected", gAnon.status);
+        const gEmpty = await api("/api/admin/members/birthdates/import", { method: "POST", jar: admin, body: new FormData(), isForm: true });
+        ok(gEmpty.status === 400, "birth matcher: no file -> 400", gEmpty.json);
+        // export carries the new columns
+        const exp = await api("/api/admin/members/export", { jar: admin, raw: false });
+        ok(exp.status === 200, "export still works", exp.status);
+      }
 
       // server source files must never be downloadable
-      for (const f of ["/server.js", "/swiss.js", "/swiss_print.js", "/report_print.js", "/package.json"]) {
+      for (const f of ["/server.js", "/swiss.js", "/swiss_print.js", "/report_print.js", "/age_utils.js", "/package.json"]) {
         const r = await fetch(BASE + f);
         ok(r.status === 404, `source file ${f} is not downloadable`, r.status);
       }

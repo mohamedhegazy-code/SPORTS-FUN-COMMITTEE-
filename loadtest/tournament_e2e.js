@@ -101,7 +101,7 @@ async function main() {
     const res = await api("/api/auth/signup", {
       method: "POST",
       jar,
-      body: { membershipNumber: `E2E${num}`, name: `E2E Player ${num}`, password: "abc12345", phone: `0100${String(num).padStart(7, "0")}`, agreeTerms: true, memberType: "main", ageGroup: "18to45" },
+      body: { membershipNumber: `E2E${num}`, name: `E2E Player ${num}`, password: "abc12345", phone: `0100${String(num).padStart(7, "0")}`, agreeTerms: true, memberType: "main", birthDate: "1990-06-15" },
     });
     return { jar, res };
   }
@@ -451,6 +451,7 @@ async function main() {
 
     const evRes = await createEvent("E2E Authz Event", "Chess");
     const eventId = evRes.json.id;
+    await api(`/api/admin/events/${eventId}/managers`, { method: "PUT", jar: admin, body: { managerUsernames: ["e2e_tourmgr"] } });
 
     const tourCreate = await api(`/api/admin/tournaments/${eventId}`, { method: "POST", jar: tourJar, body: { mode: "individual", format: "knockout" } });
     ok(tourCreate.status === 201, "tournament-manager role CAN create a tournament", tourCreate.json);
