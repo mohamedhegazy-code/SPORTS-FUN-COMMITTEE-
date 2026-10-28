@@ -1554,3 +1554,19 @@ tr.dir-archived td { opacity: 0.6; }
 @media (max-width: 700px) { .rb-saved-bar { grid-template-columns: 1fr; } }
 .rb-f input[type="checkbox"], .rb-f input[type="radio"], .rb-card input[type="checkbox"], #rb-card input[type="checkbox"], #rb-card input[type="radio"] { width: auto; flex: none; margin: 0; }
 #rb-card .agerep-chk { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Birthday cards */
+.bd-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; margin-top: 12px; }
+.bd-preview-col { position: sticky; top: 12px; text-align: center; }
+.bd-preview-col canvas { width: 100%; max-width: 300px; height: auto; border-radius: 14px; box-shadow: 0 10px 30px rgba(80, 0, 10, 0.35); }
+.bd-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--maroon, #8b0000); cursor: pointer; text-align: start; }
+.bd-name:hover { text-decoration: underline; }
+.bd-today { display: inline-block; background: #ffd23f; color: #6b0010; font-weight: 800; border-radius: 999px; padding: 1px 10px; font-size: 0.78rem; }
+.bd-sent { color: #1d6b34; font-weight: 700; font-size: 0.8rem; }
+.rb-table tr.bd-row-today td { background: #fff7d6 !important; }
+.rb-table tr.bd-row-active td { box-shadow: inset 0 -2px 0 #c9a227; }
+.rb-table td.num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+#bd-card input[type="checkbox"] { width: auto; }
+@media (max-width: 860px) { .bd-layout { grid-template-columns: 1fr; } .bd-preview-col { position: static; order: -1; } }
+.bd-list .rb-table th, .bd-list .rb-table td { padding: 6px 7px; }
+.bd-list .rb-table td:last-child { padding-inline-end: 10px; }

@@ -472,6 +472,7 @@ function setLang(lang) {
   renderReports();
   renderAgeReportBuilder();
   if (RB && RB.meta) rbEnsure().catch(() => {});
+  if (typeof BD !== "undefined" && BD.items.length) { bdLabelMonths(); bdRender(); }
   // Rosters are built with t() at render time - redraw them in the new language
   try {
     if (CHECKIN_ROSTER && CHECKIN_ROSTER.length) renderCheckinRoster();
@@ -3411,6 +3412,7 @@ function switchAdminTab(tabKey) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
+  if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
     loadChatThreadsList();
@@ -3844,6 +3846,539 @@ async function rbDelete() {
   rbEl("rb-save-new").addEventListener("click", rbSaveNew);
   rbEl("rb-update").addEventListener("click", rbUpdate);
   rbEl("rb-delete").addEventListener("click", rbDelete);
+})();
+
+// ------------------------------------------------------ admin: birthday cards --
+// The card is drawn on a canvas in the browser (1080x1350 PNG, 4:5 - the shape
+// WhatsApp shows best). wa.me can only pre-fill TEXT, so for each member the
+// card is copied to the clipboard when the admin presses "Open WhatsApp";
+// they paste it into the chat (Ctrl/Cmd+V) and press Send themselves.
+const BDCARD = { W: 1080, H: 1350, crest: null };
+function bdRng(seed) {
+  let h = 2166136261;
+  for (const c of String(seed)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return () => {
+    h += 0x6d2b79f5;
+    let x = h;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function bdLoadCrest() {
+  return new Promise((resolve) => {
+    if (BDCARD.crest) return resolve(BDCARD.crest);
+    const img = new Image();
+    img.onload = () => { BDCARD.crest = img; resolve(img); };
+    img.onerror = () => resolve(null);
+    img.src = "/ahly-crest-logo.png";
+  });
+}
+async function bdLoadFonts() {
+  try {
+    await Promise.race([
+      Promise.all([document.fonts.load('110px "Pacifico"'), document.fonts.load('800 80px "Cairo"'), document.fonts.load('700 40px "Cairo"')]),
+      new Promise((r) => setTimeout(r, 2500)),
+    ]);
+  } catch (e) { /* fall back to system fonts */ }
+}
+const BD_FONT_AR = '"Cairo","Segoe UI",Tahoma,Arial,sans-serif';
+const BD_FONT_SCRIPT = '"Pacifico","Brush Script MT","Segoe Script",cursive';
+function bdRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function bdFit(ctx, text, maxW, startPx, weight, family) {
+  let px = startPx;
+  ctx.font = `${weight} ${px}px ${family}`;
+  while (ctx.measureText(text).width > maxW && px > 16) { px -= 3; ctx.font = `${weight} ${px}px ${family}`; }
+  return px;
+}
+function bdBalloon(ctx, x, y, rx, ry, color, tilt, stringLen) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(tilt);
+  // string
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, ry + 10);
+  ctx.bezierCurveTo(-24, ry + stringLen * 0.35, 24, ry + stringLen * 0.65, -6, ry + stringLen);
+  ctx.stroke();
+  // body (slightly egg shaped)
+  ctx.beginPath();
+  ctx.moveTo(0, -ry);
+  ctx.bezierCurveTo(rx * 1.25, -ry, rx * 1.15, ry * 0.75, 0, ry);
+  ctx.bezierCurveTo(-rx * 1.15, ry * 0.75, -rx * 1.25, -ry, 0, -ry);
+  ctx.closePath();
+  const g = ctx.createRadialGradient(-rx * 0.35, -ry * 0.4, rx * 0.1, 0, 0, ry * 1.1);
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(0.18, color[0]);
+  g.addColorStop(1, color[1]);
+  ctx.fillStyle = g;
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 22;
+  ctx.shadowOffsetY = 10;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  // shine
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.beginPath();
+  ctx.ellipse(-rx * 0.45, -ry * 0.45, rx * 0.16, ry * 0.26, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  // knot
+  ctx.fillStyle = color[1];
+  ctx.beginPath();
+  ctx.moveTo(0, ry - 2);
+  ctx.lineTo(-11, ry + 16);
+  ctx.lineTo(11, ry + 16);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+function bdStar(ctx, x, y, r, fill) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI / 4) * i;
+    const rad = i % 2 === 0 ? r : r * 0.28;
+    ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+function bdIcingBand(ctx, x1, x2, y, rng) {
+  ctx.fillStyle = "#fffaf0";
+  ctx.shadowColor = "rgba(0,0,0,0.18)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+  bdRoundRect(ctx, x1, y - 16, x2 - x1, 32, 16);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  for (let x = x1 + 22; x < x2 - 22; x += 38 + rng() * 12) {
+    const len = 18 + rng() * 34;
+    ctx.beginPath();
+    ctx.moveTo(x - 11, y);
+    ctx.lineTo(x - 11, y + len);
+    ctx.arc(x, y + len, 11, Math.PI, 0, true);
+    ctx.lineTo(x + 11, y);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+function bdCake(ctx, cx, baseY, rng) {
+  // plate
+  const pg = ctx.createLinearGradient(0, baseY - 6, 0, baseY + 40);
+  pg.addColorStop(0, "#fff3c4");
+  pg.addColorStop(1, "#d9a526");
+  ctx.fillStyle = pg;
+  ctx.shadowColor = "rgba(0,0,0,0.4)";
+  ctx.shadowBlur = 24;
+  ctx.shadowOffsetY = 12;
+  ctx.beginPath();
+  ctx.ellipse(cx, baseY + 12, 300, 34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  const tiers = [
+    { w: 460, h: 105, y: baseY - 105, c: ["#e63946", "#a4161a"] },
+    { w: 340, h: 92, y: baseY - 105 - 92, c: ["#ff9ebb", "#ff6f9c"] },
+    { w: 220, h: 84, y: baseY - 105 - 92 - 84, c: ["#ffd166", "#f4a62a"] },
+  ];
+  for (const t of tiers) {
+    const g = ctx.createLinearGradient(cx - t.w / 2, 0, cx + t.w / 2, 0);
+    g.addColorStop(0, t.c[1]);
+    g.addColorStop(0.35, t.c[0]);
+    g.addColorStop(1, t.c[1]);
+    ctx.fillStyle = g;
+    bdRoundRect(ctx, cx - t.w / 2, t.y, t.w, t.h, 14);
+    ctx.fill();
+    // sprinkles
+    for (let i = 0; i < 16; i++) {
+      ctx.fillStyle = ["#ffffff", "#fff3b0", "#a8f0d8", "#bde0ff"][i % 4];
+      ctx.save();
+      ctx.translate(cx - t.w / 2 + 20 + rng() * (t.w - 40), t.y + 46 + rng() * (t.h - 62));
+      ctx.rotate(rng() * Math.PI);
+      ctx.fillRect(-7, -2.5, 14, 5);
+      ctx.restore();
+    }
+    bdIcingBand(ctx, cx - t.w / 2 - 4, cx + t.w / 2 + 4, t.y + 2, rng);
+  }
+  // candles + flames
+  const top = tiers[2];
+  const flameCols = ["#fff7c2", "#ffb703"];
+  [-80, -40, 0, 40, 80].forEach((dx, i) => {
+    const x = cx + dx;
+    const cy = top.y - 8;
+    const cg = ctx.createLinearGradient(x - 8, 0, x + 8, 0);
+    cg.addColorStop(0, i % 2 ? "#ffffff" : "#ff5d73");
+    cg.addColorStop(1, i % 2 ? "#ffd6dc" : "#c1121f");
+    ctx.fillStyle = cg;
+    bdRoundRect(ctx, x - 8, cy - 70, 16, 72, 5);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.65)";
+    ctx.lineWidth = 3;
+    for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.moveTo(x - 8, cy - 62 + k * 17); ctx.lineTo(x + 8, cy - 50 + k * 17); ctx.stroke(); }
+    const glow = ctx.createRadialGradient(x, cy - 100, 2, x, cy - 100, 56);
+    glow.addColorStop(0, "rgba(255,220,120,0.75)");
+    glow.addColorStop(1, "rgba(255,200,80,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, cy - 100, 56, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x, cy - 128);
+    ctx.bezierCurveTo(x + 18, cy - 104, x + 14, cy - 76, x, cy - 76);
+    ctx.bezierCurveTo(x - 14, cy - 76, x - 18, cy - 104, x, cy - 128);
+    const fg = ctx.createLinearGradient(0, cy - 128, 0, cy - 76);
+    fg.addColorStop(0, flameCols[0]);
+    fg.addColorStop(1, flameCols[1]);
+    ctx.fillStyle = fg;
+    ctx.fill();
+  });
+}
+// opts: { name, age (number|null) }  ->  Promise<HTMLCanvasElement>
+async function renderBirthdayCard(opts) {
+  const [crest] = await Promise.all([bdLoadCrest(), bdLoadFonts()]);
+  const W = BDCARD.W, H = BDCARD.H;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const rng = bdRng(opts.name || "ahly");
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+
+  // background: Al Ahly red with a warm glow behind the title
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#e5001c");
+  bg.addColorStop(0.55, "#a3000f");
+  bg.addColorStop(1, "#52000a");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W / 2, 560);
+  for (let i = 0; i < 16; i++) {
+    ctx.rotate((Math.PI * 2) / 16);
+    ctx.fillStyle = i % 2 ? "rgba(255,225,150,0.10)" : "rgba(255,225,150,0.03)";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-90, -1100); ctx.lineTo(90, -1100); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  const glow = ctx.createRadialGradient(W / 2, 560, 40, W / 2, 560, 760);
+  glow.addColorStop(0, "rgba(255,196,90,0.50)");
+  glow.addColorStop(1, "rgba(255,160,60,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 34; i++) { // soft bokeh
+    ctx.fillStyle = `rgba(255,${200 + Math.floor(rng() * 40)},120,${0.05 + rng() * 0.12})`;
+    ctx.beginPath(); ctx.arc(rng() * W, rng() * H, 14 + rng() * 46, 0, Math.PI * 2); ctx.fill();
+  }
+  // gold frame
+  ctx.strokeStyle = "#f2c230";
+  ctx.lineWidth = 10;
+  bdRoundRect(ctx, 22, 22, W - 44, H - 44, 36);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,240,190,0.55)";
+  ctx.lineWidth = 2;
+  bdRoundRect(ctx, 40, 40, W - 80, H - 80, 26);
+  ctx.stroke();
+
+  // confetti
+  const confetti = ["#ffd23f", "#ffffff", "#ff7a59", "#5fe0b7", "#6ec8ff", "#ff9ebb", "#f2c230"];
+  for (let i = 0; i < 170; i++) {
+    const x = 50 + rng() * (W - 100), y = 50 + rng() * (H - 100);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rng() * Math.PI * 2);
+    ctx.fillStyle = confetti[Math.floor(rng() * confetti.length)];
+    ctx.globalAlpha = 0.85;
+    if (rng() < 0.35) { ctx.beginPath(); ctx.arc(0, 0, 5 + rng() * 5, 0, Math.PI * 2); ctx.fill(); }
+    else ctx.fillRect(-4, -9, 8 + rng() * 6, 16 + rng() * 8);
+    ctx.restore();
+  }
+
+  // balloons
+  const balloons = [
+    [150, 330, 62, 80, ["#ffd23f", "#e0a100"], -0.12, 300], [265, 215, 54, 70, ["#ff7a8a", "#d6203a"], 0.1, 280],
+    [88, 520, 52, 68, ["#8be8cf", "#1fa985"], -0.08, 250], [930, 320, 62, 80, ["#ffffff", "#c8c8d0"], 0.12, 300],
+    [815, 205, 54, 70, ["#ffd23f", "#e0a100"], -0.1, 280], [992, 520, 52, 68, ["#ff9ebb", "#e0457b"], 0.08, 250],
+  ];
+  balloons.forEach((b) => bdBalloon(ctx, b[0], b[1], b[2], b[3], b[4], b[5], b[6]));
+
+  // crest + club line
+  if (crest) {
+    const ch = 150, cw = (crest.width / crest.height) * ch;
+    ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 18;
+    ctx.drawImage(crest, W / 2 - cw / 2, 70, cw, ch);
+    ctx.shadowColor = "transparent";
+  }
+  ctx.fillStyle = "#ffe9a8";
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "2px";
+  bdFit(ctx, "AL AHLY CLUB · RECREATIONAL SPORTS COMMITTEE", 640, 25, 700, BD_FONT_AR);
+  ctx.fillText("AL AHLY CLUB · RECREATIONAL SPORTS COMMITTEE", W / 2, 258);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+
+  // headline
+  const gold = ctx.createLinearGradient(0, 300, 0, 420);
+  gold.addColorStop(0, "#fff6c9"); gold.addColorStop(0.5, "#ffd23f"); gold.addColorStop(1, "#e09a00");
+  ctx.lineJoin = "round";
+  ctx.font = `800 128px ${BD_FONT_AR}`;
+  ctx.lineWidth = 14; ctx.strokeStyle = "#7a0010";
+  ctx.strokeText("عيد ميلاد سعيد", W / 2, 400);
+  ctx.fillStyle = gold;
+  ctx.fillText("عيد ميلاد سعيد", W / 2, 400);
+  ctx.font = `112px ${BD_FONT_SCRIPT}`;
+  ctx.lineWidth = 12; ctx.strokeStyle = "#7a0010";
+  ctx.strokeText("Happy Birthday", W / 2, 548);
+  ctx.fillStyle = "#ffffff";
+  ctx.shadowColor = "rgba(255,200,80,0.8)"; ctx.shadowBlur = 24;
+  ctx.fillText("Happy Birthday", W / 2, 548);
+  ctx.shadowColor = "transparent";
+  bdStar(ctx, 205, 372, 30, "#fff3b0"); bdStar(ctx, 880, 340, 24, "#ffffff"); bdStar(ctx, 840, 470, 18, "#ffd23f"); bdStar(ctx, 236, 496, 20, "#ffffff");
+
+  // name plate on a ribbon
+  const py = 600, ph = 150, px = 130, pw = W - 260;
+  ctx.fillStyle = "#5d000b";
+  ctx.beginPath(); ctx.moveTo(78, py + 36); ctx.lineTo(px + 40, py + 36); ctx.lineTo(px + 40, py + ph + 36); ctx.lineTo(78, py + ph + 36); ctx.lineTo(112, py + ph / 2 + 36); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(W - 78, py + 36); ctx.lineTo(W - px - 40, py + 36); ctx.lineTo(W - px - 40, py + ph + 36); ctx.lineTo(W - 78, py + ph + 36); ctx.lineTo(W - 112, py + ph / 2 + 36); ctx.closePath(); ctx.fill();
+  const plate = ctx.createLinearGradient(0, py, 0, py + ph);
+  plate.addColorStop(0, "#fffdf6"); plate.addColorStop(1, "#ffeec0");
+  ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 26; ctx.shadowOffsetY = 12;
+  ctx.fillStyle = plate;
+  bdRoundRect(ctx, px, py, pw, ph, 30);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "#e0a100"; ctx.lineWidth = 6;
+  bdRoundRect(ctx, px + 10, py + 10, pw - 20, ph - 20, 22);
+  ctx.stroke();
+  const name = String(opts.name || "").trim();
+  const px2 = bdFit(ctx, name, pw - 90, 92, 800, BD_FONT_AR);
+  ctx.fillStyle = "#8b000f";
+  ctx.fillText(name, W / 2, py + ph / 2 + px2 * 0.34);
+
+  // optional age badge
+  if (opts.age != null && opts.age > 0) {
+    ctx.save();
+    ctx.translate(W - 165, py + ph - 4);
+    ctx.rotate(0.14);
+    ctx.fillStyle = "#ffd23f";
+    ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+    ctx.beginPath();
+    for (let i = 0; i < 28; i++) { const a = (Math.PI * 2 * i) / 28; const r = i % 2 ? 66 : 80; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    ctx.closePath(); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = "#8b000f";
+    ctx.font = `800 ${String(opts.age).length > 2 ? 52 : 68}px ${BD_FONT_AR}`;
+    ctx.fillText(String(opts.age), 0, 14);
+    ctx.font = `700 20px ${BD_FONT_AR}`;
+    ctx.fillText("YEARS · سنة", 0, 46);
+    ctx.restore();
+  }
+
+  // cake
+  bdCake(ctx, W / 2, 1115, rng);
+  bdStar(ctx, 250, 930, 26, "#fff3b0"); bdStar(ctx, 830, 900, 30, "#ffffff"); bdStar(ctx, 300, 1040, 18, "#ffd23f"); bdStar(ctx, 790, 1030, 20, "#fff3b0");
+
+  // wishes
+  ctx.fillStyle = "#ffffff";
+  const wishAr = "كل عام وأنت بخير .. أيام مليئة بالسعادة والصحة والانتصارات";
+  bdFit(ctx, wishAr, 880, 44, 800, BD_FONT_AR);
+  ctx.shadowColor = "rgba(60,0,8,0.7)"; ctx.shadowBlur = 8;
+  ctx.fillText(wishAr, W / 2, 1204);
+  ctx.fillStyle = "#ffe9a8";
+  const wishEn = "Wishing you a year full of joy, health and victories!";
+  bdFit(ctx, wishEn, 880, 33, 700, BD_FONT_AR);
+  ctx.fillText(wishEn, W / 2, 1250);
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle = "rgba(255,255,255,0.78)";
+  const foot = "لجنة الرياضة الترفيهية – فرع القاهرة الجديدة  ·  Recreational Sports Committee — New Cairo";
+  bdFit(ctx, foot, 880, 23, 700, BD_FONT_AR);
+  ctx.fillText(foot, W / 2, 1303);
+  return canvas;
+}
+const bdCanvasBlob = (canvas) => new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("render"))), "image/png"));
+const bdCardOpts = (it) => ({ name: it.name, age: document.getElementById("bd-showage").checked ? it.turning : null });
+const bdCardBlob = (it) => renderBirthdayCard(bdCardOpts(it)).then(bdCanvasBlob);
+function bdDownloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `birthday-${String(name).replace(/[^\w؀-ۿ]+/g, "_")}.png`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function waBirthdayMessage(name) {
+  const ar = `🎉🎂 كل عام وأنت بخير يا ${name}! أسرة لجنة الرياضة الترفيهية – فرع القاهرة الجديدة تتمنى لك عيد ميلاد سعيدًا وعامًا مليئًا بالصحة والسعادة والانتصارات. 🎈`;
+  const en = `🎉🎂 Happy Birthday, ${name}! The Recreational Sports Committee — New Cairo Branch wishes you a wonderful year full of health, happiness and victories. 🎈`;
+  return `${ar}\n\n${en}`;
+}
+
+var BD = { items: [], counts: { today: 0, week: 0, total: 0 }, sel: new Set(), previewKey: "", copy: null };
+const bdKey = (it) => `${it.membershipNumber}#${it.dependentId == null ? "" : it.dependentId}`;
+const bdFind = (key) => BD.items.find((x) => bdKey(x) === key);
+function bdDateText(it) {
+  return new Date(Date.UTC(2001, it.month - 1, it.day)).toLocaleDateString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+}
+function bdWhen(it) {
+  if (it.daysUntil === 0) return `<span class="bd-today">${escapeAttr(t("bdWhenToday"))}</span>`;
+  if (it.daysUntil === 1) return escapeAttr(t("bdWhenTomorrow"));
+  return escapeAttr(t("bdWhenDays").replace("{n}", fmt(it.daysUntil)));
+}
+function bdBuildMonths() {
+  const sel = document.getElementById("bd-month");
+  if (sel.options.length) return;
+  for (let m = 1; m <= 12; m++) {
+    const o = document.createElement("option");
+    o.value = String(m);
+    sel.appendChild(o);
+  }
+  sel.value = String(new Date().getMonth() + 1);
+}
+function bdLabelMonths() {
+  document.querySelectorAll("#bd-month option").forEach((o) => {
+    o.textContent = new Date(Date.UTC(2001, Number(o.value) - 1, 1)).toLocaleDateString(currentLang === "ar" ? "ar-EG" : "en-GB", { month: "long", timeZone: "UTC" });
+  });
+}
+function bdRender() {
+  const wrap = document.getElementById("bd-table");
+  document.getElementById("bd-summary").textContent = t("bdSummary").replace("{today}", fmt(BD.counts.today)).replace("{week}", fmt(BD.counts.week));
+  if (!BD.items.length) {
+    wrap.innerHTML = `<p class="hint-note">${escapeAttr(t("bdEmpty"))}</p>`;
+  } else {
+    const rows = BD.items
+      .map((it) => {
+        const key = bdKey(it);
+        const sent = it.sentAt ? `<span class="bd-sent">${escapeAttr(t("bdSentOn").replace("{date}", it.sentAt.slice(0, 10)))}</span>` : `<span class="hint-note" style="margin:0;">${escapeAttr(t("bdNotSent"))}</span>`;
+        const who = it.kind === "dependent" ? `<small class="hint-note" style="margin:0;display:block;">${escapeAttr(t("bdFamilyOf").replace("{name}", it.parentName))}</small>` : "";
+        return `<tr class="${it.daysUntil === 0 ? "bd-row-today" : ""}${BD.previewKey === key ? " bd-row-active" : ""}">
+          <td><input type="checkbox" class="bd-sel" value="${escapeAttr(key)}" ${BD.sel.has(key) ? "checked" : ""} ${it.phone ? "" : "disabled"} /></td>
+          <td><button type="button" class="bd-name" data-bd-preview="${escapeAttr(key)}">${escapeAttr(it.name)}</button>${who}</td>
+          <td>${escapeAttr(bdDateText(it))}<small class="hint-note" style="margin:0;display:block;">${bdWhen(it)}</small></td>
+          <td class="num">${fmt(it.turning)}</td>
+          <td class="num">${it.phone ? escapeAttr(it.phone) : `<span class="hint-note" style="margin:0;">${escapeAttr(t("bdNoPhone"))}</span>`}</td>
+          <td>${sent}</td>
+          <td><button type="button" class="secondary small" data-bd-dl="${escapeAttr(key)}">${escapeAttr(t("bdDlShort"))}</button></td>
+        </tr>`;
+      })
+      .join("");
+    wrap.innerHTML = `<div class="rb-table-wrap"><table class="rb-table"><thead><tr><th></th><th>${escapeAttr(t("bdColName"))}</th><th>${escapeAttr(t("bdColDate"))}</th><th>${escapeAttr(t("bdColTurning"))}</th><th>${escapeAttr(t("bdColPhone"))}</th><th>${escapeAttr(t("bdColSent"))}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  bdUpdateSendBtn();
+}
+function bdUpdateSendBtn() {
+  const btn = document.getElementById("bd-send");
+  btn.textContent = t("bdSendSelected").replace("{n}", fmt(BD.sel.size));
+  btn.disabled = !BD.sel.size;
+}
+async function bdPreview(key) {
+  const it = bdFind(key);
+  if (!it) return;
+  BD.previewKey = key;
+  const canvas = await renderBirthdayCard(bdCardOpts(it));
+  const pv = document.getElementById("bd-preview");
+  pv.width = canvas.width;
+  pv.height = canvas.height;
+  pv.getContext("2d").drawImage(canvas, 0, 0);
+  document.getElementById("bd-preview-wrap").classList.remove("hidden");
+  document.getElementById("bd-preview-name").textContent = it.name;
+  document.querySelectorAll("#bd-table tbody tr").forEach((tr) => {
+    const b = tr.querySelector("[data-bd-preview]");
+    tr.classList.toggle("bd-row-active", !!b && b.dataset.bdPreview === key);
+  });
+}
+async function loadBirthdays() {
+  if (!rbIsAdmin() || !document.getElementById("bd-card")) return;
+  bdBuildMonths();
+  bdLabelMonths();
+  const scope = document.getElementById("bd-scope").value;
+  document.getElementById("bd-month").classList.toggle("hidden", scope !== "month");
+  const q = new URLSearchParams({ scope, month: document.getElementById("bd-month").value, family: document.getElementById("bd-family").checked ? "1" : "0" });
+  try {
+    const data = await api(`/api/admin/birthdays?${q}`);
+    BD.items = data.items;
+    BD.counts = data.counts;
+    BD.sel = new Set([...BD.sel].filter((k) => BD.items.some((x) => bdKey(x) === k && x.phone)));
+    bdRender();
+    if (BD.previewKey && bdFind(BD.previewKey)) bdPreview(BD.previewKey);
+    else if (BD.items.length) bdPreview(bdKey(BD.items[0]));
+    else document.getElementById("bd-preview-wrap").classList.add("hidden");
+  } catch (err) {
+    showMsg(document.getElementById("bd-msg"), err.message, false);
+  }
+}
+function bdCopyCard(it) {
+  const blobP = bdCardBlob(it);
+  BD.copy = (async () => {
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blobP })]);
+        return "copied";
+      }
+    } catch (e) { /* fall through to a download */ }
+    try { bdDownloadBlob(await blobP, it.name); return "downloaded"; } catch (e) { return "failed"; }
+  })();
+}
+function bdSend() {
+  const msg = document.getElementById("bd-msg");
+  const people = BD.items.filter((x) => BD.sel.has(bdKey(x)) && x.phone);
+  if (!people.length) return showMsg(msg, t("bdNeedSelect"), false);
+  if (people.length > CREDS_BIG_BATCH && !confirm(`${fmt(people.length)} — ${t("credsBigBatch")}`)) return;
+  waQueueStart({
+    title: t("bdQueueTitle"),
+    warn: t("bdQueueWarn"),
+    items: people.map((it) => ({ label: `${it.name} — ${bdDateText(it)}`, it })),
+    beforeOpen: (item) => bdCopyCard(item.it),
+    async prepare(item) {
+      const r = await api("/api/admin/birthdays/sent", { method: "POST", body: JSON.stringify({ membershipNumber: item.it.membershipNumber, dependentId: item.it.dependentId }) });
+      item.it.sentAt = r.sentAt;
+      return { phone: r.phone || item.it.phone, text: waBirthdayMessage(item.it.name) };
+    },
+    async afterOpen() {
+      const res = BD.copy ? await BD.copy : "failed";
+      showMsg(document.getElementById("creds-msg"), t(res === "copied" ? "bdCopied" : res === "downloaded" ? "bdDownloaded" : "bdCopyFailed"), res !== "failed");
+    },
+    onClose: () => loadBirthdays(),
+  });
+}
+(function wireBirthdayCards() {
+  const card = document.getElementById("bd-card");
+  if (!card) return;
+  ["bd-scope", "bd-month", "bd-family"].forEach((id) => document.getElementById(id).addEventListener("change", () => loadBirthdays()));
+  document.getElementById("bd-showage").addEventListener("change", () => { if (BD.previewKey) bdPreview(BD.previewKey); });
+  document.getElementById("bd-select-all").addEventListener("click", () => {
+    BD.items.forEach((x) => { if (x.phone) BD.sel.add(bdKey(x)); });
+    bdRender();
+  });
+  document.getElementById("bd-select-none").addEventListener("click", () => { BD.sel.clear(); bdRender(); });
+  document.getElementById("bd-select-unsent").addEventListener("click", () => {
+    BD.sel.clear();
+    BD.items.forEach((x) => { if (x.phone && !x.sentAt) BD.sel.add(bdKey(x)); });
+    bdRender();
+  });
+  document.getElementById("bd-send").addEventListener("click", bdSend);
+  document.getElementById("bd-preview-dl").addEventListener("click", async () => {
+    const it = bdFind(BD.previewKey);
+    if (it) bdDownloadBlob(await bdCardBlob(it), it.name);
+  });
+  card.addEventListener("change", (e) => {
+    const cb = e.target.closest && e.target.closest(".bd-sel");
+    if (!cb) return;
+    if (cb.checked) BD.sel.add(cb.value); else BD.sel.delete(cb.value);
+    bdUpdateSendBtn();
+  });
+  card.addEventListener("click", async (e) => {
+    const pv = e.target.closest("[data-bd-preview]");
+    if (pv) return bdPreview(pv.dataset.bdPreview);
+    const dl = e.target.closest("[data-bd-dl]");
+    if (dl) {
+      const it = bdFind(dl.dataset.bdDl);
+      if (it) bdDownloadBlob(await bdCardBlob(it), it.name);
+    }
+  });
 })();
 
 // ---------------------------------------------------------- admin: settings --
@@ -5571,6 +6106,8 @@ document.getElementById("creds-open").addEventListener("click", async () => {
   const btn = document.getElementById("creds-open");
   const msg = document.getElementById("creds-msg");
   btn.disabled = true;
+  // Runs synchronously inside the click (e.g. copy the birthday card to the clipboard).
+  if (c.cfg.beforeOpen) c.cfg.beforeOpen(item);
   try {
     const { phone, text } = await c.cfg.prepare(item);
     const href = waLink(phone, text);
@@ -5579,6 +6116,7 @@ document.getElementById("creds-open").addEventListener("click", async () => {
     c.sent++;
     c.idx++;
     credsRender();
+    if (c.cfg.afterOpen) c.cfg.afterOpen(item);
     if (c.idx < c.queue.length) credsCooldown();
   } catch (e) {
     showMsg(msg, e.message, false);

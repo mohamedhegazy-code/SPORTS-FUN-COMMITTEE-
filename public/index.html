@@ -6,7 +6,7 @@
 <title>MyAhlawy — Online Registration &amp; Points</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Cairo:wght@600;700;800&family=Pacifico&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -1050,6 +1050,39 @@
       </div>
 
       <div class="admin-tab-panel hidden" data-admin-panel="members">
+        <div class="card admin-full-only" id="bd-card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 17.5h13M5 17.5v-5.5h10v5.5M5 12c1.7 1.4 3.3 1.4 5 0s3.3-1.4 5 0M10 12V8.5M10 8.5c-1.1-.9-1.1-2 0-3 1.1 1 1.1 2.1 0 3z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="bdTitle">Birthday cards</span></h2>
+          <p class="section-sub" data-i18n="bdIntro">See who has a birthday, preview the birthday card, and send it on WhatsApp to one member or to several, one chat at a time.</p>
+          <div class="rb-filters">
+            <div class="rb-f"><span class="rb-fl" data-i18n="bdShow">Show birthdays</span>
+              <div class="rb-pair"><select id="bd-scope"><option value="week" data-i18n="bdWeek">Today and the next 7 days</option><option value="today" data-i18n="bdToday">Today</option><option value="month" data-i18n="bdMonth">A month</option><option value="all" data-i18n="bdAll">All (next birthday first)</option></select><select id="bd-month" class="hidden"></select></div></div>
+            <div class="rb-f"><span class="rb-fl" data-i18n="bdOptions">Options</span>
+              <div class="rb-chips">
+                <label class="agerep-chk"><input type="checkbox" id="bd-family" checked /> <span data-i18n="bdIncludeFamily">Include family members</span></label>
+                <label class="agerep-chk"><input type="checkbox" id="bd-showage" /> <span data-i18n="bdShowAge">Show the age on the card</span></label>
+              </div></div>
+          </div>
+          <p class="hint-note" id="bd-summary" style="margin:10px 0 0;"></p>
+          <div class="bd-layout">
+            <div class="bd-list">
+              <div class="agerep-actions">
+                <button type="button" class="secondary small" id="bd-select-all" data-i18n="ageRepSelectAll">Select all</button>
+                <button type="button" class="secondary small" id="bd-select-unsent" data-i18n="bdSelectUnsent">Select not yet sent</button>
+                <button type="button" class="secondary small" id="bd-select-none" data-i18n="ageRepClear">Clear</button>
+              </div>
+              <div id="bd-table"></div>
+              <div class="rb-actions"><button type="button" class="primary" id="bd-send" disabled></button></div>
+              <p class="hint-note" data-i18n="bdHowTo">When you press Open WhatsApp the card is copied. Paste it into the chat (Ctrl or Cmd + V), then press Send. WhatsApp does not allow a link to attach the picture by itself.</p>
+              <div class="msg" id="bd-msg"></div>
+            </div>
+            <div class="bd-preview-col hidden" id="bd-preview-wrap">
+              <canvas id="bd-preview" width="1080" height="1350"></canvas>
+              <p class="hint-note" id="bd-preview-name" style="margin:6px 0;text-align:center;"></p>
+              <button type="button" class="secondary small" id="bd-preview-dl" data-i18n="bdDownload">Download card</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8" cy="7" r="2.8" stroke="currentColor" stroke-width="1.4"/><path d="M3 16c.6-3 2.5-4.6 5-4.6s4.4 1.6 5 4.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M14.5 6.5h3M16 5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="adminMembersTitle">Members</span></h2>
           <p class="section-sub" data-i18n="adminMembersIntro">Import your existing member list, export it as a backup, and invite members directly to an event without waiting for them to sign up themselves.</p>
