@@ -549,6 +549,7 @@ function setLang(lang) {
     renderMemberAddEventDropdown();
     renderMembersTable();
     renderDirectoryTable();
+    if (document.querySelector('[data-admin-panel="points"]:not(.hidden)')) loadPointsStart();
   }
   if (ADMIN_CHAT_OPEN_MEMBERSHIP) refreshOpenAdminChatThread();
   updateSessionBadge();
@@ -740,7 +741,10 @@ function applyMaybeShowTermsGate() {
 let MUST_CHANGE_PASSWORD_GATE_OPEN = false;
 function applyMaybeShowMustChangePasswordGate() {
   const isStaff = CURRENT_SESSION && CURRENT_SESSION.type === "staff";
-  const mustChange = isStaff && CURRENT_SESSION.staff.mustChangePassword;
+  const isMember = CURRENT_SESSION && CURRENT_SESSION.type === "member";
+  // Members get the same gate when the committee issued them a temporary
+  // password (Admin > Member directory > Send login details).
+  const mustChange = !!((isStaff && CURRENT_SESSION.staff.mustChangePassword) || (isMember && CURRENT_SESSION.member && CURRENT_SESSION.member.mustChangePassword));
   const modal = document.getElementById("must-change-password-modal");
   if (mustChange) {
     if (!MUST_CHANGE_PASSWORD_GATE_OPEN) {
@@ -775,6 +779,10 @@ document.getElementById("mcp-submit").addEventListener("click", async () => {
     });
     if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && result.staff) {
       CURRENT_SESSION.staff = result.staff;
+    }
+    if (CURRENT_SESSION && CURRENT_SESSION.type === "member") {
+      if (result.member) CURRENT_SESSION.member = result.member;
+      else if (CURRENT_SESSION.member) CURRENT_SESSION.member.mustChangePassword = false;
     }
     document.getElementById("mcp-old").value = "";
     document.getElementById("mcp-new").value = "";
@@ -3316,6 +3324,7 @@ function switchAdminTab(tabKey) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
   if (tabKey === "reports") loadReports();
+  if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
     loadChatThreadsList();
     loadInquiriesList();
@@ -4768,9 +4777,53 @@ function renderDirectoryTable() {
       m.memberType === "follower"
         ? ` <span class="fam-rel-badge">${t("memberTypeFollower")}${m.relationshipToMain ? ` · ${escapeAttr(m.relationshipToMain)}` : ""}</span>`
         : "";
-    return `<tr data-directory-row data-search="${searchBlob}">
+    const archived = !!m.archivedAt;
+    const badges =
+      (archived ? ` <span class="dir-badge archived">${t("archivedBadge")}</span>` : "") +
+      (!m.hasLoggedInAccount ? ` <span class="dir-badge nologin">${t("noLoginBadge")}</span>` : m.mustChangePassword ? ` <span class="dir-badge temp">${t("tempPasswordBadge")}</span>` : "");
+    const dataAttrs = [
+      `data-status="${archived ? "archived" : "active"}"`,
+      `data-account="${m.hasLoggedInAccount ? "has" : "none"}"`,
+      `data-must="${m.mustChangePassword ? "1" : "0"}"`,
+      `data-age="${m.ageGroup || "none"}"`,
+      `data-type="${m.memberType === "follower" ? "follower" : "main"}"`,
+      `data-act="${m.checkedInCount > 0 ? "attended" : m.registeredCount > 0 ? "registered" : "never"}"`,
+      `data-phone="${m.phone ? "1" : "0"}"`,
+    ].join(" ");
+    // Admin-only manual points editor. Changes are stored as an adjustment
+    // (never overwrites history) and always require a reason.
+    const adjHistory = (m.adjustments || []).length
+      ? `<ul class="directory-list">${m.adjustments
+          .map(
+            (a) =>
+              `<li><b class="${a.delta >= 0 ? "pos" : "neg"}">${a.delta >= 0 ? "+" : ""}${fmt(a.delta)}</b> · ${escapeAttr(a.reason)} <span style="color:var(--muted);">(${escapeAttr((a.createdAt || "").slice(0, 10))}${a.byName ? " · " + escapeAttr(a.byName) : ""})</span></li>`
+          )
+          .join("")}</ul>`
+      : `<p class="dashboard-empty-note">${t("pointsEditNone")}</p>`;
+    const me = escapeAttr(m.membershipNumber);
+    const pointsEditorHtml = `<div class="dir-points-editor" style="margin-top:14px;">
+        <h4 style="margin:6px 0;">${t("pointsEditTitle")}</h4>
+        <p class="hint-note" style="margin:0 0 6px;">${t("pointsEditBalance")}: <b>${fmt(m.balance)}</b>${m.familyPooled ? ` · ${t("pointsEditPooledNote")}` : ""}</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <select class="dir-pts-mode" data-me="${me}" style="max-width:190px;padding:5px 6px;font-size:0.8rem;">
+            <option value="add">${t("pointsModeAdd")}</option>
+            <option value="set">${t("pointsModeSet")}</option>
+          </select>
+          <input class="dir-pts-amount" data-me="${me}" type="number" step="1" placeholder="${t("pointsEditAmount")}" style="max-width:120px;padding:5px 8px;font-size:0.8rem;" />
+          <input class="dir-pts-reason" data-me="${me}" type="text" maxlength="200" placeholder="${t("pointsEditReason")}" style="flex:1;min-width:180px;padding:5px 8px;font-size:0.8rem;" />
+          <button class="secondary dir-pts-save" data-me="${me}" style="padding:5px 12px;font-size:0.78rem;">${t("pointsEditSave")}</button>
+        </div>
+        <div class="msg dir-pts-msg" data-me="${me}"></div>
+        <h4 style="margin:10px 0 4px;">${t("pointsEditHistory")}</h4>
+        ${adjHistory}
+      </div>`;
+    const sendCredsHtml = archived
+      ? ""
+      : `<div style="margin-top:14px;"><button type="button" class="roster-btn wa dir-send-one" data-me="${me}">${t("btnSendCredsRow")}</button></div>`;
+    return `<tr data-directory-row data-search="${searchBlob}" ${dataAttrs}${archived ? ' class="dir-archived"' : ""}>
+        <td><input type="checkbox" class="dir-sel" value="${me}" aria-label="${me}" /></td>
         <td>${escapeAttr(m.membershipNumber)}</td>
-        <td>${escapeAttr(m.name)}${memberTypeBadge}</td>
+        <td>${escapeAttr(m.name)}${memberTypeBadge}${badges}</td>
         <td style="white-space:nowrap;">${m.ageGroup ? escapeAttr(ageGroupLabel(m.ageGroup)) : `<span class="fam-age-missing">—</span>`}</td>
         <td>${escapeAttr(m.phone)}</td>
         <td>${escapeAttr(m.email || "")}</td>
@@ -4780,20 +4833,22 @@ function renderDirectoryTable() {
         <td class="num">${fmt(m.checkedInCount)}</td>
         <td><button class="secondary" data-directory-toggle="${i}" style="padding:3px 10px;font-size:0.78rem;">${t("btnDetails")}</button></td>
       </tr>
-      <tr data-directory-row data-search="${searchBlob}" data-directory-detail="${i}" data-open="false" class="hidden">
-        <td colspan="10">
+      <tr data-directory-row data-search="${searchBlob}" ${dataAttrs} data-directory-detail="${i}" data-open="false" class="hidden">
+        <td colspan="11">
           <div class="grid-2">
             <div><h4 style="margin:6px 0;">${t("colFamilyMembers")}</h4>${dependentsHtml}</div>
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
           </div>
           ${ageEditorHtml}
+          ${pointsEditorHtml}
           ${familyLinkHtml}
+          ${sendCredsHtml}
         </td>
       </tr>`;
   }).join("");
   wrap.innerHTML = `<div class="dashboard-table-wrap"><table class="dashboard-table">
     <thead><tr>
-      <th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colAgeGroup")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
+      <th></th><th>${t("colMembershipNumber")}</th><th>${t("colName")}</th><th>${t("colAgeGroup")}</th><th>${t("colPhone")}</th><th>${t("colEmail")}</th>
       <th>${t("colFamilyGroup")}</th><th>${t("colPointsBalance")}</th><th>${t("colRegistrations")}</th>
       <th>${t("colCheckedIn")}</th><th></th>
     </tr></thead>
@@ -4869,6 +4924,41 @@ function renderDirectoryTable() {
       }
     });
   });
+  wrap.querySelectorAll(".dir-pts-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const me = btn.dataset.me;
+      const q = (cls) => wrap.querySelector(`.${cls}[data-me="${me}"]`);
+      const msg = q("dir-pts-msg");
+      const mode = q("dir-pts-mode").value;
+      const raw = q("dir-pts-amount").value.trim();
+      const reason = q("dir-pts-reason").value.trim();
+      if (!/^-?\d+$/.test(raw)) return showMsg(msg, t("errPointsAmount"), false);
+      if (!reason) return showMsg(msg, t("errPointsReason"), false);
+      btn.disabled = true;
+      try {
+        await api(`/api/admin/members/${encodeURIComponent(me)}/points-adjust`, {
+          method: "POST",
+          body: JSON.stringify({ mode, amount: Number(raw), reason }),
+        });
+        const openIdx = Array.from(wrap.querySelectorAll("[data-directory-detail][data-open='true']")).map((r) => r.dataset.directoryDetail);
+        await loadAdminDirectory();
+        openIdx.forEach((idx) => {
+          const row = wrap.querySelector(`[data-directory-detail="${idx}"]`);
+          const tgl = wrap.querySelector(`[data-directory-toggle="${idx}"]`);
+          if (row && tgl) tgl.click();
+        });
+        const m2 = wrap.querySelector(`.dir-pts-msg[data-me="${me}"]`);
+        if (m2) showMsg(m2, t("pointsEditSaved"), true);
+      } catch (e) {
+        showMsg(msg, e.message, false);
+        btn.disabled = false;
+      }
+    });
+  });
+  wrap.querySelectorAll(".dir-send-one").forEach((btn) => {
+    btn.addEventListener("click", () => credsStart([btn.dataset.me]));
+  });
+  wrap.querySelectorAll(".dir-sel").forEach((cb) => cb.addEventListener("change", updateDirectorySelectionUI));
   applyDirectorySearchFilter();
 }
 
@@ -4876,18 +4966,264 @@ function renderDirectoryTable() {
 // AND the admin has explicitly opened it via the "Details" button - so
 // typing in the search box never forces a detail panel open, and it also
 // doesn't leave a stale open panel visible once its member is filtered out.
+function directoryFilterState() {
+  const v = (id) => document.getElementById(id).value;
+  return {
+    query: v("directory-search").trim().toLowerCase(),
+    status: v("dir-f-status"),
+    account: v("dir-f-account"),
+    age: v("dir-f-age"),
+    type: v("dir-f-type"),
+    act: v("dir-f-act"),
+    phone: v("dir-f-phone"),
+  };
+}
+function directoryRowMatches(row, f) {
+  const d = row.dataset;
+  if (f.query && !d.search.includes(f.query)) return false;
+  if (f.status !== "all" && d.status !== f.status) return false;
+  if (f.account === "has" && d.account !== "has") return false;
+  if (f.account === "none" && d.account !== "none") return false;
+  if (f.account === "must" && d.must !== "1") return false;
+  if (f.age && d.age !== f.age) return false;
+  if (f.type && d.type !== f.type) return false;
+  if (f.act && d.act !== f.act) return false;
+  if (f.phone === "has" && d.phone !== "1") return false;
+  if (f.phone === "missing" && d.phone !== "0") return false;
+  return true;
+}
 function applyDirectorySearchFilter() {
-  const query = document.getElementById("directory-search").value.trim().toLowerCase();
+  const f = directoryFilterState();
+  let shown = 0;
+  let total = 0;
   document.querySelectorAll("#directory-table [data-directory-row]").forEach((row) => {
-    const matches = !query || row.dataset.search.includes(query);
+    const matches = directoryRowMatches(row, f);
     if (row.hasAttribute("data-directory-detail")) {
       row.classList.toggle("hidden", !matches || row.dataset.open !== "true");
     } else {
+      total++;
+      if (matches) shown++;
       row.classList.toggle("hidden", !matches);
     }
   });
+  const count = document.getElementById("dir-count");
+  if (count) count.textContent = DIRECTORY_DATA.length ? `${t("dirShowing")} ${fmt(shown)} / ${fmt(total)}` : "";
+  updateDirectorySelectionUI();
 }
-document.getElementById("directory-search").addEventListener("input", applyDirectorySearchFilter);
+["directory-search", "dir-f-status", "dir-f-account", "dir-f-age", "dir-f-type", "dir-f-act", "dir-f-phone"].forEach((id) => {
+  document.getElementById(id).addEventListener(id === "directory-search" ? "input" : "change", applyDirectorySearchFilter);
+});
+
+// ---- selection + bulk actions (archive / restore / delete / credentials) ----
+// Only checked rows that are ALSO currently visible count, so a filter change
+// can never leave a hidden member silently selected for a destructive action.
+function directorySelected() {
+  return Array.from(document.querySelectorAll("#directory-table .dir-sel:checked"))
+    .filter((cb) => !cb.closest("tr").classList.contains("hidden"))
+    .map((cb) => cb.value);
+}
+function updateDirectorySelectionUI() {
+  const el = document.getElementById("dir-sel-count");
+  if (!el) return;
+  const n = directorySelected().length;
+  el.textContent = n ? `${fmt(n)} ${t("dirSelected")}` : "";
+  ["dir-send-creds", "dir-archive", "dir-restore", "dir-delete"].forEach((id) => {
+    document.getElementById(id).disabled = !n;
+  });
+}
+document.getElementById("dir-select-visible").addEventListener("click", () => {
+  document.querySelectorAll("#directory-table tr[data-directory-row]:not([data-directory-detail]):not(.hidden) .dir-sel").forEach((cb) => (cb.checked = true));
+  updateDirectorySelectionUI();
+});
+document.getElementById("dir-clear-sel").addEventListener("click", () => {
+  document.querySelectorAll("#directory-table .dir-sel").forEach((cb) => (cb.checked = false));
+  updateDirectorySelectionUI();
+});
+async function directoryBulk(action) {
+  const msg = document.getElementById("dir-action-msg");
+  const nums = directorySelected();
+  if (!nums.length) return;
+  const body = { action, membershipNumbers: nums };
+  if (action === "archive" && !confirm(`${t("confirmArchiveMembers")} (${fmt(nums.length)})`)) return;
+  if (action === "restore" && !confirm(`${t("confirmRestoreMembers")} (${fmt(nums.length)})`)) return;
+  if (action === "delete") {
+    const typed = window.prompt(`${t("confirmDeleteMembers")} (${fmt(nums.length)})`);
+    if (typed !== "DELETE") return;
+    body.confirm = "DELETE";
+  }
+  try {
+    const r = await api("/api/admin/members/bulk", { method: "POST", body: JSON.stringify(body) });
+    const fails = (r.results || []).filter((x) => !x.ok).map((x) => `#${x.membershipNumber}: ${x.error}`);
+    await loadAdminDirectory();
+    showMsg(msg, `${t("bulkDone")}: ${fmt(r.done)} · ${t("bulkFailed")}: ${fmt(r.failed)}${fails.length ? "\n" + fails.slice(0, 8).join("\n") : ""}`, !r.failed);
+    msg.style.whiteSpace = "pre-line";
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+document.getElementById("dir-archive").addEventListener("click", () => directoryBulk("archive"));
+document.getElementById("dir-restore").addEventListener("click", () => directoryBulk("restore"));
+document.getElementById("dir-delete").addEventListener("click", () => directoryBulk("delete"));
+document.getElementById("dir-send-creds").addEventListener("click", () => credsStart(directorySelected()));
+
+// ---- sending login details over WhatsApp (one wa.me chat per member) --------
+// A fresh temporary password is generated on the server only when the admin
+// presses "Open WhatsApp" for that member, so skipped members keep whatever
+// password they had. Each chat is opened by a human click, with a short
+// cool-down between sends, so this never looks like automated bulk sending.
+function waCredentialsMessage(name, num, pw, url) {
+  const ar = `مرحبًا ${name}،\nبيانات الدخول إلى منصة أهلاوي (لجنة الرياضة الترفيهية - فرع القاهرة الجديدة):\nرابط الدخول: ${url}\nاسم المستخدم (رقم العضوية): ${num}\nكلمة المرور المؤقتة: ${pw}\nسيُطلب منك تغيير كلمة المرور عند أول دخول. من فضلك لا تشارك هذه البيانات مع أحد.`;
+  const en = `Hi ${name},\nYour MyAhlawy login (Recreational Sports Committee — New Cairo Branch):\nLogin page: ${url}\nUsername (membership number): ${num}\nTemporary password: ${pw}\nYou will be asked to change the password the first time you sign in. Please do not share these details.`;
+  return `${ar}\n\n${en}`;
+}
+const CREDS_COOLDOWN_SECONDS = 8;
+const CREDS_BIG_BATCH = 30;
+let CREDS = null;
+let CREDS_TIMER = null;
+function credsStart(numbers) {
+  const msg = document.getElementById("dir-action-msg");
+  const members = numbers.map((n) => DIRECTORY_DATA.find((m) => m.membershipNumber === n)).filter(Boolean);
+  const queue = members.filter((m) => !m.archivedAt && m.phone);
+  const noPhone = members.filter((m) => !m.archivedAt && !m.phone).length;
+  if (!queue.length) return showMsg(msg, t("credsNoPhone"), false);
+  if (noPhone) showMsg(msg, `${fmt(noPhone)} ${t("credsNoPhone")}`, false);
+  const hasPw = queue.filter((m) => m.hasLoggedInAccount).length;
+  if (hasPw && !confirm(`${fmt(hasPw)} ${t("credsReplaceConfirm")}`)) return;
+  if (queue.length > CREDS_BIG_BATCH && !confirm(`${fmt(queue.length)} — ${t("credsBigBatch")}`)) return;
+  CREDS = { queue, idx: 0, sent: 0, skipped: 0 };
+  document.getElementById("creds-modal").classList.remove("hidden");
+  credsRender();
+}
+function credsStopTimer() {
+  if (CREDS_TIMER) clearInterval(CREDS_TIMER);
+  CREDS_TIMER = null;
+}
+function credsRender() {
+  const c = CREDS;
+  const openBtn = document.getElementById("creds-open");
+  const skipBtn = document.getElementById("creds-skip");
+  credsStopTimer();
+  document.getElementById("creds-msg").classList.remove("show");
+  if (c.idx >= c.queue.length) {
+    document.getElementById("creds-progress").textContent = t("credsDone");
+    document.getElementById("creds-name").textContent = `${fmt(c.sent)} ${t("credsSentWord")} · ${fmt(c.skipped)} ${t("credsSkippedWord")}`;
+    openBtn.classList.add("hidden");
+    skipBtn.textContent = t("waBulkClose");
+    return;
+  }
+  const m = c.queue[c.idx];
+  document.getElementById("creds-progress").textContent = `${t("credsProgress")} ${fmt(c.idx + 1)} / ${fmt(c.queue.length)}`;
+  document.getElementById("creds-name").textContent = `${m.name} (${m.membershipNumber})`;
+  openBtn.classList.remove("hidden");
+  openBtn.disabled = false;
+  openBtn.textContent = t("credsOpen");
+  skipBtn.textContent = t("waBulkSkip");
+}
+function credsCooldown() {
+  const openBtn = document.getElementById("creds-open");
+  let left = CREDS_COOLDOWN_SECONDS;
+  openBtn.disabled = true;
+  openBtn.textContent = `${t("credsWait")} ${left}`;
+  credsStopTimer();
+  CREDS_TIMER = setInterval(() => {
+    left--;
+    if (left <= 0) {
+      credsStopTimer();
+      openBtn.disabled = false;
+      openBtn.textContent = t("credsOpen");
+    } else {
+      openBtn.textContent = `${t("credsWait")} ${left}`;
+    }
+  }, 1000);
+}
+function credsClose() {
+  credsStopTimer();
+  document.getElementById("creds-modal").classList.add("hidden");
+  CREDS = null;
+  loadAdminDirectory();
+}
+document.getElementById("creds-close").addEventListener("click", credsClose);
+document.getElementById("creds-skip").addEventListener("click", () => {
+  const c = CREDS;
+  if (!c) return;
+  if (c.idx >= c.queue.length) return credsClose();
+  c.skipped++;
+  c.idx++;
+  credsRender();
+});
+document.getElementById("creds-open").addEventListener("click", async () => {
+  const c = CREDS;
+  if (!c || c.idx >= c.queue.length) return;
+  const m = c.queue[c.idx];
+  const btn = document.getElementById("creds-open");
+  const msg = document.getElementById("creds-msg");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/admin/members/${encodeURIComponent(m.membershipNumber)}/send-credentials`, {
+      method: "POST",
+      body: JSON.stringify({ replaceExisting: true }),
+    });
+    const href = waLink(r.phone || m.phone, waCredentialsMessage(r.name || m.name, r.membershipNumber, r.tempPassword, r.loginUrl));
+    if (!href) throw new Error(t("waNoPhoneNote"));
+    m.hasLoggedInAccount = true;
+    m.mustChangePassword = true;
+    window.open(href, "_blank", "noopener");
+    c.sent++;
+    c.idx++;
+    credsRender();
+    if (c.idx < c.queue.length) credsCooldown();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+    btn.disabled = false;
+  }
+});
+
+// ---- Points & Rewards: the date points start counting ----------------------
+async function loadPointsStart() {
+  const sel = document.getElementById("pstart-event");
+  if (!sel) return;
+  try {
+    const cur = await api("/api/admin/points-start");
+    const evs = EVENTS_DATA.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    sel.innerHTML =
+      `<option value="">${escapeAttr(t("pstartNone"))}</option>` +
+      evs.map((e) => `<option value="${e.id}">${escapeAttr(bilingual(e.nameEn, e.nameAr))} — ${escapeAttr(e.date || "")}</option>`).join("");
+    sel.value = cur.eventId ? String(cur.eventId) : "";
+    const label = document.getElementById("pstart-current");
+    label.textContent = cur.date
+      ? `${t("pstartCurrent")} ${cur.eventId ? bilingual(cur.nameEn, cur.nameAr) : ""} (${cur.date})`
+      : t("pstartCurrentNone");
+  } catch (e) {
+    showMsg(document.getElementById("pstart-msg"), e.message, false);
+  }
+}
+document.getElementById("pstart-save").addEventListener("click", async () => {
+  const msg = document.getElementById("pstart-msg");
+  const eventId = document.getElementById("pstart-event").value;
+  if (!eventId) return showMsg(msg, t("pstartPickEvent"), false);
+  try {
+    const p = await api(`/api/admin/points-start/preview?eventId=${encodeURIComponent(eventId)}`);
+    const text = `${t("pstartConfirm")}\n\n${fmt(p.checkInsAffected)} ${t("pstartCheckins")}\n${fmt(p.pointsRemoved)} ${t("pstartPoints")}\n${fmt(p.redemptionsIgnored)} ${t("pstartRedemptions")}`;
+    if (!confirm(text)) return;
+    await api("/api/admin/points-start", { method: "PUT", body: JSON.stringify({ eventId: Number(eventId) }) });
+    showMsg(msg, t("pstartSaved"), true);
+    await loadPointsStart();
+    if (typeof loadAdminDirectory === "function") loadAdminDirectory();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
+document.getElementById("pstart-clear").addEventListener("click", async () => {
+  const msg = document.getElementById("pstart-msg");
+  try {
+    await api("/api/admin/points-start", { method: "PUT", body: JSON.stringify({ eventId: null }) });
+    showMsg(msg, t("pstartCleared"), true);
+    await loadPointsStart();
+    loadAdminDirectory();
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
 
 // -------------------------------------------------------- edit points rules --
 

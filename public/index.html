@@ -1010,7 +1010,57 @@
         <div class="card">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="1.4" stroke="currentColor" stroke-width="1.4"/><circle cx="7.3" cy="8" r="1.6" stroke="currentColor" stroke-width="1.2"/><path d="M4.8 12.8c.4-1.6 1.4-2.4 2.5-2.4s2.1.8 2.5 2.4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M12 7.5h3.3M12 10h3.3M12 12.5h3.3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg><span data-i18n="directoryTitle">Member directory</span></h2>
           <p class="section-sub" data-i18n="directoryIntro">Every member, in one place: contact details, points balance, family members, and their full registration history.</p>
-          <input id="directory-search" type="text" placeholder="Search by name, membership number, or phone" style="margin-bottom:10px;" />
+          <div class="dir-toolbar">
+            <input id="directory-search" type="text" placeholder="Search by name, membership number, or phone" />
+            <select id="dir-f-status" aria-label="Status">
+              <option value="active" data-i18n="dirFilterStatusActive">Active members</option>
+              <option value="archived" data-i18n="dirFilterStatusArchived">Archived</option>
+              <option value="all" data-i18n="dirFilterStatusAll">All members</option>
+            </select>
+            <select id="dir-f-account" aria-label="Account">
+              <option value="" data-i18n="dirFilterAccountAll">Any account status</option>
+              <option value="has" data-i18n="dirFilterAccountHas">Has a login</option>
+              <option value="none" data-i18n="dirFilterAccountNone">No login yet</option>
+              <option value="must" data-i18n="dirFilterAccountMust">Still on a temporary password</option>
+            </select>
+            <select id="dir-f-age" aria-label="Age group">
+              <option value="" data-i18n="dirFilterAgeAll">Any age group</option>
+              <option value="under12" data-i18n="ageGroupKids">Kids (Under 12)</option>
+              <option value="12to17" data-i18n="ageGroupTeens">Youth (12–17)</option>
+              <option value="18to45" data-i18n="ageGroupAdults">Adults (18–45)</option>
+              <option value="46plus" data-i18n="ageGroupSeniors">Masters (46+)</option>
+              <option value="none" data-i18n="ageRepNotSet">Not set</option>
+            </select>
+            <select id="dir-f-type" aria-label="Member type">
+              <option value="" data-i18n="dirFilterTypeAll">Any member type</option>
+              <option value="main" data-i18n="dirFilterTypeMain">Main members</option>
+              <option value="follower" data-i18n="dirFilterTypeFollower">Followers</option>
+            </select>
+            <select id="dir-f-act" aria-label="Activity">
+              <option value="" data-i18n="dirFilterActAll">Any activity</option>
+              <option value="never" data-i18n="dirFilterActNever">Never registered</option>
+              <option value="registered" data-i18n="dirFilterActRegistered">Registered for events</option>
+              <option value="attended" data-i18n="dirFilterActAttended">Attended at least once</option>
+            </select>
+            <select id="dir-f-phone" aria-label="Phone">
+              <option value="" data-i18n="dirFilterPhoneAll">Phone: any</option>
+              <option value="has" data-i18n="dirFilterPhoneHas">Has a phone number</option>
+              <option value="missing" data-i18n="dirFilterPhoneMissing">No phone number</option>
+            </select>
+          </div>
+          <div class="dir-actions">
+            <span id="dir-count" class="hint-note" style="margin:0;"></span>
+            <button type="button" class="secondary small" id="dir-select-visible" data-i18n="dirSelectVisible">Select all shown</button>
+            <button type="button" class="secondary small" id="dir-clear-sel" data-i18n="dirClearSel">Clear selection</button>
+            <span id="dir-sel-count" class="hint-note" style="margin:0;"></span>
+          </div>
+          <div class="dir-actions">
+            <button type="button" class="roster-btn wa" id="dir-send-creds" data-i18n="btnSendCreds">Send login details (WhatsApp)</button>
+            <button type="button" class="secondary small" id="dir-archive" data-i18n="btnArchiveSel">Archive</button>
+            <button type="button" class="secondary small" id="dir-restore" data-i18n="btnRestoreSel">Restore</button>
+            <button type="button" class="danger small" id="dir-delete" data-i18n="btnDeleteSel">Delete permanently</button>
+          </div>
+          <div class="msg" id="dir-action-msg"></div>
           <div id="directory-table"></div>
         </div>
 
@@ -1035,6 +1085,19 @@
             <span data-i18n="pointsVisibleLabel">Show points &amp; Redemption Ladder to members</span>
           </label>
           <div class="msg" id="settings-msg"></div>
+        </div>
+
+        <div class="card" id="pstart-card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15M6 2v3M14 2v3M7 12l2 2 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="pstartTitle">Points start date</span></h2>
+          <p class="section-sub" data-i18n="pstartIntro">Choose the event that starts the points scheme. Earlier events earn no points and earlier reward requests are ignored. Nothing is deleted: remove the cutoff at any time to bring the old points back.</p>
+          <p class="hint-note" id="pstart-current" style="margin:0 0 10px;"></p>
+          <label for="pstart-event" data-i18n="pstartEventLabel">Start counting points from</label>
+          <select id="pstart-event"></select>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="primary" id="pstart-save" data-i18n="pstartSave">Apply</button>
+            <button class="secondary" id="pstart-clear" data-i18n="pstartClear">Remove the cutoff</button>
+          </div>
+          <div class="msg" id="pstart-msg"></div>
         </div>
 
         <div class="card">
@@ -1513,6 +1576,22 @@
     <div class="msg" id="wa-bulk-msg"></div>
   </div>
 </div>
+
+<div class="modal-overlay hidden" id="creds-modal" style="z-index:207;">
+  <div class="modal-box" style="max-width:480px;">
+    <button class="modal-close" id="creds-close" aria-label="Close">&times;</button>
+    <h2 data-i18n="credsTitle">Send login details</h2>
+    <p class="wa-hint" style="font-size:0.8rem;" data-i18n="credsWarn">Each member gets a NEW temporary password and must change it at first login. Their old password stops working. To protect your WhatsApp account, send in small batches (about 30 a day) and pause between messages.</p>
+    <p id="creds-progress" style="color:var(--muted);font-size:0.9rem;"></p>
+    <p id="creds-name" style="font-size:1.1rem;font-weight:700;margin:6px 0;"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+      <button id="creds-open" class="roster-btn wa"></button>
+      <button id="creds-skip" class="secondary" data-i18n="waBulkSkip">Skip</button>
+    </div>
+    <div class="msg" id="creds-msg"></div>
+  </div>
+</div>
+
 
 <script src="i18n.js"></script>
 <script src="jsQR.js"></script>
