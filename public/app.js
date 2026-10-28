@@ -471,6 +471,7 @@ function setLang(lang) {
   renderCommitteeAdminList();
   renderReports();
   renderAgeReportBuilder();
+  if (RB && RB.meta) rbEnsure().catch(() => {});
   // Rosters are built with t() at render time - redraw them in the new language
   try {
     if (CHECKIN_ROSTER && CHECKIN_ROSTER.length) renderCheckinRoster();
@@ -760,6 +761,54 @@ function applyMaybeShowMustChangePasswordGate() {
     modal.classList.add("hidden");
   }
 }
+// First-login date-of-birth confirmation. Non-dismissible: it stays open until
+// the server confirms (POST /api/me/birth-date/confirm). The date shown is the
+// one on file (typed at sign-up or loaded by the committee), editable.
+let BIRTH_GATE_OPEN = false;
+function applyMaybeShowBirthConfirmGate() {
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const need = !!(member && !member.birthConfirmedAt);
+  const modal = document.getElementById("birth-confirm-modal");
+  if (!modal) return;
+  if (need) {
+    if (!BIRTH_GATE_OPEN) {
+      BIRTH_GATE_OPEN = true;
+      document.getElementById("bc-birthdate").value = member.birthDate || "";
+      document.getElementById("bc-check").checked = false;
+      document.getElementById("bc-msg").classList.remove("show");
+      updateBirthConfirmPreview();
+      modal.classList.remove("hidden");
+    }
+  } else if (BIRTH_GATE_OPEN) {
+    BIRTH_GATE_OPEN = false;
+    modal.classList.add("hidden");
+  }
+}
+function updateBirthConfirmPreview() {
+  const v = document.getElementById("bc-birthdate").value;
+  const el = document.getElementById("bc-preview");
+  if (!v || v > todayISO() || v < "1900-01-01") { el.textContent = ""; return; }
+  el.textContent = bornAgeText({ birthDate: v });
+}
+document.getElementById("bc-birthdate").addEventListener("input", updateBirthConfirmPreview);
+document.getElementById("bc-submit").addEventListener("click", async () => {
+  const msg = document.getElementById("bc-msg");
+  const birthDate = document.getElementById("bc-birthdate").value;
+  if (!birthDate) {
+    highlightMissingFields(["bc-birthdate"]);
+    return showMsg(msg, t("errBirthDateRequired"), false);
+  }
+  if (birthDate > todayISO() || birthDate < "1900-01-01") return showMsg(msg, t("errBirthDateInvalid"), false);
+  if (!document.getElementById("bc-check").checked) return showMsg(msg, t("bcNeedCheck"), false);
+  try {
+    const result = await api("/api/me/birth-date/confirm", { method: "POST", body: JSON.stringify({ birthDate }) });
+    if (CURRENT_SESSION && CURRENT_SESSION.type === "member" && result.member) CURRENT_SESSION.member = result.member;
+    applyMaybeShowBirthConfirmGate();
+    renderAgeGroupStatus();
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+});
 document.getElementById("mcp-submit").addEventListener("click", async () => {
   const oldPassword = document.getElementById("mcp-old").value;
   const newPassword = document.getElementById("mcp-new").value;
@@ -1171,6 +1220,7 @@ function updateUIForSession() {
   document.getElementById("mp-signed-out").classList.toggle("hidden", isMember);
   document.getElementById("mp-nickname-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-agegroup-card").classList.toggle("hidden", !isMember);
+  document.getElementById("mp-phone-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-family-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-registrations-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-chat-card").classList.toggle("hidden", !isMember);
@@ -1180,6 +1230,7 @@ function updateUIForSession() {
     renderRecoveryPinStatus("mp-recovery-pin-status", CURRENT_SESSION.member.hasRecoveryPin);
     renderNicknameStatus();
     renderAgeGroupStatus();
+    renderMyPhoneInput();
     if (pointsVisible()) {
       document.getElementById("mp-points-disabled-note").classList.add("hidden");
       loadMyBalance();
@@ -1279,6 +1330,7 @@ function updateUIForSession() {
 
   applyMaybeShowTermsGate();
   applyMaybeShowMustChangePasswordGate();
+  applyMaybeShowBirthConfirmGate();
 
   // Idle auto-logout timers track CURRENT_SESSION, not the individual
   // login/logout call sites - every one of them already calls
@@ -1665,6 +1717,7 @@ function eventCardHtml(ev, isPast, featured) {
     isParent ? "" : capacityBadgeHtml(ev)
   }</div>
         <div class="snippet">${eventCardDescHtml(ev, isPast, 110)}</div>
+        ${!isPast && !isParent && isEventFull(ev) ? `<p class="event-full-note">${escapeAttr(t("eventFullWaitlistNote"))}</p>` : ""}
         ${
           isParent
             ? `<div class="activities-list"><div class="activities-title">${escapeAttr(
@@ -1674,7 +1727,7 @@ function eventCardHtml(ev, isPast, featured) {
         }
         <div class="actions">
           <button class="secondary" data-action="details">${t("btnMoreDetails")}</button>
-          ${isPast || isParent ? "" : `<button class="primary" data-action="register">${t("btnRegisterCard")}</button>`}
+          ${isPast || isParent ? "" : `<button class="primary" data-action="register">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`}
           ${TOURNAMENT_EVENT_IDS.has(ev.id) ? `<button class="secondary" data-action="view-tournament">${t("btnViewTournament")}</button>` : ""}
         </div>
       </div>
@@ -1964,7 +2017,7 @@ function openEventModal(ev, isPast) {
             isPast
           )}</div>`
         : !isPast
-        ? `<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t("btnRegisterCard")}</button>`
+        ? `${isEventFull(ev) ? `<p class="event-full-note">${escapeAttr(t("eventFullWaitlistNote"))}</p>` : ""}<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`
         : ""
     }
   `;
@@ -3357,7 +3410,7 @@ function switchAdminTab(tabKey) {
   } catch (e) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
-  if (tabKey === "reports") loadReports();
+  if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
   if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
     loadChatThreadsList();
@@ -3506,6 +3559,291 @@ function updateAgeReportLink() {
   document.getElementById("agerep-open").addEventListener("click", (e) => {
     if (e.currentTarget.classList.contains("disabled")) e.preventDefault();
   });
+})();
+
+// -------------------------------------------- admin: custom report builder --
+// The form is turned into a "spec" (source, columns, filters, sort, group-by)
+// that the server whitelists and runs; the same spec drives the on-screen
+// table, the Excel download, the A4 print page and saved reports.
+var RB = { meta: null, events: [], saved: [], lang: null, savedId: 0, lastSpec: null };
+const rbEl = (id) => document.getElementById(id);
+const rbIsAdmin = () => !!(CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin");
+const rbSource = () => ((document.querySelector('input[name="rb-source"]:checked') || {}).value === "registrations" ? "registrations" : "people");
+const rbChecked = (boxId) => [...document.querySelectorAll(`#${boxId} input:checked`)].map((i) => i.value);
+const rbNum = (id) => {
+  const v = rbEl(id).value.trim();
+  return v === "" ? "" : v;
+};
+function rbChips(boxId, items, checkedSet) {
+  rbEl(boxId).innerHTML = items
+    .map((it) => `<label class="agerep-chk"><input type="checkbox" value="${escapeAttr(String(it.key))}" ${checkedSet && checkedSet.has(it.key) ? "checked" : ""} /> <span>${escapeAttr(it.label)}</span></label>`)
+    .join("");
+}
+function rbReadSpec() {
+  return {
+    source: rbSource(),
+    columns: rbChecked("rb-columns"),
+    filters: {
+      kinds: rbChecked("rb-kinds"),
+      memberTypes: rbChecked("rb-membertypes"),
+      ageGroups: rbChecked("rb-agegroups"),
+      ageMin: rbNum("rb-agemin"),
+      ageMax: rbNum("rb-agemax"),
+      birthYearMin: rbNum("rb-bymin"),
+      birthYearMax: rbNum("rb-bymax"),
+      hasBirthDate: rbEl("rb-hasdob").value,
+      birthConfirmed: rbEl("rb-birthconf").value,
+      phone: rbEl("rb-phone").value,
+      phoneContains: rbEl("rb-phonecontains").value,
+      search: rbEl("rb-search").value,
+      familyGroup: rbEl("rb-familygroup").value,
+      account: rbEl("rb-account").value,
+      status: rbEl("rb-status").value,
+      activity: rbEl("rb-activity").value,
+      pointsMin: rbNum("rb-ptsmin"),
+      pointsMax: rbNum("rb-ptsmax"),
+      events: [...document.querySelectorAll("#rb-events input:checked")].map((i) => Number(i.value)),
+      from: rbEl("rb-from").value,
+      to: rbEl("rb-to").value,
+      regStatus: rbChecked("rb-regstatus"),
+    },
+    sortBy: rbEl("rb-sortby").value,
+    sortDir: rbEl("rb-sortdir").value,
+    groupBy: rbEl("rb-groupby").value,
+    layout: rbEl("rb-layout").value,
+  };
+}
+// Rebuilds everything that depends on the chosen source / language, keeping
+// the values the admin already typed where they still make sense.
+function rbBuildSourceParts(source, colsChecked, sortBy, groupBy) {
+  const def = RB.meta[source];
+  const set = new Set(colsChecked && colsChecked.length ? colsChecked : def.columns.filter((c) => c.def).map((c) => c.key));
+  rbChips("rb-columns", def.columns, set);
+  rbEl("rb-sortby").innerHTML = `<option value="">${escapeAttr(t("rbSortNone"))}</option>` + def.columns.map((c) => `<option value="${c.key}">${escapeAttr(c.label)}</option>`).join("");
+  rbEl("rb-groupby").innerHTML = `<option value="">${escapeAttr(t("rbGroupNone"))}</option>` + def.groups.map((g) => `<option value="${g.key}">${escapeAttr(g.label)}</option>`).join("");
+  if (def.columns.some((c) => c.key === sortBy)) rbEl("rb-sortby").value = sortBy;
+  if (def.groups.some((g) => g.key === groupBy)) rbEl("rb-groupby").value = groupBy;
+  document.querySelectorAll(".rb-people-only").forEach((el) => el.classList.toggle("hidden", source !== "people"));
+  document.querySelectorAll(".rb-regs-only").forEach((el) => el.classList.toggle("hidden", source !== "registrations"));
+}
+function rbBuildAll(spec) {
+  spec = spec || RB.lastSpec || null;
+  const o = RB.meta.options;
+  const f = (spec && spec.filters) || {};
+  rbChips("rb-membertypes", o.memberTypes, new Set(f.memberTypes || []));
+  rbChips("rb-agegroups", o.ageGroups, new Set(f.ageGroups || []));
+  rbChips("rb-regstatus", o.regStatus, new Set(f.regStatus && f.regStatus.length ? f.regStatus : ["confirmed", "checkedin"]));
+  const evSel = new Set(f.events || []);
+  rbEl("rb-events").innerHTML = RB.events
+    .map((ev) => `<label class="agerep-chk"><input type="checkbox" data-rbev="1" value="${ev.id}" ${evSel.has(ev.id) ? "checked" : ""} /> <span><b>${escapeAttr(ev.name)}</b> <span class="hint-note" style="margin:0;">${escapeAttr(ev.date)}</span></span></label>`)
+    .join("");
+  rbBuildSourceParts(spec ? spec.source : rbSource(), spec && spec.columns, spec && spec.sortBy, spec && spec.groupBy);
+  rbUpdateEventCount();
+  rbBuildSaved();
+}
+function rbApplySpec(spec) {
+  document.querySelector(`input[name="rb-source"][value="${spec.source}"]`).checked = true;
+  RB.lastSpec = spec;
+  rbBuildAll(spec);
+  const f = spec.filters;
+  const setChecks = (id, arr) => document.querySelectorAll(`#${id} input`).forEach((i) => { i.checked = (arr || []).includes(i.value); });
+  setChecks("rb-kinds", f.kinds);
+  const val = (id, v) => { rbEl(id).value = v == null ? "" : v; };
+  val("rb-agemin", f.ageMin); val("rb-agemax", f.ageMax);
+  val("rb-bymin", f.birthYearMin); val("rb-bymax", f.birthYearMax);
+  val("rb-hasdob", f.hasBirthDate); val("rb-birthconf", f.birthConfirmed); val("rb-phone", f.phone); val("rb-phonecontains", f.phoneContains);
+  val("rb-search", f.search); val("rb-familygroup", f.familyGroup); val("rb-account", f.account);
+  val("rb-status", f.status); val("rb-activity", f.activity);
+  val("rb-ptsmin", f.pointsMin); val("rb-ptsmax", f.pointsMax);
+  val("rb-from", f.from); val("rb-to", f.to);
+  rbEl("rb-sortdir").value = spec.sortDir || "asc";
+  rbEl("rb-layout").value = spec.layout || "detail";
+}
+function rbUpdateEventCount() {
+  const n = document.querySelectorAll("#rb-events input:checked").length;
+  rbEl("rb-ev-count").textContent = n ? t("rbEventsSel").replace("{n}", fmt(n)) : t("rbEventsNoneSel");
+}
+function rbBuildSaved() {
+  const sel = rbEl("rb-saved");
+  sel.innerHTML = `<option value="0">${escapeAttr(t("rbSavedNone"))}</option>` + RB.saved.map((r) => `<option value="${r.id}">${escapeAttr(r.name)}</option>`).join("");
+  if (!RB.saved.some((r) => r.id === RB.savedId)) RB.savedId = 0;
+  sel.value = String(RB.savedId);
+  rbEl("rb-update").disabled = !RB.savedId;
+  rbEl("rb-delete").disabled = !RB.savedId;
+}
+async function rbEnsure(force) {
+  if (!rbIsAdmin() || !rbEl("rb-card")) return;
+  if (RB.meta && RB.lang === currentLang && !force) return;
+  const keep = RB.meta ? rbReadSpec() : null;
+  const data = await api(`/api/admin/report-builder/meta?lang=${currentLang}`);
+  RB.meta = data.meta;
+  RB.events = data.events;
+  RB.saved = data.saved;
+  RB.lang = currentLang;
+  if (keep) rbApplySpec(keep);
+  else rbBuildAll(null);
+}
+function rbTable(head, rows, totalRow) {
+  const th = head.map((h) => `<th>${escapeAttr(h)}</th>`).join("");
+  const body = rows.map((r) => `<tr>${r.map((c) => `<td>${escapeAttr(c == null ? "" : String(c))}</td>`).join("")}</tr>`).join("");
+  const tot = totalRow ? `<tr class="rb-total">${totalRow.map((c) => `<td>${escapeAttr(String(c))}</td>`).join("")}</tr>` : "";
+  return `<div class="rb-table-wrap"><table class="rb-table"><thead><tr>${th}</tr></thead><tbody>${body}${tot}</tbody></table></div>`;
+}
+function rbRender(out) {
+  const box = rbEl("rb-result");
+  let html = `<p class="rb-count"><b>${escapeAttr(t("rbResults").replace("{n}", fmt(out.total)))}</b></p>`;
+  html += `<p class="hint-note rb-filters-text">${(out.filters || []).map((f) => escapeAttr(f)).join(" · ")}</p>`;
+  if (out.summary) html += rbTable(out.summary.head, out.summary.rows, out.summary.total);
+  if (out.spec.layout !== "summary") {
+    html += out.rows.length
+      ? rbTable(["#", ...out.columns.map((c) => c.label)], out.rows.map((r, i) => [i + 1, ...r]))
+      : `<p class="hint-note">${escapeAttr(t("rbNoResults"))}</p>`;
+    if (out.truncated) html += `<p class="hint-note">${escapeAttr(t("rbShowing").replace("{shown}", fmt(out.rows.length)).replace("{n}", fmt(out.total)))}</p>`;
+  }
+  box.innerHTML = html;
+}
+function rbCheckSpec(spec) {
+  if (!spec.columns.length && spec.layout !== "summary") {
+    showMsg(rbEl("rb-msg"), t("rbPickColumn"), false);
+    return false;
+  }
+  return true;
+}
+async function rbRun() {
+  const msg = rbEl("rb-msg");
+  const spec = rbReadSpec();
+  if (!rbCheckSpec(spec)) return;
+  msg.classList.remove("show");
+  rbEl("rb-run").disabled = true;
+  try {
+    const out = await api("/api/admin/report-builder/run", { method: "POST", body: JSON.stringify({ spec, lang: currentLang }) });
+    RB.lastSpec = out.spec;
+    rbRender(out);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  } finally {
+    rbEl("rb-run").disabled = false;
+  }
+}
+async function rbExcel() {
+  const msg = rbEl("rb-msg");
+  const spec = rbReadSpec();
+  if (!rbCheckSpec(spec)) return;
+  msg.classList.remove("show");
+  try {
+    const res = await fetch("/api/admin/report-builder/export", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+      body: JSON.stringify({ spec, lang: currentLang }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || t("errGeneric"));
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "ahlawy-custom-report.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+}
+function rbPrint() {
+  const spec = rbReadSpec();
+  if (!rbCheckSpec(spec)) return;
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(spec)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  if (b64.length > 7800) {
+    showMsg(rbEl("rb-msg"), t("rbPrintTooLong"), false);
+    return;
+  }
+  window.open(`/admin/print/custom-report?lang=${currentLang}&spec=${b64}`, "_blank", "noopener");
+}
+async function rbSaveNew() {
+  const msg = rbEl("rb-saved-msg");
+  const name = rbEl("rb-name").value.trim();
+  if (!name) return showMsg(msg, t("rbNeedName"), false);
+  try {
+    const rec = await api("/api/admin/saved-reports", { method: "POST", body: JSON.stringify({ name, spec: rbReadSpec() }) });
+    RB.saved.push(rec);
+    RB.savedId = rec.id;
+    rbBuildSaved();
+    showMsg(msg, t("rbSavedMsg"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+}
+async function rbUpdate() {
+  const msg = rbEl("rb-saved-msg");
+  if (!RB.savedId) return;
+  const name = rbEl("rb-name").value.trim();
+  if (!name) return showMsg(msg, t("rbNeedName"), false);
+  try {
+    const rec = await api(`/api/admin/saved-reports/${RB.savedId}`, { method: "PUT", body: JSON.stringify({ name, spec: rbReadSpec() }) });
+    RB.saved = RB.saved.map((r) => (r.id === rec.id ? rec : r));
+    rbBuildSaved();
+    showMsg(msg, t("rbUpdatedMsg"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+}
+async function rbDelete() {
+  const msg = rbEl("rb-saved-msg");
+  if (!RB.savedId || !window.confirm(t("rbDeleteConfirm"))) return;
+  try {
+    await api(`/api/admin/saved-reports/${RB.savedId}`, { method: "DELETE" });
+    RB.saved = RB.saved.filter((r) => r.id !== RB.savedId);
+    RB.savedId = 0;
+    rbEl("rb-name").value = "";
+    rbBuildSaved();
+    showMsg(msg, t("rbDeletedMsg"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+}
+(function wireReportBuilder() {
+  const card = rbEl("rb-card");
+  if (!card) return;
+  card.addEventListener("change", (e) => {
+    if (e.target.name === "rb-source") {
+      RB.lastSpec = null;
+      rbBuildSourceParts(rbSource(), null, "", "");
+    }
+    if (e.target.closest("#rb-events")) rbUpdateEventCount();
+  });
+  rbEl("rb-saved").addEventListener("change", (e) => {
+    RB.savedId = Number(e.target.value) || 0;
+    const rec = RB.saved.find((r) => r.id === RB.savedId);
+    rbEl("rb-update").disabled = !rec;
+    rbEl("rb-delete").disabled = !rec;
+    rbEl("rb-saved-msg").classList.remove("show");
+    if (rec) {
+      rbEl("rb-name").value = rec.name;
+      rbApplySpec(rec.spec);
+      rbRun();
+    } else {
+      rbEl("rb-name").value = "";
+    }
+  });
+  rbEl("rb-col-default").addEventListener("click", () => {
+    const def = new Set(RB.meta[rbSource()].columns.filter((c) => c.def).map((c) => c.key));
+    document.querySelectorAll("#rb-columns input").forEach((i) => { i.checked = def.has(i.value); });
+  });
+  rbEl("rb-col-all").addEventListener("click", () => document.querySelectorAll("#rb-columns input").forEach((i) => { i.checked = true; }));
+  rbEl("rb-col-none").addEventListener("click", () => document.querySelectorAll("#rb-columns input").forEach((i) => { i.checked = false; }));
+  rbEl("rb-ev-none").addEventListener("click", () => {
+    document.querySelectorAll("#rb-events input").forEach((i) => { i.checked = false; });
+    rbUpdateEventCount();
+  });
+  rbEl("rb-run").addEventListener("click", rbRun);
+  rbEl("rb-excel").addEventListener("click", rbExcel);
+  rbEl("rb-print").addEventListener("click", rbPrint);
+  rbEl("rb-save-new").addEventListener("click", rbSaveNew);
+  rbEl("rb-update").addEventListener("click", rbUpdate);
+  rbEl("rb-delete").addEventListener("click", rbDelete);
 })();
 
 // ---------------------------------------------------------- admin: settings --
@@ -9309,6 +9647,29 @@ function renderAgeGroupStatus() {
   const input = document.getElementById("mp-birthdate");
   if (input && document.activeElement !== input) input.value = (member && member.birthDate) || "";
 }
+
+function renderMyPhoneInput() {
+  const input = document.getElementById("mp-phone");
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  if (input && member && document.activeElement !== input) input.value = member.phone || "";
+}
+document.getElementById("mp-phone-save").addEventListener("click", async () => {
+  const input = document.getElementById("mp-phone");
+  const msg = document.getElementById("mp-phone-msg");
+  const phone = input.value.trim();
+  if (!phone) {
+    highlightMissingFields(["mp-phone"]);
+    return showMsg(msg, t("errPhoneRequired"), false);
+  }
+  try {
+    const result = await api("/api/me/profile", { method: "PATCH", body: JSON.stringify({ phone }) });
+    CURRENT_SESSION.member.phone = result.member.phone;
+    renderMyPhoneInput();
+    showMsg(msg, t("okPhoneSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
 
 document.getElementById("mp-agegroup-save").addEventListener("click", async () => {
   const input = document.getElementById("mp-birthdate");

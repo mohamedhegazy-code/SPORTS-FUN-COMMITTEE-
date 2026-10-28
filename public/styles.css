@@ -1510,17 +1510,47 @@ tr.dir-archived td { opacity: 0.6; }
   border-radius: 18px;
   padding: 14px 18px;
 }
-.hero-wa-qr-link { flex: 0 0 auto; display: block; background: #fff; border-radius: 12px; padding: 6px; line-height: 0; }
-.hero-wa-qr { width: 118px; height: 118px; object-fit: contain; display: block; }
-.hero-wa-text { min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.hero-wa-qr-link { flex: 0 0 auto; display: block; width: 130px; height: 130px; background: #fff; border-radius: 12px; padding: 0; line-height: 0; overflow: hidden; }
+/* The uploaded image is a QR with a caption and lots of white margin; scaling
+   it up inside the same box makes the code itself much larger to scan. */
+.hero-wa-qr { width: 130px; height: 130px; object-fit: contain; display: block; transform: scale(1.4); transform-origin: 50% 54%; }
+.hero-wa-text { min-width: 0; flex: 1 1 auto; align-self: stretch; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center; }
 .hero-wa-card .hero-wa-title { margin: 0; color: #fff; font-size: 0.98rem; font-weight: 700; line-height: 1.25; }
 .hero-wa-card .hero-wa-sub { margin: 0; color: rgba(255, 255, 255, 0.78); font-size: 0.78rem; line-height: 1.4; }
 .hero-wa-btn { display: inline-block; background: #25d366; color: #0b3d1d; font-weight: 800; font-size: 0.8rem; padding: 8px 14px; border-radius: 999px; text-decoration: none; }
 .hero-wa-btn:hover { filter: brightness(1.06); }
 @media (max-width: 640px) {
-  .hero-wa-qr { width: 104px; height: 104px; }
+  .hero-wa-qr-link, .hero-wa-qr { width: 112px; height: 112px; }
 }
 
 .howto-langs { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
 .howto-lang { padding: 4px 14px; font-size: 0.82rem; background: #fff; color: var(--maroon, #7a0e0e); border: 1px solid var(--maroon, #7a0e0e); border-radius: 999px; cursor: pointer; }
 .howto-lang.active { background: var(--maroon, #7a0e0e); color: #fff; }
+
+/* Full event: tell members the waiting list is open. */
+.event-full-note { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: #fff4e0; border: 1px solid #f0c987; color: #7a4a00; font-size: 0.86rem; line-height: 1.45; }
+
+/* Admin custom report builder */
+.rb-saved-bar { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 6px; }
+.rb-saved-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rb-section { margin-top: 16px; }
+.rb-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
+.rb-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 16px; margin-top: 6px; }
+.rb-f { min-width: 0; }
+.rb-f input, .rb-f select { width: 100%; max-width: none; }
+.rb-fl { display: block; font-size: 0.82rem; font-weight: 700; color: var(--muted, #6b6b6b); margin-bottom: 4px; }
+.rb-pair { display: flex; gap: 8px; }
+.rb-pair > * { flex: 1 1 0; min-width: 0; }
+.rb-events-wrap { margin-top: 12px; }
+.rb-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.rb-result { margin-top: 14px; }
+.rb-count { margin: 0 0 4px; }
+.rb-table-wrap { overflow-x: auto; margin: 10px 0; border: 1px solid #e4dfd8; border-radius: 10px; max-height: 70vh; }
+.rb-table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+.rb-table th { position: sticky; top: 0; background: #2a0b0b; color: #f0d98a; text-align: start; padding: 8px 10px; white-space: nowrap; }
+.rb-table td { padding: 7px 10px; border-top: 1px solid #eee8de; white-space: nowrap; }
+.rb-table tbody tr:nth-child(even) td { background: #faf7f2; }
+.rb-table tr.rb-total td { background: #fff3cf !important; font-weight: 800; }
+@media (max-width: 700px) { .rb-saved-bar { grid-template-columns: 1fr; } }
+.rb-f input[type="checkbox"], .rb-f input[type="radio"], .rb-card input[type="checkbox"], #rb-card input[type="checkbox"], #rb-card input[type="radio"] { width: auto; flex: none; margin: 0; }
+#rb-card .agerep-chk { display: inline-flex; align-items: center; gap: 6px; }

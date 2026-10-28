@@ -422,6 +422,17 @@
       <div class="msg" id="mp-agegroup-msg"></div>
     </div>
 
+    <div class="card hidden" id="mp-phone-card">
+      <h2 data-i18n="phoneCardTitle">My mobile number</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="phoneCardIntro">Changed your number? Update it here so the club can reach you. Your family members' numbers are edited on each person in the My Family card below.</p>
+      <label class="required-label" for="mp-phone" data-i18n="fieldSignupPhone">Mobile number</label>
+      <input id="mp-phone" type="tel" placeholder="01xxxxxxxxx" />
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button class="primary" id="mp-phone-save" data-i18n="btnSavePhone">Save mobile number</button>
+      </div>
+      <div class="msg" id="mp-phone-msg"></div>
+    </div>
+
     <div class="card hidden" id="mp-whatsapp-card" style="text-align:center;">
       <h2 id="mp-whatsapp-title" data-i18n="whatsappCommunityTitle">Join our WhatsApp Community</h2>
       <p id="mp-whatsapp-body" style="color:var(--muted);white-space:pre-wrap;"></p>
@@ -890,6 +901,107 @@
       </div>
 
       <div class="admin-tab-panel hidden evt-tab-only" data-admin-panel="reports">
+        <div class="card admin-full-only" id="rb-card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 4.5h14M3 10h14M3 15.5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="15" cy="15.5" r="2" stroke="currentColor" stroke-width="1.4"/></svg><span data-i18n="rbTitle">Custom report builder</span></h2>
+          <p class="section-sub" data-i18n="rbIntro">Build any report you need: choose what to list, filter by age, age group, member type, phone number and more, pick the columns, then view it here, download Excel or print. Save a report to run it again later.</p>
+
+          <div class="rb-saved-bar">
+            <div>
+              <label for="rb-saved" data-i18n="rbSaved">Saved reports</label>
+              <select id="rb-saved"></select>
+            </div>
+            <div>
+              <label for="rb-name" data-i18n="rbName">Report name</label>
+              <input id="rb-name" type="text" maxlength="80" />
+            </div>
+            <div class="rb-saved-actions">
+              <button type="button" class="secondary small" id="rb-save-new" data-i18n="rbBtnSave">Save as new</button>
+              <button type="button" class="secondary small" id="rb-update" data-i18n="rbBtnUpdate" disabled>Update saved</button>
+              <button type="button" class="danger small" id="rb-delete" data-i18n="rbBtnDelete" disabled>Delete</button>
+            </div>
+          </div>
+          <div class="msg" id="rb-saved-msg"></div>
+
+          <div class="rb-section">
+            <label data-i18n="rbSource">What to list</label>
+            <div class="rb-chips" id="rb-source">
+              <label class="agerep-chk"><input type="radio" name="rb-source" value="people" checked /> <span data-i18n="rbSrcPeople">People (members and family members)</span></label>
+              <label class="agerep-chk"><input type="radio" name="rb-source" value="registrations" /> <span data-i18n="rbSrcRegs">Event registrations and attendance</span></label>
+            </div>
+          </div>
+
+          <div class="rb-section">
+            <label data-i18n="rbColumns">Columns to show</label>
+            <div class="agerep-actions">
+              <button type="button" class="secondary small" id="rb-col-default" data-i18n="rbColDefaults">Default</button>
+              <button type="button" class="secondary small" id="rb-col-all" data-i18n="ageRepSelectAll">Select all</button>
+              <button type="button" class="secondary small" id="rb-col-none" data-i18n="ageRepClear">Clear</button>
+            </div>
+            <div class="rb-chips" id="rb-columns"></div>
+          </div>
+
+          <div class="rb-section">
+            <label data-i18n="rbFilters">Filters</label>
+            <div class="rb-filters">
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbKinds">Person type</span>
+                <div class="rb-chips" id="rb-kinds">
+                  <label class="agerep-chk"><input type="checkbox" value="member" /> <span data-i18n="rbKindMember">Member</span></label>
+                  <label class="agerep-chk"><input type="checkbox" value="dependent" /> <span data-i18n="rbKindDependent">Family member</span></label>
+                </div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbMemberTypes">Member type</span><div class="rb-chips" id="rb-membertypes"></div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbAgeGroups">Age group</span><div class="rb-chips" id="rb-agegroups"></div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbAgeRange">Age (years)</span>
+                <div class="rb-pair"><input id="rb-agemin" type="number" min="0" max="120" inputmode="numeric" data-i18n-ph="rbMin" placeholder="Min" /><input id="rb-agemax" type="number" min="0" max="120" inputmode="numeric" data-i18n-ph="rbMax" placeholder="Max" /></div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbBirthYearRange">Birth year</span>
+                <div class="rb-pair"><input id="rb-bymin" type="number" min="1900" max="2100" inputmode="numeric" data-i18n-ph="rbMin" placeholder="Min" /><input id="rb-bymax" type="number" min="1900" max="2100" inputmode="numeric" data-i18n-ph="rbMax" placeholder="Max" /></div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbHasDob">Date of birth on file</span>
+                <select id="rb-hasdob"><option value="" data-i18n="rbAny">Any</option><option value="yes" data-i18n="rbYes">Yes</option><option value="no" data-i18n="rbNo">No</option></select></div>
+              <div class="rb-f rb-people-only"><span class="rb-fl" data-i18n="rbBirthConf">Date of birth confirmed by the member</span>
+                <select id="rb-birthconf"><option value="" data-i18n="rbAny">Any</option><option value="yes" data-i18n="rbYes">Yes</option><option value="no" data-i18n="rbNo">No</option></select></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbPhone">Phone number</span>
+                <select id="rb-phone"><option value="" data-i18n="rbAny">Any</option><option value="has" data-i18n="rbPhoneHas">Has a phone number</option><option value="none" data-i18n="rbPhoneNone">No phone number</option></select></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbPhoneContains">Phone contains</span><input id="rb-phonecontains" type="text" maxlength="40" inputmode="tel" /></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbSearch">Search (name, number, phone, email)</span><input id="rb-search" type="text" maxlength="80" /></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbFamilyGroup">Family group contains</span><input id="rb-familygroup" type="text" maxlength="80" /></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbAccount">Login account</span>
+                <select id="rb-account"><option value="" data-i18n="rbAny">Any</option><option value="has" data-i18n="rbAccHas">Has a login</option><option value="none" data-i18n="rbAccNone">No login yet</option></select></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbStatus">Membership status</span>
+                <select id="rb-status"><option value="active" data-i18n="rbStActive">Active only</option><option value="archived" data-i18n="rbStArchived">Archived only</option><option value="all" data-i18n="rbStAll">Active and archived</option></select></div>
+              <div class="rb-f rb-people-only"><span class="rb-fl" data-i18n="rbActivity">Activity</span>
+                <select id="rb-activity"><option value="" data-i18n="rbAny">Any</option><option value="registered" data-i18n="rbActRegistered">Registered at least once</option><option value="never_registered" data-i18n="rbActNever">Never registered</option><option value="attended" data-i18n="rbActAttended">Attended at least once</option><option value="never_attended" data-i18n="rbActNeverAtt">Never attended</option></select></div>
+              <div class="rb-f rb-people-only"><span class="rb-fl" data-i18n="rbPoints">Points balance</span>
+                <div class="rb-pair"><input id="rb-ptsmin" type="number" inputmode="numeric" data-i18n-ph="rbMin" placeholder="Min" /><input id="rb-ptsmax" type="number" inputmode="numeric" data-i18n-ph="rbMax" placeholder="Max" /></div></div>
+              <div class="rb-f rb-regs-only"><span class="rb-fl" data-i18n="rbRegStatus">Registration status</span><div class="rb-chips" id="rb-regstatus"></div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbPeriod">Event dates (from – to)</span>
+                <div class="rb-pair"><input id="rb-from" type="date" /><input id="rb-to" type="date" /></div></div>
+            </div>
+            <div class="rb-f rb-events-wrap"><span class="rb-fl" data-i18n="rbEvents">Only these events</span>
+              <div class="agerep-actions">
+                <button type="button" class="secondary small" id="rb-ev-none" data-i18n="rbEventsAll">All events (clear)</button>
+                <span class="hint-note" id="rb-ev-count" style="margin:0;"></span>
+              </div>
+              <div id="rb-events" class="agerep-events"></div>
+            </div>
+          </div>
+
+          <div class="rb-section">
+            <div class="rb-filters">
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbSort">Sort by</span>
+                <div class="rb-pair"><select id="rb-sortby"></select><select id="rb-sortdir"><option value="asc" data-i18n="rbAsc">Ascending</option><option value="desc" data-i18n="rbDesc">Descending</option></select></div></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbGroup">Group and count by</span><select id="rb-groupby"></select></div>
+              <div class="rb-f"><span class="rb-fl" data-i18n="rbLayout">Show</span>
+                <select id="rb-layout"><option value="detail" data-i18n="rbLayoutDetail">Detailed list</option><option value="summary" data-i18n="rbLayoutSummary">Summary only</option><option value="both" data-i18n="rbLayoutBoth">Summary and list</option></select></div>
+            </div>
+          </div>
+
+          <div class="rb-actions">
+            <button type="button" class="primary" id="rb-run" data-i18n="rbRun">Show report</button>
+            <button type="button" class="secondary" id="rb-excel" data-i18n="rbExcel">Download Excel</button>
+            <button type="button" class="secondary" id="rb-print" data-i18n="rbPrint">Print / PDF</button>
+          </div>
+          <div class="msg" id="rb-msg"></div>
+          <div id="rb-result" class="rb-result"></div>
+        </div>
         <div class="card" id="agerep-card">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="6.5" r="2.4" stroke="currentColor" stroke-width="1.4"/><circle cx="14" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 16c.5-2.8 2.2-4.2 4.5-4.2s4 1.4 4.5 4.2M12.5 12.2c1.8.1 3.2 1.3 3.7 3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span data-i18n="ageRepTitle">Age group report</span></h2>
           <p class="section-sub" data-i18n="ageRepIntro">Registrations and attendance split by age group. Choose the events and period, which age groups to include, and how much detail, then open the printable report.</p>
@@ -1569,6 +1681,22 @@
      button and no way to reach any other tab while it's open - see
      applyMaybeShowMustChangePasswordGate() in app.js, called from the same
      updateUIForSession() chokepoint as every other session-gated view. -->
+<!-- First-login date-of-birth confirmation: non-dismissible, stays open until the member confirms. -->
+<div class="modal-overlay hidden" id="birth-confirm-modal" style="z-index:205;">
+  <div class="modal-box" style="max-width:440px;">
+    <h2 data-i18n="bcTitle">Please confirm your date of birth</h2>
+    <p style="color:var(--muted);font-size:0.9rem;" id="bc-intro" data-i18n="bcIntro">Your age and age group are worked out from your date of birth and used for events and tournaments. Check the date below and correct it if needed.</p>
+    <label class="required-label" for="bc-birthdate" data-i18n="fieldBirthDateRequired">Date of birth</label>
+    <input id="bc-birthdate" type="date" min="1900-01-01" required />
+    <p class="hint-note" id="bc-preview" style="margin:6px 0 0;"></p>
+    <label class="checkbox-row" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:0.88rem;">
+      <input type="checkbox" id="bc-check" style="margin-top:3px;" /> <span data-i18n="bcCheck">I confirm that this is my correct date of birth.</span>
+    </label>
+    <button class="primary" id="bc-submit" style="margin-top:12px;" data-i18n="bcBtn">Confirm</button>
+    <div class="msg" id="bc-msg"></div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="must-change-password-modal" style="z-index:210;">
   <div class="modal-box" style="max-width:420px;">
     <h2 data-i18n="mustChangePasswordTitle">You need to set a new password</h2>
