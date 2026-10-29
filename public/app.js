@@ -5724,6 +5724,7 @@ function renderDirectoryTable() {
       </div>`;
     const ageEditorHtml = `<div style="margin-top:14px;">
         <h4 style="margin:6px 0;">${t("directoryAgeGroupsTitle")}</h4>
+        ${m.birthRequestAt ? `<p class="hint-note" style="margin:0 0 6px;">${escapeAttr(t("birthReqAskedOn"))}: ${escapeAttr(new Date(m.birthRequestAt).toLocaleDateString())}</p>` : ""}
         ${ageRow(m.name, m, null)}
         ${m.dependents.map((d) => ageRow(d.name, d, d.id)).join("")}
         <div class="msg dir-age-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
@@ -5790,6 +5791,7 @@ function renderDirectoryTable() {
       `data-account="${m.hasLoggedInAccount ? "has" : "none"}"`,
       `data-must="${m.mustChangePassword ? "1" : "0"}"`,
       `data-age="${m.ageGroup || "none"}"`,
+      `data-nobirth="${!m.birthDate || (m.dependents || []).some((d) => !d.birthDate) ? "1" : "0"}"`,
       `data-type="${m.memberType === "follower" ? "follower" : "main"}"`,
       `data-act="${m.checkedInCount > 0 ? "attended" : m.registeredCount > 0 ? "registered" : "never"}"`,
       `data-phone="${m.phone ? "1" : "0"}"`,
@@ -5998,7 +6000,8 @@ function directoryRowMatches(row, f) {
   if (f.account === "has" && d.account !== "has") return false;
   if (f.account === "none" && d.account !== "none") return false;
   if (f.account === "must" && d.must !== "1") return false;
-  if (f.age && d.age !== f.age) return false;
+  if (f.age === "nobirth") { if (d.nobirth !== "1") return false; }
+  else if (f.age && d.age !== f.age) return false;
   if (f.type && d.type !== f.type) return false;
   if (f.act && d.act !== f.act) return false;
   if (f.phone === "has" && d.phone !== "1") return false;
@@ -6040,7 +6043,7 @@ function updateDirectorySelectionUI() {
   if (!el) return;
   const n = directorySelected().length;
   el.textContent = n ? `${fmt(n)} ${t("dirSelected")}` : "";
-  ["dir-send-creds", "dir-archive", "dir-restore", "dir-delete"].forEach((id) => {
+  ["dir-send-creds", "dir-birth-request", "dir-archive", "dir-restore", "dir-delete"].forEach((id) => {
     document.getElementById(id).disabled = !n;
   });
 }
@@ -6084,6 +6087,47 @@ document.getElementById("dir-send-creds").addEventListener("click", () => credsS
 // presses "Open WhatsApp" for that member, so skipped members keep whatever
 // password they had. Each chat is opened by a human click, with a short
 // cool-down between sends, so this never looks like automated bulk sending.
+// ---- Ask members who have no date of birth on file to add it --------------
+const BIRTH_REQ_BATCH = 15; // keep chats per sitting small - WhatsApp restricts accounts that message many people at once
+const BIRTH_REQ_RECENT_DAYS = 7;
+function waBirthRequestMessage(name, missing, url) {
+  const self = missing.some((x) => x.self);
+  const others = missing.filter((x) => !x.self).map((x) => x.name);
+  const arWho = self ? (others.length ? `بتاريخ ميلادك وتاريخ ميلاد: ${others.join("، ")}` : "بتاريخ ميلادك") : `بتاريخ ميلاد: ${others.join("، ")}`;
+  const enWho = self ? (others.length ? `your date of birth and the date of birth of: ${others.join(", ")}` : "your date of birth") : `the date of birth of: ${others.join(", ")}`;
+  const ar = `مرحبًا ${name}،\nنرجو تزويدنا ${arWho} على منصة أهلاوي، ليُحدَّد التصنيف العمري المناسب للفعاليات.\nسجّل الدخول من: ${url} ثم افتح "الملف الشخصي"، أو ردّ على هذه الرسالة بالتاريخ (يوم/شهر/سنة).\n- لجنة الرياضة الترفيهية - فرع القاهرة الجديدة\nإن لم ترغب في استلام رسائل من اللجنة ردّ بكلمة: إيقاف.`;
+  const en = `Hi ${name},\nPlease share ${enWho} on the MyAhlawy platform so we can place everyone in the right age group for events.\nLog in at ${url} and open "Member Profile", or simply reply to this message with the date (day/month/year).\n- Recreational Sports Committee — New Cairo Branch\nIf you prefer not to receive messages from the committee, reply: STOP.`;
+  return `${ar}\n\n${en}`;
+}
+function birthRequestStart(numbers) {
+  const msg = document.getElementById("dir-action-msg");
+  const members = numbers.map((n) => DIRECTORY_DATA.find((m) => m.membershipNumber === n)).filter(Boolean).filter((m) => !m.archivedAt);
+  const missingOf = (m) => (!m.birthDate ? 1 : 0) + (m.dependents || []).filter((d) => !d.birthDate).length;
+  const withMissing = members.filter((m) => missingOf(m) > 0);
+  const withPhone = withMissing.filter((m) => m.phone);
+  const cutoff = Date.now() - BIRTH_REQ_RECENT_DAYS * 86400000;
+  const recent = withPhone.filter((m) => m.birthRequestAt && Date.parse(m.birthRequestAt) > cutoff);
+  const queue = withPhone.filter((m) => !recent.includes(m));
+  if (!queue.length) return showMsg(msg, t("birthReqNone"), false);
+  const notes = [];
+  if (members.length - withMissing.length) notes.push(`${fmt(members.length - withMissing.length)} ${t("birthReqSkipHave")}`);
+  if (withMissing.length - withPhone.length) notes.push(`${fmt(withMissing.length - withPhone.length)} ${t("credsNoPhone")}`);
+  if (recent.length) notes.push(`${fmt(recent.length)} ${t("birthReqSkipRecent")}`);
+  if (notes.length) showMsg(msg, notes.join(" · "), true);
+  if (queue.length > BIRTH_REQ_BATCH && !confirm(`${fmt(queue.length)} — ${t("birthReqBigBatch")}`)) return;
+  waQueueStart({
+    title: t("birthReqTitle"),
+    warn: t("birthReqWarn"),
+    items: queue.map((m) => ({ label: `${m.name} (${m.membershipNumber})`, m })),
+    async prepare(item) {
+      const r = await api(`/api/admin/members/${encodeURIComponent(item.m.membershipNumber)}/birthdate-request`, { method: "POST", body: JSON.stringify({}) });
+      item.m.birthRequestAt = r.birthRequestAt;
+      return { phone: r.phone || item.m.phone, text: waBirthRequestMessage(r.name || item.m.name, r.missing || [], r.loginUrl) };
+    },
+    onClose: () => { try { applyDirectorySearchFilter(); } catch (e) { /* ignore */ } },
+  });
+}
+document.getElementById("dir-birth-request").addEventListener("click", () => birthRequestStart(directorySelected()));
 function waCredentialsMessage(name, num, pw, url) {
   const ar = `مرحبًا ${name}،\nبيانات الدخول إلى منصة أهلاوي (لجنة الرياضة الترفيهية - فرع القاهرة الجديدة):\nرابط الدخول: ${url}\nاسم المستخدم (رقم العضوية): ${num}\nكلمة المرور المؤقتة: ${pw}\nسيُطلب منك تغيير كلمة المرور عند أول دخول. من فضلك لا تشارك هذه البيانات مع أحد.`;
   const en = `Hi ${name},\nYour MyAhlawy login (Recreational Sports Committee — New Cairo Branch):\nLogin page: ${url}\nUsername (membership number): ${num}\nTemporary password: ${pw}\nYou will be asked to change the password the first time you sign in. Please do not share these details.`;
