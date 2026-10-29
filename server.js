@@ -7142,6 +7142,7 @@ app.get("/admin/print/event/:eventId", requireStaffRole(["tournament"]), require
         membershipNumber: r.membershipNumber,
         phone: isAdminViewer && m ? m.phone || "" : "",
         ageGroup: ai.ageGroup,
+        birthDate: ai.birthDate || "",
         birthYear: ai.birthYear,
         age: ai.age,
         registeredAt: r.registeredAt,
@@ -7200,6 +7201,7 @@ app.get("/admin/print/age-report", requireStaffRole(["tournament"]), (req, res) 
       }
       return {
         eventDate: eventDateById.get(r.eventId) || "",
+        birthDate: ai.birthDate || "",
         birthYear: ai.birthYear,
         age: ai.age,
         eventId: r.eventId,
