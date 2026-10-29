@@ -5485,7 +5485,7 @@ function renderMembersTable() {
       <td>${escapeAttr(m.phone)}</td>
       <td>${escapeAttr(m.familyGroup)}</td>
       <td>${escapeAttr(ageGroupLabel(m.ageGroup))}</td>
-      <td class="num">${m.birthYear ? escapeAttr(m.birthYear) : "—"}</td>
+      <td class="num" style="white-space:nowrap;">${m.birthDate ? escapeAttr(birthDateText(m.birthDate)) : "—"}</td>
       <td class="num">${m.age != null ? escapeAttr(m.age) : "—"}</td>
       <td>${m.hasLoggedInAccount ? t("yesLabel") : t("noLabel")}</td>
       <td>${m.hasClaimCode ? t("yesLabel") : t("noLabel")}</td>
@@ -5740,7 +5740,7 @@ function renderDirectoryTable() {
         <input type="date" class="dir-birth-input" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" value="${escapeAttr(person.birthDate || "")}" min="1900-01-01" max="${todayISO()}" style="max-width:160px;padding:4px 6px;font-size:0.8rem;" />
         ${
           person.birthDate
-            ? `<span class="fam-rel-badge">${escapeAttr(ageGroupLabel(effectiveAgeGroup(person)) + " · " + bornAgeText(person))}</span>`
+            ? `<span class="fam-rel-badge dir-birth-badge" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}">${escapeAttr(ageGroupLabel(effectiveAgeGroup(person)) + " · " + bornAgeText(person))}</span>`
             : `<select class="dir-age-select" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="max-width:200px;padding:4px 6px;font-size:0.8rem;">${ageGroupOptionsHtml(person.ageGroup || "")}</select>`
         }
         <button class="secondary dir-age-save" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button>
@@ -5855,7 +5855,7 @@ function renderDirectoryTable() {
         <td>${escapeAttr(m.membershipNumber)}</td>
         <td>${escapeAttr(m.name)}${memberTypeBadge}${badges}</td>
         <td style="white-space:nowrap;">${m.ageGroup ? escapeAttr(ageGroupLabel(m.ageGroup)) : `<span class="fam-age-missing">—</span>`}</td>
-        <td class="num">${m.birthYear ? escapeAttr(m.birthYear) : `<span class="fam-age-missing">—</span>`}</td>
+        <td class="num dir-birth-cell" data-me="${me}" style="white-space:nowrap;">${m.birthDate ? escapeAttr(birthDateText(m.birthDate)) : `<span class="fam-age-missing">—</span>`}</td>
         <td class="num">${m.age != null ? escapeAttr(m.age) : `<span class="fam-age-missing">—</span>`}</td>
         <td>${escapeAttr(m.phone)}</td>
         <td>${escapeAttr(m.email || "")}</td>
@@ -5913,7 +5913,21 @@ function renderDirectoryTable() {
             body: JSON.stringify({ birthDate: birthIn.value, dependentId: depId }),
           });
           if (holder) Object.assign(holder, { birthDate: r.birthDate, birthYear: r.birthYear, age: r.age, ageGroup: r.ageGroup });
-          showMsg(msg, `${t("okAgeGroupSavedShort")} — ${ageGroupLabel(r.ageGroup)} · ${bornAgeText({ birthDate: r.birthDate })}`, true);
+          const badgeText = `${ageGroupLabel(effectiveAgeGroup({ birthDate: r.birthDate, ageGroup: r.ageGroup }))} · ${bornAgeText({ birthDate: r.birthDate })}`;
+          let badge = wrap.querySelector(`.dir-birth-badge[data-me="${me}"][data-dep="${dep}"]`);
+          if (!badge) {
+            badge = document.createElement("span");
+            badge.className = "fam-rel-badge dir-birth-badge";
+            badge.dataset.me = me;
+            badge.dataset.dep = dep;
+            if (sel) sel.replaceWith(badge); else birthIn.after(badge);
+          }
+          badge.textContent = badgeText;
+          if (dep === "") {
+            const cell = wrap.querySelector(`.dir-birth-cell[data-me="${me}"]`);
+            if (cell) cell.textContent = birthDateText(r.birthDate);
+          }
+          showMsg(msg, `${t("okAgeGroupSavedShort")} — ${badgeText}`, true);
           return;
         }
         if (!sel || !sel.value) return showMsg(msg, t("errBirthDateRequired"), false);
@@ -10314,7 +10328,7 @@ function birthDateText(iso) {
 }
 function bornAgeText(p) {
   if (!p || !p.birthDate) return "";
-  return t("bornAge").replace("{year}", p.birthDate.slice(0, 4)).replace("{age}", String(ageFromBirth(p.birthDate)));
+  return t("bornAge").replace("{date}", birthDateText(p.birthDate)).replace("{age}", String(ageFromBirth(p.birthDate)));
 }
 function initBirthInputs() {
   const max = todayISO();
