@@ -4492,6 +4492,42 @@ app.post("/api/admin/members/:membershipNumber/send-credentials", requireStaffRo
   });
 });
 
+// ----------------------------------------- ask a member for a date of birth --
+// For members / family members who still have no date of birth on file. Like
+// the credentials flow, the admin sends it from their OWN WhatsApp one chat at
+// a time (click-to-chat); this endpoint only works out who is missing, stamps
+// "asked on", and hands back the phone number at the moment of sending.
+app.post("/api/admin/members/:membershipNumber/birthdate-request", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const num = req.params.membershipNumber;
+  const member = db.members[num];
+  if (!member) return res.status(404).json({ error: "No member found with that membership number" });
+  if (member.archivedAt) return res.status(409).json({ error: "This member is archived - restore the member first" });
+  if (!String(member.phone || "").replace(/\D/g, "")) return res.status(400).json({ error: "This member has no phone number on file" });
+  const missing = [];
+  if (!member.birthDate) missing.push({ name: member.name, self: true });
+  for (const d of member.dependents || []) if (!d.birthDate) missing.push({ name: d.name, self: false });
+  if (!missing.length) return res.status(409).json({ error: "Everyone on this account already has a date of birth on file", nothingMissing: true });
+  member.birthRequestAt = new Date().toISOString();
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "birthdate_requested",
+    details: `${member.name} (#${num}) - missing: ${missing.map((x) => x.name).join(", ")}`,
+  });
+  writeDb(db);
+  res.json({
+    ok: true,
+    membershipNumber: num,
+    name: member.name,
+    phone: member.phone || "",
+    missing,
+    birthRequestAt: member.birthRequestAt,
+    loginUrl: `${req.protocol}://${req.get("host")}/`,
+  });
+});
+
 // ------------------------------------------------------ points start date --
 // Non-destructive cutoff: events dated before the chosen start event earn no
 // points and redemptions requested before it are ignored. History stays in
@@ -5429,6 +5465,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         hasLoggedInAccount: !!m.passwordHash,
         mustChangePassword: !!m.mustChangePassword,
         credentialsIssuedAt: m.credentialsIssuedAt || null,
+        birthRequestAt: m.birthRequestAt || null,
         archivedAt: m.archivedAt || null,
         balance: snap ? snap.balance : 0,
         familyPooled: snap ? snap.familyPooled : false,
