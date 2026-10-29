@@ -1107,6 +1107,11 @@ function requireStaffRole(role) {
         if (!allowList.includes(session.role)) return res.status(403).json({ error: "Admin access required" });
       } else if (role === "admin") {
         return res.status(403).json({ error: "Admin access required" });
+      } else if (session.role === "partner") {
+        // A Partner account is a read-only view of who attended the events
+        // it was assigned; it must never reach the gate / roster endpoints
+        // (those carry phone numbers and can change data).
+        return res.status(403).json({ error: "Not allowed for this account" });
       }
     }
     const db = readDb();
@@ -1683,7 +1688,7 @@ function sanitizeStaffPhone(raw) {
 app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   const { username, password, name, role } = req.body;
   const phone = sanitizeStaffPhone(req.body.phone);
-  if (!username || !password || !name || !["admin", "staff", "tournament", "management"].includes(role)) {
+  if (!username || !password || !name || !["admin", "staff", "tournament", "management", "partner"].includes(role)) {
     return res.status(400).json({ error: "username, password, name, and a valid role are required" });
   }
   if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
@@ -1708,6 +1713,97 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   });
   writeDb(db);
   res.status(201).json({ staff: publicStaff(db.staffAccounts[username]) });
+});
+
+// ------------------------------------------------------------ partners ----
+// A "partner" staff account is read-only. It sees, for the events an admin
+// assigned to it (staff.partnerEventIds), only the people who were actually
+// checked in: name, age, date of birth and check-in time. No phone number,
+// membership number, points or anything else, and no way to change data.
+// Access closes PARTNER_ACCESS_DAYS after the event ended (like managers).
+const PARTNER_ACCESS_DAYS = 7;
+function partnerCanSeeEvent(db, staff, ev) {
+  if (!ev) return false;
+  if (staff.role === "admin") return true; // admin can preview what a partner sees
+  const ids = Array.isArray(staff.partnerEventIds) ? staff.partnerEventIds : [];
+  if (!ids.includes(ev.id) && !(ev.parentEventId && ids.includes(ev.parentEventId))) return false;
+  return todayStr() <= dateStrPlusDays(eventEndDate(ev), PARTNER_ACCESS_DAYS);
+}
+function partnerEventSummary(db, ev) {
+  const childIds = db.events.filter((e) => e.parentEventId === ev.id).map((e) => e.id);
+  const ids = new Set([ev.id, ...childIds]);
+  return {
+    id: ev.id,
+    nameEn: ev.nameEn,
+    nameAr: ev.nameAr || "",
+    date: ev.date,
+    endDate: ev.endDate || "",
+    startTime: ev.startTime || "",
+    endTime: ev.endTime || "",
+    checkedInCount: db.registrations.filter((r) => ids.has(r.eventId) && !r.waitlisted && r.checkedIn).length,
+  };
+}
+app.get("/api/partner/events", requireStaffRole(["partner"]), (req, res) => {
+  const db = req.db;
+  const list = db.events
+    .filter((ev) => partnerCanSeeEvent(db, req.staff, ev) && (req.staff.role === "admin" || !ev.parentEventId))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .map((ev) => partnerEventSummary(db, ev));
+  res.json({ events: list });
+});
+app.get("/api/partner/events/:eventId/attendees", requireStaffRole(["partner"]), (req, res) => {
+  const db = req.db;
+  const ev = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!ev) return res.status(404).json({ error: "Event not found" });
+  if (!partnerCanSeeEvent(db, req.staff, ev)) return res.status(403).json({ error: "This event is not available to your account" });
+  const childById = new Map(db.events.filter((e) => e.parentEventId === ev.id).map((e) => [e.id, e]));
+  const attendees = [];
+  for (const r of db.registrations) {
+    if (r.waitlisted || !r.checkedIn) continue;
+    const regEvent = r.eventId === ev.id ? ev : childById.get(r.eventId);
+    if (!regEvent) continue;
+    const m = db.members[r.membershipNumber];
+    const person = m ? (r.dependentName ? (m.dependents || []).find((d) => d.id === r.dependentId) || {} : m) : {};
+    const ai = AgeUtils.ageInfo(person, String(regEvent.date || ""));
+    attendees.push({
+      name: r.dependentName || (m ? m.name : ""),
+      age: ai.age,
+      birthDate: ai.birthDate || "",
+      checkedInAt: r.checkInAt || "",
+      activityEn: regEvent.id === ev.id ? "" : regEvent.nameEn,
+      activityAr: regEvent.id === ev.id ? "" : regEvent.nameAr || "",
+    });
+  }
+  attendees.sort((a, b) => String(a.checkedInAt).localeCompare(String(b.checkedInAt)) || a.name.localeCompare(b.name));
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "partner.viewed_attendees",
+    details: `${ev.nameEn} (#${ev.id}) - ${attendees.length} people`,
+  });
+  writeDb(db);
+  res.json({ event: partnerEventSummary(db, ev), attendees });
+});
+// Admin: choose which events a partner account may see.
+app.put("/api/staff/accounts/:username/partner-events", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const account = db.staffAccounts[req.params.username];
+  if (!account) return res.status(404).json({ error: "Account not found" });
+  if (account.role !== "partner") return res.status(400).json({ error: "Only Partner accounts have assigned events" });
+  const raw = Array.isArray(req.body && req.body.eventIds) ? req.body.eventIds : [];
+  const valid = new Set(db.events.map((e) => e.id));
+  const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && valid.has(n)))];
+  account.partnerEventIds = ids;
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "staff.partner_events_set",
+    details: `${account.username}: ${ids.length ? ids.join(", ") : "none"}`,
+  });
+  writeDb(db);
+  res.json({ ok: true, username: account.username, partnerEventIds: ids });
 });
 
 app.put("/api/staff/accounts/:username/phone", requireStaffRole("admin"), (req, res) => {
