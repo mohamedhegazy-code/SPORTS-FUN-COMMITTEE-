@@ -822,6 +822,8 @@ function readDb() {
   if (typeof db.landingPage.whatsapp.bodyAr !== "string") db.landingPage.whatsapp.bodyAr = "";
   if (typeof db.landingPage.whatsapp.qrImage !== "string") db.landingPage.whatsapp.qrImage = "";
   if (typeof db.landingPage.whatsapp.link !== "string") db.landingPage.whatsapp.link = "";
+  // The committee's shared WhatsApp number (members tap a button to start a chat with it).
+  if (typeof db.landingPage.whatsapp.committeePhone !== "string") db.landingPage.whatsapp.committeePhone = "";
   // Public contact form block: title/intro shown above the form on the
   // landing page - same bilingual title/body pattern as "about" and
   // "whatsapp" above. The form itself needs no admin-curated content
@@ -3063,9 +3065,20 @@ app.put("/api/admin/landing/about", requireStaffRole("admin"), uploadEventPhoto.
 
 app.put("/api/admin/landing/whatsapp", requireStaffRole("admin"), uploadEventPhoto.single("qrImage"), (req, res) => {
   const db = req.db;
-  const { titleEn, titleAr, bodyEn, bodyAr, link, removeQrImage } = req.body;
+  const { titleEn, titleAr, bodyEn, bodyAr, link, removeQrImage, committeePhone } = req.body;
   const oldQrImage = db.landingPage.whatsapp.qrImage;
+  // Committee WhatsApp number: optional; digits with an optional leading "+"
+  // (spaces, dashes and brackets are stripped). Omitted = keep what is saved.
+  let phone = db.landingPage.whatsapp.committeePhone || "";
+  if (committeePhone !== undefined) {
+    const cleaned = String(committeePhone).trim().replace(/[\s\-().]/g, "");
+    if (cleaned && !/^\+?\d{8,15}$/.test(cleaned)) {
+      return res.status(400).json({ error: "Enter the committee WhatsApp number using digits only, 8 to 15 digits (for example 01012345678 or +201012345678)." });
+    }
+    phone = cleaned;
+  }
   db.landingPage.whatsapp = {
+    committeePhone: phone,
     titleEn: (titleEn || "").trim() || db.landingPage.whatsapp.titleEn,
     titleAr: (titleAr || "").trim(),
     bodyEn: (bodyEn || "").trim(),
