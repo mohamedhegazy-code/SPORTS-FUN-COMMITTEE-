@@ -665,6 +665,10 @@
 
     <div id="admin-panel" class="hidden">
       <div class="admin-tabs" id="admin-tabs" role="tablist">
+        <button class="admin-tab partner-tab-only hidden" type="button" data-admin-tab="partner" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7.5" cy="7" r="2.8" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16c.4-3 2.4-4.5 5-4.5s4.6 1.5 5 4.5M13.5 9.5l1.8 1.8 3-3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span data-i18n="adminTabPartner">Attendees</span>
+        </button>
         <button class="admin-tab active evt-tab-only" type="button" data-admin-tab="overview" role="tab">
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.3" stroke="currentColor" stroke-width="1.5"/></svg>
           <span data-i18n="adminTabOverview">Overview</span>
@@ -1632,6 +1636,7 @@
                 <option value="staff" data-i18n="roleStaff">Staff (gate scanner only)</option>
                 <option value="tournament" data-i18n="roleTournament">Tournament Manager (tournaments, check-in, messages &amp; event dashboard)</option>
                 <option value="management" data-i18n="roleManagement">Management (dashboard &amp; reports only)</option>
+                <option value="partner" data-i18n="rolePartner">Partner (read-only: checked-in attendees of assigned events)</option>
                 <option value="admin" data-i18n="roleAdmin">Admin (full access)</option>
               </select>
             </div>
@@ -1663,6 +1668,21 @@
             <button class="secondary" id="staff-pin-clear" data-i18n="btnClearRecoveryPin">Remove recovery PIN</button>
           </div>
           <div class="msg" id="staff-pin-msg"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden partner-tab-only" data-admin-panel="partner">
+        <div class="card">
+          <h2><span data-i18n="partnerTitle">Checked-in attendees</span></h2>
+          <p class="section-sub" data-i18n="partnerIntro">People who have checked in to your events: name, age and date of birth only. This page is read-only.</p>
+          <p id="partner-no-events" class="hidden" style="color:var(--muted);" data-i18n="partnerNoEvents">No events have been assigned to your account yet.</p>
+          <div id="partner-controls" class="hidden" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <select id="partner-event-select" style="max-width:420px;"></select>
+            <input id="partner-search" type="search" data-i18n-ph="partnerSearch" placeholder="Search by name" style="max-width:240px;" />
+            <button class="secondary" type="button" id="partner-refresh" data-i18n="partnerRefresh">Refresh</button>
+            <span id="partner-count" class="fam-rel-badge"></span>
+          </div>
+          <div id="partner-table-wrap" style="margin-top:14px;overflow-x:auto;"></div>
         </div>
       </div>
 

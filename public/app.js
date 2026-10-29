@@ -462,6 +462,7 @@ function setLang(lang) {
   renderLandingAnnualPreview();
   renderFeaturedEvents();
   renderHeroUpcoming();
+  if (CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "partner") loadPartnerEvents();
   renderNewsList(NEWS_DATA);
   renderSpotlightGrid(SPOTLIGHTS_DATA);
   // Committee page/admin list are both built with t() at render time (tier
@@ -1229,7 +1230,8 @@ function updateSessionBadge() {
     const roleLabel =
       CURRENT_SESSION.staff.role === "admin" ? t("roleAdminShort") :
       CURRENT_SESSION.staff.role === "tournament" ? t("roleTournamentShort") :
-      CURRENT_SESSION.staff.role === "management" ? t("roleManagementShort") : t("roleStaffShort");
+      CURRENT_SESSION.staff.role === "management" ? t("roleManagementShort") :
+      CURRENT_SESSION.staff.role === "partner" ? t("rolePartnerShort") : t("roleStaffShort");
     text.textContent = `${t("sessionAsStaff")} ${CURRENT_SESSION.staff.name} (${roleLabel})`;
   }
 }
@@ -1254,7 +1256,14 @@ function updateUIForSession() {
   // requireStaffRole(["management"]) in server.js for the matching backend
   // gate on the dashboard/report endpoints.
   const isManagementRole = isStaff && CURRENT_SESSION.staff.role === "management";
-  const isAdminAreaVisible = isAdmin || isTournamentRole || isManagementRole;
+  // Partner: read-only account that only sees who checked in to the events an
+  // admin assigned to it (see requireStaffRole(["partner"]) in server.js).
+  const isPartnerRole = isStaff && CURRENT_SESSION.staff.role === "partner";
+  const isAdminAreaVisible = isAdmin || isTournamentRole || isManagementRole || isPartnerRole;
+  // A partner has no use for the gate scanner.
+  const scanTabBtn = document.querySelector('.tab-btn[data-view="scan"]');
+  if (scanTabBtn) scanTabBtn.classList.toggle("hidden", isPartnerRole);
+  document.querySelectorAll(".partner-tab-only").forEach((el) => el.classList.toggle("hidden", !isPartnerRole));
 
   // Register tab
   document.getElementById("reg-auth").classList.toggle("hidden", isMember);
@@ -1327,7 +1336,7 @@ function updateUIForSession() {
   // admin-full-only) are for Admin + Tournament Manager - a pure Management
   // role account has no use for event editing or the old per-event mini
   // dashboard, so it only ever sees the Management Dashboard tab.
-  document.querySelectorAll(".evt-tab-only").forEach((el) => el.classList.toggle("hidden", isManagementRole && !isAdmin));
+  document.querySelectorAll(".evt-tab-only").forEach((el) => el.classList.toggle("hidden", (isManagementRole || isPartnerRole) && !isAdmin));
   if (isAdminAreaVisible) {
     initAdminTabs();
     // A Tournament Manager can't reach Members/Points/Content/Settings - if
@@ -1342,7 +1351,14 @@ function updateUIForSession() {
     // A pure Management role account only has the Management tab available
     // at all, so always land there regardless of what was remembered from
     // an earlier full-admin/tournament session in this same browser.
-    if (isManagementRole && !isAdmin) {
+    if (isPartnerRole) {
+      // Signing in happens on the Gate Scanner tab, which a partner doesn't
+      // get - move them to the Admin tab where their attendee list lives.
+      const activeView = document.querySelector(".tab-btn.active");
+      if (activeView && activeView.dataset.view === "scan") switchTab("admin");
+      switchAdminTab("partner");
+      loadPartnerEvents();
+    } else if (isManagementRole && !isAdmin) {
       switchAdminTab("management");
       loadManagementDashboard();
     } else {
@@ -9929,6 +9945,123 @@ async function setRedemptionStatus(id, status) {
   loadAdminOverview();
 }
 
+// ------------------------------------------------------- partner account --
+// Read-only view for the "partner" role: who checked in to the events an admin
+// assigned (name, age, date of birth, check-in time - nothing else).
+let PARTNER_ATTENDEES = [];
+function partnerEventLabel(ev) {
+  const name = currentLang === "ar" ? ev.nameAr || ev.nameEn : ev.nameEn || ev.nameAr;
+  return `${name} · ${ev.date}`;
+}
+async function loadPartnerEvents() {
+  const sel = document.getElementById("partner-event-select");
+  if (!sel) return;
+  const noEv = document.getElementById("partner-no-events");
+  const controls = document.getElementById("partner-controls");
+  const wrap = document.getElementById("partner-table-wrap");
+  try {
+    const { events } = await api("/api/partner/events");
+    const keep = sel.value;
+    sel.innerHTML = events.map((ev) => `<option value="${ev.id}">${escapeAttr(partnerEventLabel(ev))}</option>`).join("");
+    if (keep && events.some((e) => String(e.id) === keep)) sel.value = keep;
+    noEv.classList.toggle("hidden", events.length > 0);
+    controls.classList.toggle("hidden", events.length === 0);
+    controls.style.display = events.length ? "flex" : "none";
+    if (!events.length) {
+      wrap.innerHTML = "";
+      return;
+    }
+    await loadPartnerAttendees();
+  } catch (e) {
+    wrap.innerHTML = `<p class="msg error">${escapeAttr(e.message)}</p>`;
+  }
+}
+async function loadPartnerAttendees() {
+  const sel = document.getElementById("partner-event-select");
+  const wrap = document.getElementById("partner-table-wrap");
+  if (!sel || !sel.value) return;
+  try {
+    const r = await api(`/api/partner/events/${encodeURIComponent(sel.value)}/attendees`);
+    PARTNER_ATTENDEES = r.attendees;
+    renderPartnerAttendees();
+  } catch (e) {
+    wrap.innerHTML = `<p class="msg error">${escapeAttr(e.message)}</p>`;
+  }
+}
+function renderPartnerAttendees() {
+  const wrap = document.getElementById("partner-table-wrap");
+  const q = searchNorm((document.getElementById("partner-search") || {}).value || "");
+  const list = PARTNER_ATTENDEES.filter((a) => !q || searchNorm(a.name).includes(q));
+  document.getElementById("partner-count").textContent = t("partnerCount").replace("{n}", String(PARTNER_ATTENDEES.length));
+  if (!list.length) {
+    wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("partnerNone"))}</p>`;
+    return;
+  }
+  const hasActivity = list.some((a) => a.activityEn || a.activityAr);
+  const timeText = (iso) => {
+    const d = new Date(iso);
+    if (!iso || Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit" });
+  };
+  wrap.innerHTML = `<table class="dashboard-table">
+    <thead><tr><th>#</th><th>${t("colName")}</th><th>${t("colAge")}</th><th>${t("colBirthYear")}</th>${hasActivity ? `<th>${t("partnerColActivity")}</th>` : ""}<th>${t("partnerColCheckin")}</th></tr></thead>
+    <tbody>${list
+      .map(
+        (a, i) => `<tr>
+      <td class="num">${i + 1}</td>
+      <td>${escapeAttr(a.name)}</td>
+      <td class="num">${a.age != null ? escapeAttr(a.age) : "—"}</td>
+      <td class="num" style="white-space:nowrap;">${a.birthDate ? escapeAttr(birthDateText(a.birthDate)) : "—"}</td>
+      ${hasActivity ? `<td>${escapeAttr(currentLang === "ar" ? a.activityAr || a.activityEn : a.activityEn || a.activityAr)}</td>` : ""}
+      <td class="num">${escapeAttr(timeText(a.checkedInAt))}</td>
+    </tr>`
+      )
+      .join("")}</tbody></table>`;
+}
+document.getElementById("partner-event-select").addEventListener("change", loadPartnerAttendees);
+document.getElementById("partner-refresh").addEventListener("click", loadPartnerAttendees);
+document.getElementById("partner-search").addEventListener("input", renderPartnerAttendees);
+
+// Admin side: tick the events a partner account may see.
+function partnerEventsEditorHtml(s) {
+  const assigned = new Set((s.partnerEventIds || []).map(Number));
+  const events = (typeof EVENTS_DATA !== "undefined" ? EVENTS_DATA : []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const u = escapeAttr(s.username);
+  return `<details class="partner-ev-box" data-u="${u}" style="margin-top:6px;">
+    <summary style="cursor:pointer;font-size:0.8rem;color:var(--muted);">${escapeAttr(t("partnerEventsLabel"))} — ${
+      assigned.size ? escapeAttr(t("partnerEventsCount").replace("{n}", String(assigned.size))) : escapeAttr(t("partnerEventsNone"))
+    }</summary>
+    <div style="max-height:180px;overflow:auto;margin:6px 0;font-size:0.82rem;">${events
+      .map(
+        (ev) =>
+          `<label style="display:flex;gap:6px;align-items:center;margin:2px 0;"><input type="checkbox" class="partner-ev-cb" value="${ev.id}"${assigned.has(ev.id) ? " checked" : ""} /> ${escapeAttr(partnerEventLabel(ev))}</label>`
+      )
+      .join("")}</div>
+    <button type="button" class="secondary partner-ev-save" data-u="${u}" style="padding:3px 10px;font-size:0.75rem;">${escapeAttr(t("partnerEventsSave"))}</button>
+    <span class="partner-ev-msg" style="font-size:0.78rem;margin-inline-start:8px;"></span>
+  </details>`;
+}
+document.getElementById("staff-accounts-table-wrap").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".partner-ev-save");
+  if (!btn) return;
+  const box = btn.closest(".partner-ev-box");
+  const eventIds = [...box.querySelectorAll(".partner-ev-cb:checked")].map((c) => Number(c.value));
+  const msg = box.querySelector(".partner-ev-msg");
+  try {
+    const r = await api(`/api/staff/accounts/${encodeURIComponent(btn.dataset.u)}/partner-events`, {
+      method: "PUT",
+      body: JSON.stringify({ eventIds }),
+    });
+    const acct = (STAFF_ACCOUNTS_DATA || []).find((x) => x.username === btn.dataset.u);
+    if (acct) acct.partnerEventIds = r.partnerEventIds;
+    msg.textContent = t("partnerEventsSaved");
+    msg.style.color = "var(--green, #1b7f3b)";
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.style.color = "var(--red)";
+  }
+});
+
 // ------------------------------------------------------------ staff accounts --
 async function loadStaffAccountsTable() {
   const wrap = document.getElementById("staff-accounts-table-wrap");
@@ -9956,8 +10089,10 @@ async function loadStaffAccountsTable() {
             ? t("roleTournament")
             : s.role === "management"
             ? t("roleManagement")
+            : s.role === "partner"
+            ? t("rolePartner")
             : t("roleStaff")
-        }</td>
+        }${s.role === "partner" ? partnerEventsEditorHtml(s) : ""}</td>
         <td style="white-space:nowrap;"><input class="staff-phone-input" data-u="${escapeAttr(s.username)}" type="tel" value="${escapeAttr(s.phone || "")}" placeholder="01xxxxxxxxx" style="width:140px;padding:4px 6px;font-size:0.8rem;" /> <button class="secondary staff-phone-save" data-u="${escapeAttr(s.username)}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button></td>
         <td>${
           me === s.username
