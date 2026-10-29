@@ -361,7 +361,7 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   const adultRow = (ageHtml.match(/<tr[^>]*>(?:(?!<\/tr>).)*Adult Player(?:(?!<\/tr>).)*<\/tr>/s) || [""])[0];
   ok(/Adults \(18–45\)/.test(adultRow), "own registration shows own age group", adultRow.slice(0, 200));
   // birth year + age columns, calculated as of the event's start date
-  ok(/Birth year/.test(ageHtml) && /<th class="c">Age<\/th>/.test(ageHtml), "registrations sheet has Birth year and Age columns");
+  ok(/Date of birth/.test(ageHtml) && /<th class="c">Age<\/th>/.test(ageHtml), "registrations sheet has Date of birth and Age columns");
   const yr30 = bd(30).slice(0, 4);
   ok(new RegExp(yr30).test(adultRow) && />30<\/td>/.test(adultRow), "adult row shows birth year and age 30", adultRow.slice(0, 300));
   const AU = require("../age_utils.js");
@@ -379,9 +379,9 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
   ok(/Adults \(18–45\)/.test(futRow) && new RegExp(`>${futAge.age}</td>`).test(futRow), "event sheet: age and group are calculated as of the event start date", futRow.slice(0, 300));
   const futRep = (await getHtml(`/admin/print/age-report?lang=en&detail=names&events=${evFut}`)).text;
   ok(/Adults \(18–45\)/.test(futRep) && /Almost Adult/.test(futRep) && !/Youth \(12–17\) <span class="muted">\(1\)/.test(futRep), "age report: person counted in the group they will be in on the event date", futRep.slice(0, 200));
-  ok(/Birth year/.test(futRep) && new RegExp(`>${youthBirth.slice(0, 4)}</td>`).test(futRep), "age report names table shows birth year", null);
+  ok(/Date of birth/.test(futRep) && futRep.includes(`>${youthBirth}</td>`), "age report names table shows the full date of birth", youthBirth);
   const futRepAr = (await getHtml(`/admin/print/age-report?lang=ar&detail=names&events=${evFut}`)).text;
-  ok(/سنة الميلاد/.test(futRepAr) && /العمر/.test(futRepAr), "age report (ar) has birth year / age headers");
+  ok(/تاريخ الميلاد/.test(futRepAr) && /العمر/.test(futRepAr), "age report (ar) has birth year / age headers");
   const ptsHtml = (await getHtml(`/admin/print/event/${evAge}?view=points&lang=en`)).text;
   ok(/class="total"><td colspan="8">/.test(ptsHtml), "points total row spans the new column");
   for (const v of ["registrations", "attendance"]) {

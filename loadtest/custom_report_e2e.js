@@ -192,7 +192,7 @@ const b64url = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
 
   section("Spec sanitising");
   const junk = await run({ source: "<script>", columns: ["__proto__", "passwordHash", "constructor"], filters: { ageMin: "abc", ageMax: -5, kinds: ["x"], events: ["a", -1, 3.5], search: "CRX", status: "weird", from: "not-a-date" }, sortBy: "passwordHash", groupBy: "__proto__", layout: "weird" });
-  ok(junk.status === 200 && junk.json.spec.source === "people" && junk.json.columns.length > 0 && junk.json.columns.every((c) => ["name", "kind", "membershipNumber", "memberType", "phone", "birthYear", "age", "ageGroup"].includes(c.key)), "junk spec falls back to defaults", junk.json && junk.json.spec);
+  ok(junk.status === 200 && junk.json.spec.source === "people" && junk.json.columns.length > 0 && junk.json.columns.every((c) => ["name", "kind", "membershipNumber", "memberType", "phone", "birthDate", "age", "ageGroup"].includes(c.key)), "junk spec falls back to defaults", junk.json && junk.json.spec);
   ok(junk.json.spec.filters.ageMin === null && junk.json.spec.filters.status === "active" && junk.json.spec.filters.from === "" && junk.json.spec.sortBy === "" && junk.json.spec.groupBy === "" && junk.json.spec.layout === "detail", "junk filters clamped", junk.json.spec.filters);
   const empty = await api("/api/admin/report-builder/run", { method: "POST", jar: admin, body: {} });
   ok(empty.status === 200, "empty body still runs", empty.status);
