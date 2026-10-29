@@ -1819,6 +1819,7 @@ function wireEventCardButtons(grid, events, isPast) {
     });
   });
 }
+const FEATURED_EVENTS_COUNT = 3;
 function renderEventsGrid() {
   const grid = document.getElementById("events-grid");
   const empty = document.getElementById("events-empty");
@@ -1828,9 +1829,14 @@ function renderEventsGrid() {
   const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
     a.date.localeCompare(b.date)
   );
+  // The soonest FEATURED_EVENTS_COUNT already appear in "Coming up next"
+  // above, so this section lists only the rest instead of repeating them.
+  const rest = upcoming.slice(FEATURED_EVENTS_COUNT);
   empty.classList.toggle("hidden", upcoming.length > 0);
-  grid.innerHTML = upcoming.map((ev) => eventCardHtml(ev, false)).join("");
-  wireEventCardButtons(grid, upcoming, false);
+  const title = document.getElementById("all-events-title");
+  if (title) title.classList.toggle("hidden", rest.length === 0 && upcoming.length > 0);
+  grid.innerHTML = rest.map((ev) => eventCardHtml(ev, false)).join("");
+  wireEventCardButtons(grid, rest, false);
 }
 // Same upcoming-events data and card markup as the Events tab's grid above -
 // shown on the Register tab itself (member-signed-in state only) so someone
@@ -1891,7 +1897,7 @@ function renderFeaturedEvents() {
   const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
     a.date.localeCompare(b.date)
   );
-  const featured = upcoming.slice(0, 3);
+  const featured = upcoming.slice(0, FEATURED_EVENTS_COUNT);
   section.classList.toggle("hidden", featured.length === 0);
   grid.innerHTML = featured.map((ev) => eventCardHtml(ev, false, true)).join("");
   wireEventCardButtons(grid, featured, false);
