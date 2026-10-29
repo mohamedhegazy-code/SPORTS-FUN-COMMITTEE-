@@ -5685,12 +5685,31 @@ function searchNorm(str) {
     .trim();
 }
 
+// "Filter by event": options come from the events members are actually
+// registered for (newest first). The selection survives re-renders / language switches.
+function populateDirectoryEventFilter() {
+  const sel = document.getElementById("dir-f-event");
+  if (!sel) return;
+  const prev = sel.value;
+  const seen = new Map();
+  for (const m of DIRECTORY_DATA) {
+    for (const r of m.registrations || []) {
+      if (!seen.has(r.eventId)) seen.set(r.eventId, { id: r.eventId, label: bilingual(r.nameEn, r.nameAr) || `#${r.eventId}`, date: r.date || "" });
+    }
+  }
+  const list = Array.from(seen.values()).sort((x, y) => (y.date || "").localeCompare(x.date || "") || y.id - x.id);
+  sel.innerHTML =
+    `<option value="">${escapeAttr(t("dirFilterEventAll"))}</option>` +
+    list.map((e) => `<option value="${e.id}">${escapeAttr(e.label)}${e.date ? " — " + escapeAttr(e.date) : ""}</option>`).join("");
+  if (prev && seen.has(Number(prev))) sel.value = prev;
+}
 function renderDirectoryTable() {
   const wrap = document.getElementById("directory-table");
   if (!DIRECTORY_DATA.length) {
     wrap.innerHTML = `<p class="dashboard-empty-note">${t("noMembersYet")}</p>`;
     return;
   }
+  populateDirectoryEventFilter();
   const rows = DIRECTORY_DATA.map((m, i) => {
     // The blob also carries every family member's name / phone / email, so
     // searching a child's name finds the parent's row (it used to be invisible).
@@ -5791,6 +5810,7 @@ function renderDirectoryTable() {
       `data-account="${m.hasLoggedInAccount ? "has" : "none"}"`,
       `data-must="${m.mustChangePassword ? "1" : "0"}"`,
       `data-age="${m.ageGroup || "none"}"`,
+      `data-evs="|${(m.registrations || []).map((r) => `${r.eventId}:${r.waitlisted ? "w" : r.checkedIn ? "i" : "c"}`).join("|")}|"`,
       `data-nobirth="${!m.birthDate || (m.dependents || []).some((d) => !d.birthDate) ? "1" : "0"}"`,
       `data-type="${m.memberType === "follower" ? "follower" : "main"}"`,
       `data-act="${m.checkedInCount > 0 ? "attended" : m.registeredCount > 0 ? "registered" : "never"}"`,
@@ -5991,6 +6011,8 @@ function directoryFilterState() {
     type: v("dir-f-type"),
     act: v("dir-f-act"),
     phone: v("dir-f-phone"),
+    event: v("dir-f-event"),
+    evstatus: v("dir-f-evstatus"),
   };
 }
 function directoryRowMatches(row, f) {
@@ -6004,6 +6026,20 @@ function directoryRowMatches(row, f) {
   else if (f.age && d.age !== f.age) return false;
   if (f.type && d.type !== f.type) return false;
   if (f.act && d.act !== f.act) return false;
+  if (f.event || f.evstatus) {
+    // data-evs looks like "|12:c|15:w|" (c confirmed, i checked in, w waiting list)
+    const codes = [];
+    const re = /\|(\d+):([ciw])/g;
+    let mm;
+    while ((mm = re.exec(d.evs || "")) !== null) if (!f.event || mm[1] === f.event) codes.push(mm[2]);
+    const okCode = (c) =>
+      !f.evstatus ||
+      (f.evstatus === "confirmed" && (c === "c" || c === "i")) ||
+      (f.evstatus === "waitlisted" && c === "w") ||
+      (f.evstatus === "checkedin" && c === "i") ||
+      (f.evstatus === "notchecked" && c === "c");
+    if (!codes.some(okCode)) return false;
+  }
   if (f.phone === "has" && d.phone !== "1") return false;
   if (f.phone === "missing" && d.phone !== "0") return false;
   return true;
@@ -6026,7 +6062,7 @@ function applyDirectorySearchFilter() {
   if (count) count.textContent = DIRECTORY_DATA.length ? `${t("dirShowing")} ${fmt(shown)} / ${fmt(total)}` : "";
   updateDirectorySelectionUI();
 }
-["directory-search", "dir-f-status", "dir-f-account", "dir-f-age", "dir-f-type", "dir-f-act", "dir-f-phone"].forEach((id) => {
+["directory-search", "dir-f-status", "dir-f-account", "dir-f-age", "dir-f-type", "dir-f-act", "dir-f-phone", "dir-f-event", "dir-f-evstatus"].forEach((id) => {
   document.getElementById(id).addEventListener(id === "directory-search" ? "input" : "change", applyDirectorySearchFilter);
 });
 

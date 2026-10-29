@@ -1528,7 +1528,7 @@ tr.dir-archived td { opacity: 0.6; }
 .howto-lang.active { background: var(--maroon, #7a0e0e); color: #fff; }
 
 /* Full event: tell members the waiting list is open. */
-.event-full-note { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: #fff4e0; border: 1px solid #f0c987; color: #7a4a00; font-size: 0.86rem; line-height: 1.45; }
+.event-full-note { margin: 8px 0 16px; padding: 8px 12px; border-radius: 10px; background: #fff4e0; border: 1px solid #f0c987; color: #7a4a00; font-size: 0.86rem; line-height: 1.45; }
 
 /* Admin custom report builder */
 .rb-saved-bar { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 6px; }
