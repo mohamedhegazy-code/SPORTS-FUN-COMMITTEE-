@@ -2390,6 +2390,12 @@ function pointsAwardedSuffix(points) {
 }
 function renderQrList(entries) {
   const wrap = document.getElementById("reg-qr-list");
+  const waBtn = document.getElementById("reg-wa-committee");
+  if (waBtn) {
+    const href = committeeWaHref(entries.map((e) => e.label).filter(Boolean).join(" / "));
+    waBtn.classList.toggle("hidden", !href);
+    if (href) waBtn.setAttribute("href", href);
+  }
   wrap.innerHTML = entries
     .map((e) => {
       if (e.ok && e.result.waitlisted) {
@@ -2857,7 +2863,10 @@ async function loadMyRegistrations() {
             <div class="meta">${escapeAttr(evDate)}</div>
             ${statusBadge}
           </div>
-          <button type="button" class="danger small myreg-cancel-btn" data-reg-id="${r.id}">${escapeAttr(t("btnCancelRegistration"))}</button>
+          <div class="myreg-actions">
+            ${!finished && committeeWaHref(`${attendee} — ${r.event ? bilingual(r.event.nameEn, r.event.nameAr) : ""} (${evDate})`) ? `<a class="roster-btn wa small committee-wa" href="${escapeAttr(committeeWaHref(`${attendee} — ${r.event ? bilingual(r.event.nameEn, r.event.nameAr) : ""} (${evDate})`))}" target="_blank" rel="noopener">${escapeAttr(t("btnMessageCommitteeWaShort"))}</a>` : ""}
+            <button type="button" class="danger small myreg-cancel-btn" data-reg-id="${r.id}">${escapeAttr(t("btnCancelRegistration"))}</button>
+          </div>
         </div>
         ${r.rankingCategories && !r.waitlisted ? `<div class="my-reg-cats" data-reg-id="${r.id}">
           <strong>${escapeAttr(t("regCatTitle"))}:</strong>
@@ -7161,6 +7170,7 @@ function populateLandingAdminForms() {
     document.getElementById("whatsapp-body-en").value = lp.whatsapp.bodyEn || "";
     document.getElementById("whatsapp-body-ar").value = lp.whatsapp.bodyAr || "";
     document.getElementById("whatsapp-link").value = lp.whatsapp.link || "";
+    document.getElementById("whatsapp-committee-phone").value = lp.whatsapp.committeePhone || "";
     const preview = document.getElementById("whatsapp-qr-preview");
     const previewWrap = document.getElementById("whatsapp-qr-preview-wrap");
     const removeBtn = document.getElementById("whatsapp-remove-qr-btn");
@@ -7396,6 +7406,7 @@ document.getElementById("whatsapp-save-btn").addEventListener("click", async () 
   fd.append("bodyEn", document.getElementById("whatsapp-body-en").value.trim());
   fd.append("bodyAr", document.getElementById("whatsapp-body-ar").value.trim());
   fd.append("link", document.getElementById("whatsapp-link").value.trim());
+  fd.append("committeePhone", document.getElementById("whatsapp-committee-phone").value.trim());
   const fileInput = document.getElementById("whatsapp-qr-file");
   if (fileInput.files[0]) fd.append("qrImage", fileInput.files[0]);
   try {
@@ -7418,6 +7429,7 @@ document.getElementById("whatsapp-remove-qr-btn").addEventListener("click", asyn
   fd.append("bodyEn", document.getElementById("whatsapp-body-en").value.trim());
   fd.append("bodyAr", document.getElementById("whatsapp-body-ar").value.trim());
   fd.append("link", document.getElementById("whatsapp-link").value.trim());
+  fd.append("committeePhone", document.getElementById("whatsapp-committee-phone").value.trim());
   fd.append("removeQrImage", "true");
   try {
     const result = await api("/api/admin/landing/whatsapp", { method: "PUT", body: fd });
@@ -10547,6 +10559,29 @@ function waDigits(phone) {
   else if (d.startsWith("0")) d = "20" + d.slice(1); // local 01xxxxxxxxx -> 201xxxxxxxxx
   else if (!d.startsWith("20")) d = "20" + d; // bare 1xxxxxxxxx -> 201xxxxxxxxx
   return d;
+}
+// ---- Member -> committee WhatsApp (the member starts the chat) --------------
+// One shared committee number (set by the admin under WhatsApp Community).
+// The button opens a chat with it, pre-filled with who the member is and which
+// event they mean. A message the member starts is far safer for the number's
+// reputation than the committee messaging people first.
+function committeeWaDigits() {
+  const p = String(((LANDING_PAGE && LANDING_PAGE.whatsapp) || {}).committeePhone || "").trim();
+  if (!p) return "";
+  if (p.startsWith("+")) return p.replace(/\D/g, "");
+  return waDigits(p);
+}
+function committeeWaMessage(about) {
+  const m = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const name = m ? m.name : "";
+  const num = m ? m.membershipNumber : "";
+  const ar = `السلام عليكم، أنا ${name} (رقم العضوية ${num}). لدي استفسار بخصوص تسجيلي${about ? ` في: ${about}` : ""}.`;
+  const en = `Hello, I am ${name} (membership no. ${num}). I have a question about my registration${about ? ` for: ${about}` : ""}.`;
+  return `${ar}\n\n${en}`;
+}
+function committeeWaHref(about) {
+  const d = committeeWaDigits();
+  return d ? `https://wa.me/${d}?text=${encodeURIComponent(committeeWaMessage(about))}` : "";
 }
 function waLink(phone, message) {
   const digits = waDigits(phone);

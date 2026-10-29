@@ -332,6 +332,7 @@
       <h2 data-i18n="qrTitle">Your entry QR code(s)</h2>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="qrIntro">Show this at the event entrance to check in. Points are awarded the moment it's scanned — take a screenshot so you have it even offline. You can also come back and view it any time from Member Profile → My Registrations, until the event is over.</p>
       <p class="hint-note"><a href="#" class="howto-link" data-howto="qr-entry" data-i18n="howToLinkQrEntry">▶ Watch how to use your entry QR code at the gate</a></p>
+      <p class="hint-note"><a id="reg-wa-committee" class="roster-btn wa committee-wa hidden" href="#" target="_blank" rel="noopener" data-i18n="btnMessageCommitteeWa">Message the committee on WhatsApp</a></p>
       <div id="reg-qr-list"></div>
     </div>
   </section>
@@ -1479,6 +1480,9 @@
           <textarea id="whatsapp-body-ar" dir="rtl" rows="2"></textarea>
           <label data-i18n="fieldWhatsappLink">Invite link (optional)</label>
           <input id="whatsapp-link" placeholder="https://chat.whatsapp.com/..." />
+          <label data-i18n="fieldWhatsappCommitteePhone">Committee WhatsApp number (members message it after registering)</label>
+          <input id="whatsapp-committee-phone" type="tel" inputmode="tel" placeholder="01012345678 / +201012345678" dir="ltr" />
+          <p class="hint-note" data-i18n="whatsappCommitteePhoneHint">One shared number for the whole committee (ideally a WhatsApp Business number linked on several devices). When set, a "Message the committee on WhatsApp" button appears after a member registers and in Member Profile → My registrations.</p>
           <label data-i18n="fieldWhatsappQr">Community QR code image</label>
           <div id="whatsapp-qr-preview-wrap" class="hidden" style="margin-bottom:8px;"><img id="whatsapp-qr-preview" alt="" style="max-height:160px;border-radius:8px;display:block;margin-inline:auto;" /></div>
           <input type="file" id="whatsapp-qr-file" accept="image/*" />
