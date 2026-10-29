@@ -1768,10 +1768,14 @@ function eventCardHtml(ev, isPast, featured) {
   const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
   const isParent = children.length > 0;
   const photo = isPast && ev.recap && ev.recap.photos && ev.recap.photos.length ? ev.recap.photos[0] : ev.coverPhoto;
-  const photoStyle = photo ? ` style="background-image:url('${escapeAttr(photo)}')"` : "";
+  // The cover is a real <img> (not a CSS background) so the frame takes the
+  // picture's own proportions: a wide banner with text on it shows full-width
+  // and readable instead of a small strip inside a fixed 16:10 box.
   return `
     <div class="event-card${isParent ? " event-card-parent" : ""}" data-event-id="${ev.id}">
-      <div class="photo" data-action="details"${photoStyle}>${photo ? "" : escapeAttr(t("noPhoto"))}</div>
+      <div class="photo${photo ? " has-img" : ""}" data-action="details">${
+        photo ? `<img src="${escapeAttr(photo)}" alt="" loading="lazy" />` : escapeAttr(t("noPhoto"))
+      }</div>
       <div class="body">
         ${featured ? `<span class="featured-tag">${escapeAttr(t("featuredEventsTitle"))}</span>` : ""}
         <h3 data-action="details">${eventNameHtml(ev)}</h3>

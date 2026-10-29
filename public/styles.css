@@ -644,7 +644,8 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   margin-bottom: 30px;
 }
 .event-grid.featured {
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* wider cards than the regular grid so a banner cover is big enough to read */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 560px));
   margin-bottom: 10px;
 }
 .event-grid.featured .event-card {
@@ -652,6 +653,12 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   box-shadow: 0 3px 12px rgba(201, 162, 39, 0.25);
 }
 .event-grid.featured .event-card .photo { aspect-ratio: 16 / 9; }
+/* Cover with a real picture: size to the picture (banners stay readable). */
+.event-card .photo.has-img,
+.event-grid.featured .event-card .photo.has-img { aspect-ratio: auto; display: block; background: #f1ece2; }
+.event-card .photo.has-img img {
+  display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; object-position: center;
+}
 .featured-tag {
   display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
   background: var(--gold); color: #fff; padding: 3px 9px; border-radius: 20px; margin-bottom: 8px;
