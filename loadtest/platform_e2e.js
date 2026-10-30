@@ -458,8 +458,13 @@ async function main() {
     // non-tournament staff role can't create events (requireStaffRole(['tournament']))
     const asStaff = await createEvent(staffStaff, { nameEn: "Should Fail" });
     ok(asStaff.status === 403, "create event as plain 'staff' role -> 403 (tournament role required)", asStaff.json);
+    // A Tournament Manager creates events only once the admin made them an
+    // event head (covered in depth by event_heads_e2e.js).
+    const notHead = await createEvent(staffTournament, { nameEn: "Tournament Role Event" });
+    ok(notHead.status === 403, "create event as 'tournament' role without event-head permission -> 403", notHead.json);
+    ok((await api(`/api/staff/accounts/${tournUser}/can-create-events`, { method: "PUT", jar: admin, body: { value: true } })).status === 200, "admin authorises the tournament account as event head");
     const asTournament = await createEvent(staffTournament, { nameEn: "Tournament Role Event" });
-    ok(asTournament.status === 201, "create event as 'tournament' role -> 201", asTournament.json);
+    ok(asTournament.status === 201, "create event as authorised event head -> 201", asTournament.json);
 
     // update
     const updateForm = new FormData();
