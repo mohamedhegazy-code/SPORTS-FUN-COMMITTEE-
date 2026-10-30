@@ -166,6 +166,10 @@ async function createEvent(admin, fields = {}) {
   if (fields.earlyDeadline !== undefined) form.set("earlyDeadline", fields.earlyDeadline);
   if (fields.parentEventId !== undefined) form.set("parentEventId", String(fields.parentEventId));
   if (fields.allowMultipleActivities !== undefined) form.set("allowMultipleActivities", String(fields.allowMultipleActivities));
+  // This suite deliberately creates many events that share a date and the
+  // default Arabic name; opt out of the duplicate-event guard (covered by
+  // event_merge_e2e.js).
+  form.set("allowDuplicate", "true");
   const res = await api("/api/events", { method: "POST", jar: admin, body: form, isForm: true });
   return res;
 }
