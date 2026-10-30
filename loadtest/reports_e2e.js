@@ -198,6 +198,7 @@ const getHtml = (path, jar) => api(path, { jar: jar || admin, raw: true });
     const ids = listWin.json.map((e) => e.eventId);
     ok(ids.includes(evRecent.id) && !ids.includes(evOld.id), "reports list drops the event after the window", ids);
     // a manager creating an event becomes its manager; cannot reassign; cannot edit others'
+    await api(`/api/staff/accounts/${tmUser}/can-create-events`, { method: "PUT", jar: admin, body: { value: true } }); // event-head permission
     const fdNew = new FormData();
     fdNew.set("nameEn", "Made by TM"); fdNew.set("nameAr", "x"); fdNew.set("sport", "Chess"); fdNew.set("date", dayStr(10)); fdNew.set("managerUsernames", JSON.stringify([]));
     const made = await api("/api/events", { method: "POST", jar: tm, body: fdNew, isForm: true });
