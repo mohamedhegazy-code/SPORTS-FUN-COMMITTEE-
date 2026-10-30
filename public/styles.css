@@ -1565,7 +1565,21 @@ tr.dir-archived td { opacity: 0.6; }
 /* Birthday cards */
 .bd-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; margin-top: 12px; }
 .bd-preview-col { position: sticky; top: 12px; text-align: center; }
-.bd-preview-col canvas { width: 100%; max-width: 300px; height: auto; border-radius: 14px; box-shadow: 0 10px 30px rgba(80, 0, 10, 0.35); }
+.bd-preview-col .bd-stage { max-width: 300px; margin: 0 auto; }
+.featured-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
+.featured-row.has-bd { grid-template-columns: minmax(0, 1fr) 390px; }
+.featured-row > #featured-events-section { min-width: 0; }
+.bd-panel { min-width: 0; max-width: 640px; margin-bottom: 10px; }
+@media (max-width: 1000px) { .featured-row.has-bd { grid-template-columns: minmax(0, 1fr); } .bd-panel { max-width: none; } }
+.bd-wish { margin: 0 0 8px; font-weight: 700; color: var(--maroon, #8b0000); line-height: 1.6; font-size: 0.95rem; }
+.bd-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #3d0008; border: 2px solid var(--gold); box-shadow: 0 3px 12px rgba(201, 162, 39, 0.3); }
+.bd-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.bd-name-overlay { position: absolute; inset-inline: 0; bottom: 8%; text-align: center; padding: 0 8px; pointer-events: none; transition: opacity 0.4s; }
+.bd-name-overlay.fade { opacity: 0; }
+.bd-name-overlay span { display: inline-block; max-width: 100%; font-family: "Cairo", "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif; font-weight: 800; font-size: clamp(1.15rem, 4.8vw, 1.85rem); line-height: 1.5; letter-spacing: 0; color: #fff; background: rgba(50, 0, 10, 0.66); padding: 1px 18px 3px; border-radius: 30px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7), 0 0 14px rgba(255, 200, 90, 0.35); overflow-wrap: anywhere; }
+.bd-name-overlay small { display: block; font-family: "Cairo", "Segoe UI", Tahoma, Arial, sans-serif; margin-top: 3px; font-size: 0.72rem; font-weight: 700; color: #ffe9a8; text-shadow: 0 1px 6px rgba(60, 0, 10, 0.9); }
+.bd-count { position: absolute; top: 8px; inset-inline-start: 8px; background: rgba(60, 0, 10, 0.6); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 2px 9px; border-radius: 12px; }
+.bd-sound { position: absolute; top: 8px; inset-inline-end: 8px; margin: 0; padding: 3px 11px; font-size: 0.72rem; font-weight: 700; border-radius: 14px; border: 0; background: rgba(60, 0, 10, 0.6); color: #fff; cursor: pointer; }
 .bd-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--maroon, #8b0000); cursor: pointer; text-align: start; }
 .bd-name:hover { text-decoration: underline; }
 .bd-today { display: inline-block; background: #ffd23f; color: #6b0010; font-weight: 800; border-radius: 999px; padding: 1px 10px; font-size: 0.78rem; }

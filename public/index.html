@@ -91,9 +91,21 @@
     </div>
 
     <div data-landing-section="events">
-      <div id="featured-events-section" class="hidden">
-        <h2 class="section-title" data-i18n="featuredEventsTitle">Coming up next</h2>
-        <div class="event-grid featured" id="featured-events-grid"></div>
+      <div class="featured-row">
+        <div id="featured-events-section" class="hidden">
+          <h2 class="section-title" data-i18n="featuredEventsTitle">Coming up next</h2>
+          <div class="event-grid featured" id="featured-events-grid"></div>
+        </div>
+        <aside id="birthday-panel" class="bd-panel hidden" aria-live="polite">
+          <h2 class="section-title" data-i18n="bdLandingTitle">Birthday greetings</h2>
+          <p class="bd-wish" id="bd-landing-wish"></p>
+          <div class="bd-stage">
+            <video id="bd-landing-video" src="/videos/happy-birthday.mp4" poster="/videos/happy-birthday-poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
+            <div class="bd-name-overlay"><span id="bd-landing-name"></span><small id="bd-landing-when"></small></div>
+            <span class="bd-count hidden" id="bd-landing-count"></span>
+            <button type="button" class="bd-sound" id="bd-landing-sound" data-i18n="bdSoundOn">Sound on</button>
+          </div>
+        </aside>
       </div>
 
       <h2 class="section-title hidden" id="all-events-title" data-i18n="allEventsTitle">More upcoming events</h2>
@@ -1072,15 +1084,14 @@
 
       <div class="admin-tab-panel hidden" data-admin-panel="members">
         <div class="card admin-full-only" id="bd-card">
-          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 17.5h13M5 17.5v-5.5h10v5.5M5 12c1.7 1.4 3.3 1.4 5 0s3.3-1.4 5 0M10 12V8.5M10 8.5c-1.1-.9-1.1-2 0-3 1.1 1 1.1 2.1 0 3z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="bdTitle">Birthday cards</span></h2>
-          <p class="section-sub" data-i18n="bdIntro">See who has a birthday, preview the birthday card, and send it on WhatsApp to one member or to several, one chat at a time.</p>
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 17.5h13M5 17.5v-5.5h10v5.5M5 12c1.7 1.4 3.3 1.4 5 0s3.3-1.4 5 0M10 12V8.5M10 8.5c-1.1-.9-1.1-2 0-3 1.1 1 1.1 2.1 0 3z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="bdTitle">Birthday videos</span></h2>
+          <p class="section-sub" data-i18n="bdIntro">See who has a birthday and send the birthday video (with music) on WhatsApp as a personal link, to one member or to several, one chat at a time.</p>
           <div class="rb-filters">
             <div class="rb-f"><span class="rb-fl" data-i18n="bdShow">Show birthdays</span>
               <div class="rb-pair"><select id="bd-scope"><option value="week" data-i18n="bdWeek">Today and the next 7 days</option><option value="today" data-i18n="bdToday">Today</option><option value="month" data-i18n="bdMonth">A month</option><option value="all" data-i18n="bdAll">All (next birthday first)</option></select><select id="bd-month" class="hidden"></select></div></div>
             <div class="rb-f"><span class="rb-fl" data-i18n="bdOptions">Options</span>
               <div class="rb-chips">
                 <label class="agerep-chk"><input type="checkbox" id="bd-family" checked /> <span data-i18n="bdIncludeFamily">Include family members</span></label>
-                <label class="agerep-chk"><input type="checkbox" id="bd-showage" /> <span data-i18n="bdShowAge">Show the age on the card</span></label>
               </div></div>
           </div>
           <p class="hint-note" id="bd-summary" style="margin:10px 0 0;"></p>
@@ -1093,13 +1104,16 @@
               </div>
               <div id="bd-table"></div>
               <div class="rb-actions"><button type="button" class="primary" id="bd-send" disabled></button></div>
-              <p class="hint-note" data-i18n="bdHowTo">When you press Open WhatsApp the card is copied. Paste it into the chat (Ctrl or Cmd + V), then press Send. WhatsApp does not allow a link to attach the picture by itself.</p>
+              <p class="hint-note" data-i18n="bdHowTo">Each message carries an Arabic + English congratulation and the member's personal video link. Press Open WhatsApp, then press Send yourself. The video also appears on the home page, automatically, from the day before the birthday until its end.</p>
               <div class="msg" id="bd-msg"></div>
             </div>
             <div class="bd-preview-col hidden" id="bd-preview-wrap">
-              <canvas id="bd-preview" width="1080" height="1350"></canvas>
+              <div class="bd-stage"><video id="bd-preview-video" src="/videos/happy-birthday.mp4" poster="/videos/happy-birthday-poster.jpg" muted loop playsinline preload="metadata"></video><div class="bd-name-overlay"><span id="bd-preview-who"></span></div></div>
               <p class="hint-note" id="bd-preview-name" style="margin:6px 0;text-align:center;"></p>
-              <button type="button" class="secondary small" id="bd-preview-dl" data-i18n="bdDownload">Download card</button>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                <button type="button" class="secondary small" id="bd-preview-copy" data-i18n="bdCopyLinkBtn">Copy link</button>
+                <a class="secondary small" id="bd-preview-dl" href="/videos/happy-birthday.mp4" download data-i18n="bdDownloadVideo" style="text-decoration:none;display:inline-block;">Download video</a>
+              </div>
             </div>
           </div>
         </div>

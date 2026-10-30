@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Happy Birthday — كل عام وأنت بخير</title>
+<meta property="og:title" content="__OG_TITLE__" />
+<meta property="og:description" content="لجنة الرياضة الترفيهية – فرع القاهرة الجديدة · Recreational Sports Committee — New Cairo" />
+<meta property="og:image" content="__OG_IMAGE__" />
+<meta name="theme-color" content="#5c0000" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;800&display=swap" rel="stylesheet" />
+<style>
+  :root { --red-dark:#3d0008; --red:#8b0000; --gold:#e8c35a; --cream:#fff6dc; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--red-dark); color: var(--cream); font-family: "Cairo", "Segoe UI", Tahoma, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 18px 16px 28px; gap: 14px; background: radial-gradient(circle at 50% 0%, #7a0014 0%, var(--red-dark) 70%); min-height: 100vh; }
+  .wish { text-align: center; max-width: 880px; width: 100%; }
+  .wish .ar { font-size: clamp(1.15rem, 4.2vw, 1.8rem); font-weight: 800; color: var(--gold); line-height: 1.5; }
+  .wish .en { direction: ltr; font-size: clamp(0.95rem, 3.4vw, 1.25rem); margin-top: 2px; opacity: 0.95; }
+  .stage { position: relative; width: 100%; max-width: 880px; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border: 2px solid rgba(232,195,90,0.55); background: #000; }
+  .stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .name { position: absolute; inset-inline: 0; bottom: 7%; text-align: center; padding: 0 12px; }
+  .name span { display: inline-block; max-width: 100%; font-family: "Cairo", "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif; font-weight: 800; font-size: clamp(1.5rem, 6.4vw, 3rem); line-height: 1.5; letter-spacing: 0; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7), 0 0 18px rgba(255,200,90,0.4); background: rgba(50,0,10,0.66); padding: 2px 24px 4px; border-radius: 40px; overflow-wrap: anywhere; }
+  .play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(40,0,8,0.28); border: 0; cursor: pointer; color: #fff; font: inherit; }
+  .play b { background: var(--gold); color: #4a0008; font-size: clamp(1rem, 3.6vw, 1.3rem); padding: 12px 26px; border-radius: 40px; box-shadow: 0 6px 22px rgba(0,0,0,0.45); }
+  .play.hidden, .hidden { display: none; }
+  .foot { font-size: 0.85rem; text-align: center; opacity: 0.8; line-height: 1.7; }
+  .bad { text-align: center; font-size: 1.1rem; margin-top: 30px; }
+  @media (prefers-reduced-motion: reduce) { .stage video { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="wish" id="wish">
+    <div class="ar" id="wish-ar">ألف مبروك! كل عام وأنت بخير</div>
+    <div class="en" id="wish-en">Congratulations &amp; Happy Birthday!</div>
+  </div>
+  <div class="stage" id="stage">
+    <video id="vid" src="/videos/happy-birthday.mp4" poster="/videos/happy-birthday-poster.jpg" autoplay muted loop playsinline preload="auto"></video>
+    <div class="name"><span id="who"></span></div>
+    <button class="play" id="play" type="button" aria-label="Play with music"><b>▶ شغّل مع الموسيقى · Play with music</b></button>
+  </div>
+  <div class="foot">لجنة الرياضة الترفيهية – فرع القاهرة الجديدة<br />Recreational Sports Committee — New Cairo Branch</div>
+  <script src="/birthday.js"></script>
+</body>
+</html>
