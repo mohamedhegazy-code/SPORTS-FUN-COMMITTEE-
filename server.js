@@ -1703,6 +1703,9 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
     phone,
     passwordHash,
     mustChangePassword: true,
+    // Event heads: a Tournament Manager may create new events only when the
+    // admin ticks this (otherwise they only run the events assigned to them).
+    ...(role === "tournament" ? { canCreateEvents: req.body.canCreateEvents === true } : {}),
   };
   logActivity(db, {
     actorType: "staff",
@@ -1714,6 +1717,34 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   writeDb(db);
   res.status(201).json({ staff: publicStaff(db.staffAccounts[username]) });
 });
+
+// Admin: allow / forbid a Tournament Manager (event head) from creating events.
+app.put("/api/staff/accounts/:username/can-create-events", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const account = db.staffAccounts[req.params.username];
+  if (!account) return res.status(404).json({ error: "Account not found" });
+  if (account.role !== "tournament") return res.status(400).json({ error: "Only Tournament Manager (event head) accounts have this setting" });
+  account.canCreateEvents = req.body && req.body.value === true;
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "staff.can_create_events_set",
+    details: `${account.username}: ${account.canCreateEvents ? "allowed" : "not allowed"}`,
+  });
+  writeDb(db);
+  res.json({ ok: true, username: account.username, canCreateEvents: account.canCreateEvents });
+});
+// Gate for POST /api/events: the admin, or a Tournament Manager the admin
+// marked as an event head. Runs before the upload middleware so a refused
+// request never writes files to disk.
+function requireEventCreator(req, res, next) {
+  const staff = req.staff;
+  if (staff && staff.role === "tournament" && staff.canCreateEvents !== true) {
+    return res.status(403).json({ error: "Only the admin or a designated event head can create events" });
+  }
+  next();
+}
 
 // ------------------------------------------------------------ partners ----
 // A "partner" staff account is read-only. It sees, for the events an admin
@@ -2632,6 +2663,7 @@ app.get("/api/events", (req, res) => {
 app.post(
   "/api/events",
   requireStaffRole(["tournament"]),
+  requireEventCreator,
   uploadEventCoverMedia.fields([
     { name: "coverPhoto", maxCount: 1 },
     { name: "coverVideo", maxCount: 1 },
@@ -2675,6 +2707,12 @@ app.post(
     }
     const parentCheck = validateParentEventId(db, null, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
+    if (parentCheck.parentEventId && req.staff.role === "tournament") {
+      const parentEv = db.events.find((e) => e.id === parentCheck.parentEventId);
+      if (!isEventManager(db, parentEv, req.staff.username)) {
+        return res.status(403).json({ error: "You can only add activities under an event you manage" });
+      }
+    }
     // Guard against creating the same event twice (a double click, or someone
     // re-entering an event that already exists): same date, same parent and the
     // same English (or Arabic) name. The admin can still confirm "create anyway".
