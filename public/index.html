@@ -895,6 +895,21 @@
           <div class="msg" id="tourn-msg"></div>
         </div>
 
+        <div class="card admin-full-only" id="ev-merge-card">
+          <h2><span data-i18n="mergeEventsTitle">Merge duplicate events</span></h2>
+          <p class="hint-note" data-i18n="mergeEventsHint">Moves every registration from one event into another.</p>
+          <label data-i18n="mergeFromLabel">Move registrations FROM (the copy to remove)</label>
+          <select id="ev-merge-from"></select>
+          <label data-i18n="mergeToLabel" style="margin-top:8px;">Move them TO (the event to keep)</label>
+          <select id="ev-merge-to"></select>
+          <label style="display:flex;gap:8px;align-items:center;justify-content:flex-start;margin-top:10px;text-align:start;"><input type="checkbox" id="ev-merge-delete" checked style="width:auto;margin:0;flex:0 0 auto;" /> <span data-i18n="mergeDeleteSource">Delete the source event once it is empty</span></label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <button class="secondary" type="button" id="ev-merge-preview" data-i18n="mergePreviewBtn">Preview</button>
+            <button class="danger" type="button" id="ev-merge-run" data-i18n="mergeRunBtn">Move registrations</button>
+          </div>
+          <div class="msg" id="ev-merge-msg"></div>
+        </div>
+
         <div class="card admin-full-only">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 6h12M8 6V4.3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M5.5 6l.7 9.3a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L14.5 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="adminDeleteEvent">Delete an event</span></h2>
           <p class="hint-note" data-i18n="deleteEventHint">Works for both upcoming and already-finished events. Deleting an event also removes every registration tied to it - this can't be undone. A parent event with activities nested under it can't be deleted until those activities are deleted or reassigned first.</p>

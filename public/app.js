@@ -146,6 +146,14 @@ function fmt(n) {
 // first, then the English name, regardless of the site's current EN/AR
 // toggle (which still controls all the surrounding UI text) - falls back
 // to whichever single language is actually filled in.
+// Option text that tells two same-named events apart: date, time range and how
+// many people are registered / waiting in each.
+function eventChooserLabel(ev) {
+  const time = ev.startTime ? ` ${ev.startTime}${ev.endTime ? "–" + ev.endTime : ""}` : "";
+  const counts = ev.confirmedCount !== undefined ? ` · ${t("dupBadgeRegs").replace("{c}", fmt(ev.confirmedCount || 0)).replace("{w}", fmt(ev.waitlistCount || 0))}` : "";
+  const by = ev.createdByName ? ` · ${t("createdByLabel")}: ${ev.createdByName}${ev.createdAtIso ? " " + ev.createdAtIso.slice(0, 10) : ""}` : "";
+  return `${eventLabel(ev)} — ${ev.date}${time}${counts}${by}${isPastEvent(ev) ? ` — ${t("eventPast")}` : ""}`;
+}
 function eventLabel(ev) {
   const ar = (ev.nameAr || "").trim();
   const en = (ev.nameEn || "").trim();
@@ -1616,14 +1624,20 @@ function renderEventDropdowns() {
     const prevDeleteValue = deleteSel.value;
     const deleteOpts = EVENTS_DATA.slice()
       .sort((a, b) => b.date.localeCompare(a.date))
-      .map(
-        (ev) =>
-          `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}${isPastEvent(ev) ? ` — ${t("eventPast")}` : ""}</option>`
-      )
+      .map((ev) => `<option value="${ev.id}">${escapeAttr(eventChooserLabel(ev))}</option>`)
       .join("");
     deleteSel.innerHTML = deleteOpts || `<option value="">--</option>`;
     if (prevDeleteValue && Array.from(deleteSel.options).some((o) => o.value === prevDeleteValue)) {
       deleteSel.value = prevDeleteValue;
+    }
+    // Same list (with times and registration counts, so two events with the
+    // same name can be told apart) feeds the "merge duplicate events" card.
+    for (const id of ["ev-merge-from", "ev-merge-to"]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const prev = el.value;
+      el.innerHTML = deleteOpts || `<option value="">--</option>`;
+      if (prev && Array.from(el.options).some((o) => o.value === prev)) el.value = prev;
     }
   }
 
@@ -6644,7 +6658,15 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
   if (whatsappQrInput.files[0]) fd.append("whatsappQr", whatsappQrInput.files[0]);
   try {
-    await api("/api/events", { method: "POST", body: fd });
+    try {
+      await api("/api/events", { method: "POST", body: fd });
+    } catch (dupErr) {
+      // Same name + date already exists: ask before creating a second copy.
+      if (!(dupErr.data && dupErr.data.code === "duplicate_event")) throw dupErr;
+      if (!confirm(dupErr.message)) return showMsg(msg, dupErr.message, false);
+      fd.set("allowDuplicate", "true");
+      await api("/api/events", { method: "POST", body: fd });
+    }
     showMsg(msg, "OK", true);
     document.getElementById("ev-name-en").value = "";
     document.getElementById("ev-name-ar").value = "";
@@ -6730,7 +6752,7 @@ function populateEditForm(ev) {
   if (ev.confirmedCount !== undefined) {
     statusEl.textContent = `${t("currentlyRegistered")}: ${fmt(ev.confirmedCount)}${
       ev.waitlistCount ? ` (${fmt(ev.waitlistCount)} ${t("waitlistLabel")})` : ""
-    }`;
+    }${ev.createdByName ? ` · ${t("createdByLabel")}: ${ev.createdByName}${ev.createdAtIso ? " (" + ev.createdAtIso.slice(0, 10) + ")" : ""}` : ""}`;
   } else {
     statusEl.textContent = "";
   }
@@ -6843,6 +6865,40 @@ document.getElementById("ev-delete-btn").addEventListener("click", async () => {
     showMsg(msg, e.message, false);
   }
 });
+
+// ------------------------------------------------- admin: merge duplicate events --
+async function runEventMerge(dryRun) {
+  const fromSel = document.getElementById("ev-merge-from");
+  const toSel = document.getElementById("ev-merge-to");
+  const msg = document.getElementById("ev-merge-msg");
+  if (!fromSel.value || !toSel.value || fromSel.value === toSel.value) return showMsg(msg, t("mergeSamePick"), false);
+  const from = EVENTS_DATA.find((e) => String(e.id) === fromSel.value);
+  const to = EVENTS_DATA.find((e) => String(e.id) === toSel.value);
+  try {
+    if (!dryRun && !confirm(t("mergeConfirm").replace("{from}", from ? eventLabel(from) : fromSel.value).replace("{to}", to ? eventLabel(to) : toSel.value))) return;
+    const r = await api(`/api/admin/events/${encodeURIComponent(fromSel.value)}/move-registrations`, {
+      method: "POST",
+      body: JSON.stringify({ toEventId: Number(toSel.value), dryRun: !!dryRun, deleteSourceWhenEmpty: document.getElementById("ev-merge-delete").checked }),
+    });
+    if (dryRun) {
+      const names = (r.conflictList || []).map((c) => c.name).join("، ");
+      showMsg(
+        msg,
+        t("mergePreviewText").replace("{moved}", fmt(r.moved)).replace("{total}", fmt(r.total)).replace("{conf}", fmt(r.movedConfirmed)).replace("{wait}", fmt(r.movedWaitlisted)).replace("{demoted}", fmt(r.demotedToWaitlist)).replace("{conflicts}", fmt(r.conflicts)) + (names ? ` (${names})` : ""),
+        true
+      );
+    } else {
+      showMsg(msg, t("mergeDoneText").replace("{moved}", fmt(r.moved)).replace("{conflicts}", fmt(r.conflicts)).replace("{deleted}", r.sourceDeleted ? t("mergeSourceDeleted") : t("mergeSourceKept")), true);
+      await loadEvents();
+      await loadAdminOverview();
+      await loadAdminDashboard();
+    }
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+}
+document.getElementById("ev-merge-preview").addEventListener("click", () => runEventMerge(true));
+document.getElementById("ev-merge-run").addEventListener("click", () => runEventMerge(false));
 
 // --------------------------------------------------------- admin: news --
 async function loadNewsAdminList() {
