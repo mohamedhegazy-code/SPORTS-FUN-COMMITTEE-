@@ -2030,10 +2030,9 @@ function bdlShowCurrent() {
   if (!it) return;
   const box = document.querySelector("#birthday-panel .bd-name-overlay");
   document.getElementById("bd-landing-name").textContent = it.name;
-  document.getElementById("bd-landing-when").textContent = t(it.when === 0 ? "bdWhenToday" : "bdWhenTomorrow");
   const count = document.getElementById("bd-landing-count");
-  count.classList.toggle("hidden", BDL.items.length < 2);
-  count.textContent = `${fmt(BDL.idx + 1)} / ${fmt(BDL.items.length)}`;
+  const when = t(it.when === 0 ? "bdWhenToday" : "bdWhenTomorrow").replace(/!$/, "");
+  count.textContent = BDL.items.length > 1 ? `${when} · ${fmt(BDL.idx + 1)} / ${fmt(BDL.items.length)}` : when;
   if (box) box.classList.remove("fade");
 }
 function renderBirthdayPanel() {
