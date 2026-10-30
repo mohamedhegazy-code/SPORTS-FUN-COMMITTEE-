@@ -1272,6 +1272,12 @@ function updateUIForSession() {
   const scanTabBtn = document.querySelector('.tab-btn[data-view="scan"]');
   if (scanTabBtn) scanTabBtn.classList.toggle("hidden", isPartnerRole);
   document.querySelectorAll(".partner-tab-only").forEach((el) => el.classList.toggle("hidden", !isPartnerRole));
+  // Creating events: the admin, or an event head the admin authorised.
+  const canCreateEvents = isAdmin || (isTournamentRole && CURRENT_SESSION.staff.canCreateEvents === true);
+  const addEventCard = document.getElementById("ev-add-card");
+  if (addEventCard) addEventCard.classList.toggle("hidden", !canCreateEvents);
+  const headsNote = document.getElementById("ev-heads-note");
+  if (headsNote) headsNote.classList.toggle("hidden", !(isTournamentRole && !canCreateEvents));
 
   // Register tab
   document.getElementById("reg-auth").classList.toggle("hidden", isMember);
@@ -10118,6 +10124,21 @@ document.getElementById("staff-accounts-table-wrap").addEventListener("click", a
   }
 });
 
+document.getElementById("staff-accounts-table-wrap").addEventListener("change", async (e) => {
+  const cb = e.target.closest(".staff-can-create");
+  if (!cb) return;
+  try {
+    const r = await api(`/api/staff/accounts/${encodeURIComponent(cb.dataset.u)}/can-create-events`, {
+      method: "PUT",
+      body: JSON.stringify({ value: cb.checked }),
+    });
+    const acct = (STAFF_ACCOUNTS_DATA || []).find((x) => x.username === cb.dataset.u);
+    if (acct) acct.canCreateEvents = r.canCreateEvents;
+  } catch (err) {
+    cb.checked = !cb.checked;
+    alert(err.message);
+  }
+});
 // ------------------------------------------------------------ staff accounts --
 async function loadStaffAccountsTable() {
   const wrap = document.getElementById("staff-accounts-table-wrap");
@@ -10148,7 +10169,11 @@ async function loadStaffAccountsTable() {
             : s.role === "partner"
             ? t("rolePartner")
             : t("roleStaff")
-        }${s.role === "partner" ? partnerEventsEditorHtml(s) : ""}</td>
+        }${s.role === "partner" ? partnerEventsEditorHtml(s) : ""}${
+          s.role === "tournament"
+            ? `<label style="display:flex;gap:6px;align-items:center;justify-content:flex-start;margin-top:6px;font-size:0.8rem;text-align:start;"><input type="checkbox" class="staff-can-create" data-u="${escapeAttr(s.username)}" style="width:auto;margin:0;flex:0 0 auto;"${s.canCreateEvents ? " checked" : ""} /> ${escapeAttr(t("canCreateEventsShort"))}</label>`
+            : ""
+        }</td>
         <td style="white-space:nowrap;"><input class="staff-phone-input" data-u="${escapeAttr(s.username)}" type="tel" value="${escapeAttr(s.phone || "")}" placeholder="01xxxxxxxxx" style="width:140px;padding:4px 6px;font-size:0.8rem;" /> <button class="secondary staff-phone-save" data-u="${escapeAttr(s.username)}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button></td>
         <td>${
           me === s.username
@@ -10205,6 +10230,9 @@ document.getElementById("sa-committee").addEventListener("change", (e) => {
   if (base && !document.getElementById("sa-username").value) document.getElementById("sa-username").value = base;
   document.getElementById("sa-role").value = "tournament";
 });
+document.getElementById("sa-role").addEventListener("change", (e) => {
+  document.getElementById("sa-can-create-wrap").style.display = e.target.value === "tournament" ? "flex" : "none";
+});
 document.getElementById("sa-submit").addEventListener("click", async () => {
   const username = document.getElementById("sa-username").value.trim();
   const name = document.getElementById("sa-name").value.trim();
@@ -10224,7 +10252,7 @@ document.getElementById("sa-submit").addEventListener("click", async () => {
   try {
     await api("/api/staff/accounts", {
       method: "POST",
-      body: JSON.stringify({ username, password, name, role, phone }),
+      body: JSON.stringify({ username, password, name, role, phone, canCreateEvents: role === "tournament" && document.getElementById("sa-can-create").checked }),
     });
     showMsg(msg, t("okStaffAdded"), true);
     document.getElementById("sa-username").value = "";

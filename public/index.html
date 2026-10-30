@@ -788,7 +788,8 @@
       </div>
 
       <div class="admin-tab-panel hidden evt-tab-only" data-admin-panel="events">
-        <div class="card">
+        <p class="hint-note hidden" id="ev-heads-note" data-i18n="eventHeadsOnlyNote">Events are created by the admin or by event heads the admin has authorised.</p>
+        <div class="card" id="ev-add-card">
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.8v6.4M6.8 10h6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span data-i18n="adminAddEvent">Add an event</span></h2>
           <div class="grid-2">
             <div><label data-i18n="fieldEventNameAr">Event name (AR)</label><input id="ev-name-ar" dir="rtl" /></div>
@@ -1654,6 +1655,7 @@
                 <option value="partner" data-i18n="rolePartner">Partner (read-only: checked-in attendees of assigned events)</option>
                 <option value="admin" data-i18n="roleAdmin">Admin (full access)</option>
               </select>
+              <label id="sa-can-create-wrap" style="display:none;gap:8px;align-items:center;justify-content:flex-start;margin-top:8px;text-align:start;"><input type="checkbox" id="sa-can-create" style="width:auto;margin:0;flex:0 0 auto;" /> <span data-i18n="canCreateEventsLabel">Event head: may create new events</span></label>
             </div>
           </div>
           <button class="primary" id="sa-submit" data-i18n="btnAddStaff">Add account</button>
