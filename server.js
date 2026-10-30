@@ -1947,7 +1947,13 @@ app.post("/api/staff/members/:membershipNumber/reset-password", requireStaffRole
   const member = db.members[membershipNumber];
   if (!member) return res.status(404).json({ error: "No member found with that membership number" });
   member.passwordHash = passwordHash;
+  // The admin chose (and knows) this password, so the member must replace it
+  // with their own at the next sign-in, and any open session is closed.
+  member.mustChangePassword = true;
+  member.credentialsIssuedAt = new Date().toISOString();
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "member.password_reset", details: `${member.name} (#${membershipNumber})` });
   writeDb(db);
+  dropMemberSessions(membershipNumber);
   res.json({ ok: true, member: publicMember(member) });
 });
 
@@ -3607,6 +3613,47 @@ app.post("/api/me/birth-date/confirm", requireMember, (req, res) => {
   res.json({ member: publicMember(member) });
 });
 
+// Member-side half of "admin edited my details / issued new login": the member
+// reviews the details the committee changed, confirms them and replaces the
+// temporary password with one only they know. Until then the app keeps asking
+// (non-dismissible gate - see applyMaybeShowDetailsConfirmGate in app.js).
+app.post("/api/me/details/confirm", requireMember, async (req, res) => {
+  const num = req.member.membershipNumber;
+  const { oldPassword, newPassword } = req.body || {};
+  if (!req.db.members[num] || !req.db.members[num].detailsConfirmPending) {
+    return res.status(409).json({ error: "There is nothing to confirm" });
+  }
+  if (req.body.confirmed !== true) return res.status(400).json({ error: "Please tick the box to confirm your details" });
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters" });
+  }
+  if (String(newPassword) === String(oldPassword)) {
+    return res.status(400).json({ error: "The new password must be different from the temporary one" });
+  }
+  if (!(await bcrypt.compare(oldPassword || "", req.db.members[num].passwordHash || ""))) {
+    return res.status(401).json({ error: "Current password is incorrect" });
+  }
+  const newPasswordHash = await bcrypt.hash(String(newPassword), 10);
+  // Re-read right before the write - see the comment in POST /api/auth/login.
+  const db = readDb();
+  const member = db.members[num];
+  if (!member) return res.status(401).json({ error: "Please sign in" });
+  member.passwordHash = newPasswordHash;
+  member.mustChangePassword = false;
+  member.detailsConfirmPending = false;
+  member.detailsConfirmedAt = new Date().toISOString();
+  member.pendingDetailsChange = null;
+  logActivity(db, {
+    actorType: "member",
+    actorId: num,
+    actorName: member.name,
+    action: "member.details_confirmed",
+    details: "Confirmed updated details and set a new password",
+  });
+  writeDb(db);
+  res.json({ ok: true, member: publicMember(member) });
+});
+
 // Family members ("dependents") don't get their own login - they're added
 // under the primary member's account, who registers them for events and
 // manages their QR codes. Their registrations still count toward the
@@ -5082,6 +5129,132 @@ app.post("/api/admin/members", requireStaffRole("admin"), async (req, res) => {
 // for events themselves) but should still share the family's points - link
 // them here once, or call this again with a third/fourth account to grow
 // the same group.
+// ------------------------------------------- admin: edit a member's details --
+// Lets the admin correct a member's details - including the membership number
+// (which is also the member's login id) - and optionally issue a fresh
+// temporary password in the same step. Everything that points at the old
+// membership number (registrations, point corrections, reward requests, chat)
+// moves with it. The member's open sessions are closed; at the next login the
+// member must review what changed, confirm it and choose a new password
+// (POST /api/me/details/confirm). Body: { name, phone, email, memberType,
+// relationshipToMain, familyGroup, newMembershipNumber, issueLogin }.
+const MEMBER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+function renameMemberAccount(db, oldNum, newNum) {
+  const member = db.members[oldNum];
+  const soleOwnerOfCard = member.clubId === oldNum &&
+    !Object.values(db.members).some((m) => m !== member && m.clubId === oldNum);
+  delete db.members[oldNum];
+  member.membershipNumber = newNum;
+  // A single-account member's printed card number follows the rename; a card
+  // shared with other family accounts stays as it is so the pool is untouched.
+  if (soleOwnerOfCard) member.clubId = newNum;
+  db.members[newNum] = member;
+  for (const r of db.registrations) if (r.membershipNumber === oldNum) r.membershipNumber = newNum;
+  for (const a of db.pointAdjustments || []) if (a.membershipNumber === oldNum) a.membershipNumber = newNum;
+  for (const r of db.redemptions || []) if (r.membershipNumber === oldNum) r.membershipNumber = newNum;
+  for (const c of db.chatMessages || []) if (c.membershipNumber === oldNum) c.membershipNumber = newNum;
+}
+app.put("/api/admin/members/:membershipNumber/details", requireStaffRole("admin"), async (req, res) => {
+  const oldNum = req.params.membershipNumber;
+  const body = req.body || {};
+  const peek = req.db.members[oldNum];
+  if (!peek) return res.status(404).json({ error: "No member found with that membership number" });
+  const name = body.name === undefined ? peek.name : String(body.name || "").trim().slice(0, 120);
+  if (!name) return res.status(400).json({ error: "Name is required" });
+  const phone = body.phone === undefined ? (peek.phone || "") : String(body.phone || "").trim().slice(0, 30);
+  const email = body.email === undefined ? (peek.email || "") : String(body.email || "").trim().slice(0, 120);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "Please enter a valid email address" });
+  const memberType = body.memberType === undefined ? (peek.memberType || "main") : body.memberType;
+  if (memberType !== "main" && memberType !== "follower") return res.status(400).json({ error: "Member type must be main or follower" });
+  const relationshipToMain = memberType === "main" ? "" : (body.relationshipToMain === undefined ? (peek.relationshipToMain || "") : String(body.relationshipToMain || "").trim().slice(0, 60));
+  const familyGroup = body.familyGroup === undefined ? (peek.familyGroup || "") : String(body.familyGroup || "").trim().slice(0, 80);
+  const newNum = body.newMembershipNumber === undefined || body.newMembershipNumber === "" ? oldNum : String(body.newMembershipNumber).trim();
+  const renaming = newNum !== oldNum;
+  if (renaming) {
+    if (!MEMBER_ID_RE.test(newNum)) return res.status(400).json({ error: "Membership number may contain only letters, digits, dot, dash and underscore (max 40)" });
+    if (req.db.members[newNum]) return res.status(409).json({ error: "Another member already uses this membership number" });
+    if (Object.values(req.db.members).some((m) => m.membershipNumber !== oldNum && m.clubId === newNum)) {
+      return res.status(409).json({ error: "This number is the club card of another family - choose a different number" });
+    }
+  }
+  const issueLogin = body.issueLogin === true;
+  if (issueLogin && !String(phone).replace(/\D/g, "")) return res.status(400).json({ error: "A phone number is needed to send the login details" });
+  const tempPassword = issueLogin ? generateTempPassword() : null;
+  // Hash before re-reading the db - see the comment above POST /api/auth/signup.
+  const passwordHash = tempPassword ? await bcrypt.hash(tempPassword, 10) : null;
+  const db = readDb();
+  const member = db.members[oldNum];
+  if (!member) return res.status(404).json({ error: "No member found with that membership number" });
+  if (renaming && (db.members[newNum] || Object.values(db.members).some((m) => m.membershipNumber !== oldNum && m.clubId === newNum))) {
+    return res.status(409).json({ error: "Another member already uses this membership number" });
+  }
+  const changes = [];
+  const track = (field, from, to) => { if (String(from || "") !== String(to || "")) changes.push({ field, from: String(from || ""), to: String(to || "") }); };
+  track("name", member.name, name);
+  track("phone", member.phone, phone);
+  track("email", member.email, email);
+  track("memberType", member.memberType || "main", memberType);
+  track("relationshipToMain", member.relationshipToMain, relationshipToMain);
+  track("familyGroup", member.familyGroup, familyGroup);
+  track("membershipNumber", oldNum, newNum);
+  member.name = name;
+  member.phone = phone;
+  member.email = email;
+  member.memberType = memberType;
+  member.relationshipToMain = relationshipToMain;
+  member.familyGroup = familyGroup;
+  if (renaming) renameMemberAccount(db, oldNum, newNum);
+  const hasLogin = !!member.passwordHash || !!passwordHash;
+  if (passwordHash) {
+    member.passwordHash = passwordHash;
+    member.mustChangePassword = true;
+    member.credentialsIssuedAt = new Date().toISOString();
+  }
+  // Only an account that can actually log in has anything to confirm; a
+  // profile nobody has claimed yet simply carries the new details.
+  const needsConfirm = hasLogin && (changes.length > 0 || !!passwordHash);
+  if (needsConfirm) {
+    member.detailsConfirmPending = true;
+    const prev = member.pendingDetailsChange && Array.isArray(member.pendingDetailsChange.changes) ? member.pendingDetailsChange.changes : [];
+    // Keep the ORIGINAL value of each field across several edits before confirmation.
+    const merged = new Map(prev.map((c) => [c.field, { ...c }]));
+    for (const c of changes) {
+      const was = merged.get(c.field);
+      merged.set(c.field, { field: c.field, from: was ? was.from : c.from, to: c.to });
+    }
+    member.pendingDetailsChange = {
+      at: new Date().toISOString(),
+      by: req.staff.name,
+      previousMembershipNumber: (member.pendingDetailsChange && member.pendingDetailsChange.previousMembershipNumber) || (renaming ? oldNum : ""),
+      newPassword: !!passwordHash || !!(member.pendingDetailsChange && member.pendingDetailsChange.newPassword),
+      changes: [...merged.values()].filter((c) => c.from !== c.to),
+    };
+  }
+  if (changes.length === 0 && !passwordHash) return res.status(400).json({ error: "Nothing was changed" });
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "member.details_edited",
+    details: `${name} (#${newNum}): ${changes.map((c) => c.field).join(", ") || "-"}${passwordHash ? " + new temporary password" : ""}`,
+  });
+  writeDb(db);
+  // The member signs in again with the new details (the old session may name
+  // the old membership number, and a new password was just issued).
+  if (renaming || passwordHash || needsConfirm) dropMemberSessions(oldNum);
+  res.set("Cache-Control", "no-store");
+  res.json({
+    ok: true,
+    membershipNumber: newNum,
+    name: member.name,
+    phone: member.phone || "",
+    changes: changes.map((c) => c.field),
+    tempPassword,
+    detailsConfirmPending: !!member.detailsConfirmPending,
+    loginUrl: `${req.protocol}://${req.get("host")}/`,
+  });
+});
+
 // Sets (or clears, with "") the date of birth of a member or one of their
 // family members. The age group follows automatically. Body: { birthDate,
 // dependentId? }. Used by the Members editor and by the birthdates file tool.
@@ -5748,6 +5921,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         relationshipToMain: m.relationshipToMain || "",
         hasLoggedInAccount: !!m.passwordHash,
         mustChangePassword: !!m.mustChangePassword,
+        detailsConfirmPending: !!m.detailsConfirmPending,
         credentialsIssuedAt: m.credentialsIssuedAt || null,
         birthRequestAt: m.birthRequestAt || null,
         archivedAt: m.archivedAt || null,
