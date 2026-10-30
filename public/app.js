@@ -358,6 +358,7 @@ function switchTab(view) {
   // opened, so any admin edit made elsewhere shows up without a full page
   // reload.
   if (view === "events" || view === "annual") loadEvents();
+  if (view === "register") refreshRegQrs();
   if (view === "tournaments") {
     // A direct deep-link (goToEventTournament) sets this so we open that one
     // tournament's detail straight away, skipping the list load entirely -
@@ -2451,7 +2452,7 @@ function renderQrList(entries) {
           </div>`;
       }
       if (e.ok) {
-        return `<div class="qr-entry">
+        return `<div class="qr-entry" data-reg-id="${e.result.registration ? e.result.registration.id : ""}">
             <h4>${escapeAttr(e.label)}</h4>
             <img src="${e.result.qrDataUrl}" alt="QR code" />
             <p class="note">${escapeAttr(e.result.message)}${pointsAwardedSuffix(e.result.potentialPoints)}</p>
@@ -2463,7 +2464,7 @@ function renderQrList(entries) {
       // list" note) instead of a bare error with nothing they can act on.
       const already = e.data && e.data.alreadyRegistered;
       if (already && e.data.qrDataUrl) {
-        return `<div class="qr-entry">
+        return `<div class="qr-entry" data-reg-id="${e.data.registration ? e.data.registration.id : ""}">
             <h4>${escapeAttr(e.label)}</h4>
             <img src="${e.data.qrDataUrl}" alt="QR code" />
             <p class="note">${escapeAttr(t("alreadyRegisteredNote"))}${pointsAwardedSuffix(e.data.potentialPoints)}</p>
@@ -2875,6 +2876,37 @@ document.getElementById("fam-add").addEventListener("click", async () => {
 });
 
 // -------------------------------------------------------- my registrations --
+// The "Your entry QR code(s)" card on the Register tab keeps the QR codes shown
+// right after signing up. Once a registration is cancelled (by the member, or by
+// the committee while the member's page is open), checked in, or turned into a
+// waiting-list spot, its QR must disappear - this removes every QR entry whose
+// registration no longer has a valid entry code.
+function pruneStaleRegQrs(regs) {
+  const card = document.getElementById("reg-qr-card");
+  if (!card) return;
+  const valid = new Set((regs || []).filter((r) => !r.checkedIn && !r.waitlisted && r.qrDataUrl).map((r) => String(r.id)));
+  const entries = card.querySelectorAll(".qr-entry[data-reg-id]");
+  entries.forEach((el) => {
+    if (el.dataset.regId && !valid.has(el.dataset.regId)) el.remove();
+  });
+  // Nothing left to show: hide the whole card.
+  if (entries.length && !card.querySelector("#reg-qr-list .qr-entry")) card.classList.add("hidden");
+}
+async function refreshRegQrs() {
+  if (!(CURRENT_SESSION && CURRENT_SESSION.type === "member")) return;
+  const card = document.getElementById("reg-qr-card");
+  if (!card || card.classList.contains("hidden")) return;
+  try {
+    pruneStaleRegQrs(await api("/api/me/registrations"));
+  } catch (e) {
+    /* non-fatal: the next refresh will try again */
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshRegQrs();
+});
+window.addEventListener("focus", refreshRegQrs);
+
 async function loadMyRegistrations() {
   const wrap = document.getElementById("mp-registrations-list");
   if (!wrap) return;
@@ -2882,6 +2914,7 @@ async function loadMyRegistrations() {
   if (!member) return;
   try {
     const regs = await api("/api/me/registrations");
+    pruneStaleRegQrs(regs);
     if (!regs.length) {
       wrap.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;">${t("noRegistrationsYet")}</p>`;
       return;
