@@ -757,7 +757,7 @@ function applyMaybeShowMustChangePasswordGate() {
   const isMember = CURRENT_SESSION && CURRENT_SESSION.type === "member";
   // Members get the same gate when the committee issued them a temporary
   // password (Admin > Member directory > Send login details).
-  const mustChange = !!((isStaff && CURRENT_SESSION.staff.mustChangePassword) || (isMember && CURRENT_SESSION.member && CURRENT_SESSION.member.mustChangePassword));
+  const mustChange = !!((isStaff && CURRENT_SESSION.staff.mustChangePassword) || (isMember && CURRENT_SESSION.member && CURRENT_SESSION.member.mustChangePassword && !CURRENT_SESSION.member.detailsConfirmPending));
   const modal = document.getElementById("must-change-password-modal");
   if (mustChange) {
     if (!MUST_CHANGE_PASSWORD_GATE_OPEN) {
@@ -772,6 +772,68 @@ function applyMaybeShowMustChangePasswordGate() {
     modal.classList.add("hidden");
   }
 }
+// After the committee edits a member's details (or issues new login details)
+// the member must review what changed, confirm it and replace the temporary
+// password. Non-dismissible; closes only when the server confirms. While it is
+// open it stands in for the plain must-change-password gate.
+let DETAILS_GATE_OPEN = false;
+const DETAIL_FIELD_KEYS = {
+  name: "colName", phone: "colPhone", email: "colEmail", familyGroup: "colFamilyGroup",
+  memberType: "fieldMemberType", relationshipToMain: "fieldRelationship", membershipNumber: "colMembershipNumber",
+};
+function detailValueText(field, v) {
+  if (field === "memberType") return v === "follower" ? t("memberTypeFollower") : t("memberTypeMain");
+  return v || "—";
+}
+function applyMaybeShowDetailsConfirmGate() {
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const need = !!(member && member.detailsConfirmPending);
+  const modal = document.getElementById("details-confirm-modal");
+  if (!modal) return;
+  if (need) {
+    if (!DETAILS_GATE_OPEN) {
+      DETAILS_GATE_OPEN = true;
+      const ch = member.pendingDetailsChange || { changes: [] };
+      const rows = [`<li><b>${t("colMembershipNumber")}</b>: ${escapeAttr(member.membershipNumber)}${ch.previousMembershipNumber ? ` <span style="color:var(--muted);">(${t("dcWasWord")} ${escapeAttr(ch.previousMembershipNumber)})</span>` : ""}</li>`];
+      const shown = { membershipNumber: 1 };
+      rows.push(`<li><b>${t("colName")}</b>: ${escapeAttr(member.name)}</li>`, `<li><b>${t("colPhone")}</b>: ${escapeAttr(member.phone || "—")}</li>`, `<li><b>${t("colEmail")}</b>: ${escapeAttr(member.email || "—")}</li>`);
+      const changedList = (ch.changes || []).filter((c) => !shown[c.field] && !["name", "phone", "email"].includes(c.field));
+      for (const c of changedList) rows.push(`<li><b>${t(DETAIL_FIELD_KEYS[c.field] || "colName")}</b>: ${escapeAttr(detailValueText(c.field, c.to))}</li>`);
+      document.getElementById("dc-list").innerHTML = rows.join("");
+      const diffs = (ch.changes || []).map((c) => `<li>${t(DETAIL_FIELD_KEYS[c.field] || "colName")}: <s>${escapeAttr(detailValueText(c.field, c.from))}</s> → <b>${escapeAttr(detailValueText(c.field, c.to))}</b></li>`);
+      document.getElementById("dc-changes").innerHTML = diffs.length ? `<p style="margin:8px 0 2px;font-size:0.85rem;">${t("dcChangedTitle")}</p><ul style="margin:0;padding-inline-start:18px;font-size:0.85rem;">${diffs.join("")}</ul>` : "";
+      ["dc-old", "dc-new"].forEach((id) => (document.getElementById(id).value = ""));
+      document.getElementById("dc-check").checked = false;
+      document.getElementById("dc-msg").classList.remove("show");
+      modal.classList.remove("hidden");
+    }
+  } else if (DETAILS_GATE_OPEN) {
+    DETAILS_GATE_OPEN = false;
+    modal.classList.add("hidden");
+  }
+}
+document.getElementById("dc-submit").addEventListener("click", async () => {
+  const msg = document.getElementById("dc-msg");
+  const oldPassword = document.getElementById("dc-old").value;
+  const newPassword = document.getElementById("dc-new").value;
+  if (!oldPassword || !newPassword) {
+    highlightMissingFields(["dc-old", "dc-new"]);
+    return showMsg(msg, t("errFillFields"), false);
+  }
+  if (newPassword.length < 6) return showMsg(msg, t("errPasswordShort"), false);
+  if (!document.getElementById("dc-check").checked) return showMsg(msg, t("dcNeedCheck"), false);
+  try {
+    const result = await api("/api/me/details/confirm", {
+      method: "POST",
+      body: JSON.stringify({ oldPassword, newPassword, confirmed: true }),
+    });
+    if (CURRENT_SESSION && CURRENT_SESSION.type === "member" && result.member) CURRENT_SESSION.member = result.member;
+    ["dc-old", "dc-new"].forEach((id) => (document.getElementById(id).value = ""));
+    updateUIForSession();
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+});
 // First-login date-of-birth confirmation. Non-dismissible: it stays open until
 // the server confirms (POST /api/me/birth-date/confirm). The date shown is the
 // one on file (typed at sign-up or loaded by the committee), editable.
@@ -1412,6 +1474,7 @@ function updateUIForSession() {
 
   applyMaybeShowTermsGate();
   applyMaybeShowMustChangePasswordGate();
+  applyMaybeShowDetailsConfirmGate();
   applyMaybeShowBirthConfirmGate();
 
   // Idle auto-logout timers track CURRENT_SESSION, not the individual
@@ -5883,7 +5946,8 @@ function renderDirectoryTable() {
     const archived = !!m.archivedAt;
     const badges =
       (archived ? ` <span class="dir-badge archived">${t("archivedBadge")}</span>` : "") +
-      (!m.hasLoggedInAccount ? ` <span class="dir-badge nologin">${t("noLoginBadge")}</span>` : m.mustChangePassword ? ` <span class="dir-badge temp">${t("tempPasswordBadge")}</span>` : "");
+      (!m.hasLoggedInAccount ? ` <span class="dir-badge nologin">${t("noLoginBadge")}</span>` : m.mustChangePassword ? ` <span class="dir-badge temp">${t("tempPasswordBadge")}</span>` : "") +
+      (m.detailsConfirmPending ? ` <span class="dir-badge temp">${t("detailsPendingBadge")}</span>` : "");
     const dataAttrs = [
       `data-status="${archived ? "archived" : "active"}"`,
       `data-account="${m.hasLoggedInAccount ? "has" : "none"}"`,
@@ -5922,6 +5986,30 @@ function renderDirectoryTable() {
         <h4 style="margin:10px 0 4px;">${t("pointsEditHistory")}</h4>
         ${adjHistory}
       </div>`;
+    const fld = (key, label, val, extra) => `<label style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;min-width:150px;flex:1;">${label}<input class="dir-ed-${key}" data-me="${me}" type="text" value="${escapeAttr(val || "")}" ${extra || ""} style="padding:5px 8px;font-size:0.82rem;" /></label>`;
+    const detailsEditorHtml = `<div class="dir-details-editor" style="margin-top:14px;">
+        <h4 style="margin:6px 0;">${t("editDetailsTitle")}</h4>
+        <p class="hint-note" style="margin:0 0 6px;">${t("editDetailsHint")}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${fld("name", t("colName"), m.name, 'maxlength="120"')}
+          ${fld("num", t("editNewMembershipNumber"), m.membershipNumber, 'maxlength="40" dir="ltr"')}
+          ${fld("phone", t("colPhone"), m.phone, 'maxlength="30" dir="ltr"')}
+          ${fld("email", t("colEmail"), m.email, 'maxlength="120" dir="ltr"')}
+          ${fld("family", t("colFamilyGroup"), m.familyGroup, 'maxlength="80"')}
+          <label style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;min-width:150px;flex:1;">${t("fieldMemberType")}
+            <select class="dir-ed-type" data-me="${me}" style="padding:5px 6px;font-size:0.82rem;">
+              <option value="main"${m.memberType === "follower" ? "" : " selected"}>${t("memberTypeMain")}</option>
+              <option value="follower"${m.memberType === "follower" ? " selected" : ""}>${t("memberTypeFollower")}</option>
+            </select></label>
+          ${fld("rel", t("fieldRelationship"), m.relationshipToMain, 'maxlength="60"')}
+        </div>
+        <label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:0.82rem;">
+          <input type="checkbox" class="dir-ed-issue" data-me="${me}" /> ${t("editIssueLogin")}
+        </label>
+        <p class="hint-note" style="margin:4px 0;">${t("editConfirmNote")}</p>
+        <button type="button" class="secondary dir-ed-save" data-me="${me}" style="padding:5px 14px;font-size:0.8rem;">${t("editDetailsSave")}</button>
+        <div class="msg dir-ed-msg" data-me="${me}"></div>
+      </div>`;
     const sendCredsHtml = archived
       ? ""
       : `<div style="margin-top:14px;"><button type="button" class="roster-btn wa dir-send-one" data-me="${me}">${t("btnSendCredsRow")}</button></div>`;
@@ -5947,6 +6035,7 @@ function renderDirectoryTable() {
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
           </div>
           ${ageEditorHtml}
+          ${detailsEditorHtml}
           ${pointsEditorHtml}
           ${familyLinkHtml}
           ${sendCredsHtml}
@@ -6079,6 +6168,51 @@ function renderDirectoryTable() {
         if (m2) showMsg(m2, t("pointsEditSaved"), true);
       } catch (e) {
         showMsg(msg, e.message, false);
+        btn.disabled = false;
+      }
+    });
+  });
+  wrap.querySelectorAll(".dir-ed-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const me = btn.dataset.me;
+      const q = (cls) => wrap.querySelector(`.dir-ed-${cls}[data-me="${me}"]`);
+      const msg = wrap.querySelector(`.dir-ed-msg[data-me="${me}"]`);
+      const m = DIRECTORY_DATA.find((x) => x.membershipNumber === me);
+      const newNum = q("num").value.trim();
+      const issue = q("issue").checked;
+      if (!q("name").value.trim()) return showMsg(msg, t("errFillFields"), false);
+      if (newNum !== me && !confirm(`${t("editRenameConfirm")}\n${me} → ${newNum}`)) return;
+      if (issue && m && m.hasLoggedInAccount && !confirm(t("editIssueConfirm"))) return;
+      btn.disabled = true;
+      try {
+        const r = await api(`/api/admin/members/${encodeURIComponent(me)}/details`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: q("name").value.trim(),
+            newMembershipNumber: newNum,
+            phone: q("phone").value.trim(),
+            email: q("email").value.trim(),
+            familyGroup: q("family").value.trim(),
+            memberType: q("type").value,
+            relationshipToMain: q("rel").value.trim(),
+            issueLogin: issue,
+          }),
+        });
+        showMsg(msg, t("editDetailsSaved"), true);
+        loadAdminDirectory();
+        if (r.tempPassword) {
+          waQueueStart({
+            title: t("credsTitle"),
+            warn: t("credsWarn"),
+            items: [{ label: `${r.name} (${r.membershipNumber})` }],
+            async prepare() {
+              return { phone: r.phone, text: waCredentialsMessage(r.name, r.membershipNumber, r.tempPassword, r.loginUrl) };
+            },
+          });
+        }
+      } catch (e) {
+        showMsg(msg, e.message, false);
+      } finally {
         btn.disabled = false;
       }
     });

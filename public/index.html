@@ -1783,6 +1783,24 @@
   </div>
 </div>
 
+<div class="modal-overlay hidden" id="details-confirm-modal" style="z-index:215;">
+  <div class="modal-box" style="max-width:460px;max-height:90vh;overflow-y:auto;">
+    <h2 data-i18n="dcTitle">Please confirm your updated details</h2>
+    <p style="color:var(--muted);font-size:0.9rem;" data-i18n="dcIntro">The committee updated your membership details. Review them, confirm they are correct, and choose a new password that only you know.</p>
+    <ul id="dc-list" style="margin:6px 0;padding-inline-start:18px;font-size:0.92rem;"></ul>
+    <div id="dc-changes"></div>
+    <label class="required-label" for="dc-old" data-i18n="dcOldPassword">Temporary password from the committee</label>
+    <input id="dc-old" type="password" autocomplete="current-password" />
+    <label class="required-label" for="dc-new" data-i18n="fieldNewPassword">New password</label>
+    <input id="dc-new" type="password" autocomplete="new-password" />
+    <label class="checkbox-row" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:0.88rem;">
+      <input type="checkbox" id="dc-check" style="margin-top:3px;" /> <span data-i18n="dcCheck">I confirm that these details are correct.</span>
+    </label>
+    <button class="primary" id="dc-submit" style="margin-top:12px;" data-i18n="dcBtn">Confirm and set password</button>
+    <div class="msg" id="dc-msg"></div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="must-change-password-modal" style="z-index:210;">
   <div class="modal-box" style="max-width:420px;">
     <h2 data-i18n="mustChangePasswordTitle">You need to set a new password</h2>
