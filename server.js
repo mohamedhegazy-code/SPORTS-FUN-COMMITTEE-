@@ -7907,7 +7907,105 @@ app.post("/api/admin/birthdays/sent", requireStaffRole("admin"), (req, res) => {
   person.birthdayCardAt = new Date().toISOString();
   logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "birthday_card_sent", details: `${person.name} (${m.membershipNumber})` });
   writeDb(db);
-  res.json({ ok: true, sentAt: person.birthdayCardAt, phone: ((person.phone || (depId != null ? m.phone : "") || "") + "").trim() });
+  res.json({
+    ok: true,
+    sentAt: person.birthdayCardAt,
+    phone: ((person.phone || (depId != null ? m.phone : "") || "") + "").trim(),
+    url: `${req.protocol}://${req.get("host")}/birthday/${birthdayToken(m.membershipNumber, depId)}`,
+  });
+});
+
+// ---- the birthday video: public greeting on the landing page + a personal link --
+// Shown to everyone from the day BEFORE the birthday until the end of the
+// birthday itself (Cairo time). Only a display name leaves the server: first +
+// last name for adults, the first name alone for anyone under 18 - never the
+// age, the date of birth or the membership number.
+function birthdayDisplayName(rawName, turning) {
+  const parts = String(rawName || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  if (turning < 18 || parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1]}`;
+}
+app.get("/api/public/birthdays/active", (req, res) => {
+  const db = readDb();
+  const today = AgeUtils.todayCairoISO();
+  const seen = new Set();
+  const items = [];
+  for (const m of Object.values(db.members)) {
+    if (m.archivedAt) continue;
+    const consider = (p, key) => {
+      const bd = AgeUtils.parseBirthDate(p.birthDate, today);
+      if (!bd) return;
+      const info = birthdayInfo(bd, today);
+      if (info.daysUntil > 1) return;
+      const name = birthdayDisplayName(p.name, info.turning);
+      if (!name) return;
+      const id = `${key}|${info.daysUntil}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+      items.push({ name, when: info.daysUntil });
+    };
+    consider(m, `m${m.membershipNumber}`);
+    for (const d of m.dependents || []) consider(d, `d${m.membershipNumber}.${d.id}`);
+  }
+  // Today's birthdays first, then tomorrow's; alphabetical inside each group.
+  const collator = new Intl.Collator("ar", { sensitivity: "base", numeric: true });
+  items.sort((a, b) => a.when - b.when || collator.compare(a.name, b.name));
+  res.set("Cache-Control", "no-cache");
+  res.json({ items: items.slice(0, 60) });
+});
+// Personal link (sent over WhatsApp): signed, so nobody can make the page say
+// an arbitrary name. Token = base64url("<membershipNumber>~<dependentId|0>") + "." + HMAC.
+function birthdayTokenSig(payload) {
+  return crypto.createHmac("sha256", QR_SECRET).update(`birthday:${payload}`).digest("hex").slice(0, 20);
+}
+function birthdayToken(membershipNumber, dependentId) {
+  const payload = Buffer.from(`${membershipNumber}~${dependentId == null ? 0 : dependentId}`).toString("base64url");
+  return `${payload}.${birthdayTokenSig(payload)}`;
+}
+function birthdayFromToken(db, token) {
+  const [payload, sig] = String(token || "").split(".");
+  if (!payload || !sig) return null;
+  const want = Buffer.from(birthdayTokenSig(payload));
+  const got = Buffer.from(sig);
+  if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) return null;
+  const [num, depRaw] = Buffer.from(payload, "base64url").toString().split("~");
+  const m = db.members[num];
+  if (!m || m.archivedAt) return null;
+  const depId = Number(depRaw);
+  const person = depId ? (m.dependents || []).find((d) => d.id === depId) : m;
+  if (!person) return null;
+  const bd = AgeUtils.parseBirthDate(person.birthDate);
+  const turning = bd ? birthdayInfo(bd, AgeUtils.todayCairoISO()).turning : 99;
+  const name = birthdayDisplayName(person.name, turning);
+  return name ? { name } : null;
+}
+app.post("/api/admin/birthdays/link", requireStaffRole("admin"), (req, res) => {
+  const m = req.db.members[String((req.body && req.body.membershipNumber) || "")];
+  if (!m) return res.status(404).json({ error: "No such member" });
+  const depId = req.body.dependentId == null || req.body.dependentId === "" ? null : Number(req.body.dependentId);
+  if (depId != null && !(m.dependents || []).some((d) => d.id === depId)) return res.status(404).json({ error: "No such family member" });
+  res.json({ url: `${req.protocol}://${req.get("host")}/birthday/${birthdayToken(m.membershipNumber, depId)}` });
+});
+app.get("/api/public/birthday/:token", (req, res) => {
+  const who = birthdayFromToken(readDb(), req.params.token);
+  if (!who) return res.status(404).json({ error: "This birthday link is not valid" });
+  res.set("Cache-Control", "no-store");
+  res.json(who);
+});
+const htmlEsc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// The page itself is rendered here (not just served as a file) so that the
+// WhatsApp link preview carries the person's name.
+app.get("/birthday/:token", (req, res) => {
+  const who = birthdayFromToken(readDb(), req.params.token);
+  let html;
+  try { html = fs.readFileSync(path.join(__dirname, "public", "birthday.html"), "utf8"); } catch (e) { return res.status(404).end(); }
+  const origin = `${req.protocol}://${req.get("host")}`;
+  html = html
+    .replace(/__OG_TITLE__/g, htmlEsc(who ? `Happy Birthday ${who.name} — كل عام وأنت بخير` : "Happy Birthday — كل عام وأنت بخير"))
+    .replace(/__OG_IMAGE__/g, htmlEsc(`${origin}/videos/happy-birthday-poster.jpg`));
+  res.set("Cache-Control", "no-store");
+  res.status(who ? 200 : 404).type("html").send(html);
 });
 
 // Staff correction of a player's Women / Juniors ranking categories (e.g.
