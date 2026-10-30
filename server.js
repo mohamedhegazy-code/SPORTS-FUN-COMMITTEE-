@@ -2579,12 +2579,40 @@ function validateParentEventId(db, existingEvent, parentEventIdRaw) {
   return { ok: true, parentEventId };
 }
 
+// Who created each event (admins only). Events made after this was added carry
+// it on the record; for older ones it is recovered from the activity log by
+// matching the "event_created" entry (name + date). When two events share the
+// same name and date, the entries are matched in order: the earliest entry
+// belongs to the lowest event id.
+function eventCreators(db) {
+  const out = new Map();
+  const entries = (db.activityLog || []).filter((r) => r.action === "event_created");
+  const used = new Set();
+  const sorted = db.events.slice().sort((a, b) => a.id - b.id);
+  for (const ev of sorted) {
+    if (ev.createdBy) { out.set(ev.id, { name: ev.createdBy.name, username: ev.createdBy.username, at: ev.createdAt || "" }); continue; }
+    const want = `${ev.nameEn} (${ev.date})`;
+    const hit = entries.find((r) => !used.has(r.id) && r.details === want);
+    if (hit) {
+      used.add(hit.id);
+      out.set(ev.id, { name: hit.actorName, username: hit.actorId, at: hit.at });
+    }
+  }
+  return out;
+}
 app.get("/api/events", (req, res) => {
   const db = readDb();
   const session = getSession(req);
   const viewer = session && session.type === "staff" ? db.staffAccounts[session.id] : null;
+  const creators = viewer && viewer.role === "admin" ? eventCreators(db) : null;
   const events = db.events.map((ev) => ({
     ...ev,
+    // Who created the event: admins only (never exposed on the public list).
+    createdBy: undefined,
+    createdAt: undefined,
+    createdByName: creators && creators.get(ev.id) ? creators.get(ev.id).name : undefined,
+    createdByUsername: creators && creators.get(ev.id) ? creators.get(ev.id).username : undefined,
+    createdAtIso: creators && creators.get(ev.id) ? creators.get(ev.id).at : undefined,
     // Manager assignments are only shown to admins; a Tournament Manager just
     // learns whether this event is currently theirs.
     managerUsernames: viewer && viewer.role === "admin" ? ev.managerUsernames || [] : undefined,
@@ -2647,6 +2675,19 @@ app.post(
     }
     const parentCheck = validateParentEventId(db, null, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
+    // Guard against creating the same event twice (a double click, or someone
+    // re-entering an event that already exists): same date, same parent and the
+    // same English (or Arabic) name. The admin can still confirm "create anyway".
+    if (String(req.body.allowDuplicate) !== "true") {
+      const dup = findDuplicateEvent(db, { nameEn, nameAr, date, parentEventId: parentCheck.parentEventId });
+      if (dup) {
+        return res.status(409).json({
+          code: "duplicate_event",
+          error: `An event with the same name and date already exists (${dup.nameEn}, ${dup.date}${dup.startTime ? " " + dup.startTime : ""}). Create it anyway?`,
+          duplicate: { id: dup.id, nameEn: dup.nameEn, nameAr: dup.nameAr || "", date: dup.date, startTime: dup.startTime || "", endTime: dup.endTime || "" },
+        });
+      }
+    }
     const coverPhotoFile = req.files && req.files.coverPhoto && req.files.coverPhoto[0];
     const coverVideoFile = req.files && req.files.coverVideo && req.files.coverVideo[0];
     const whatsappQrFile = req.files && req.files.whatsappQr && req.files.whatsappQr[0];
@@ -2677,6 +2718,8 @@ app.post(
       whatsappQr: whatsappQrFile ? `/uploads/events/${whatsappQrFile.filename}` : "",
       recap: { descriptionEn: "", descriptionAr: "", photos: [], video: "" },
     };
+    event.createdBy = { username: req.staff.username, name: req.staff.name };
+    event.createdAt = new Date().toISOString();
     db.events.push(event);
     logActivity(db, {
       actorType: "staff",
@@ -2828,6 +2871,113 @@ app.put("/api/admin/events/:eventId/managers", requireStaffRole("admin"), (req, 
 // deleted event would break the dashboard, directory, and My Registrations
 // for whoever was signed up. The response reports how many registrations
 // were removed so the admin UI can show what actually happened.
+// ---- Duplicate events + merging --------------------------------------------
+function normEventName(x) {
+  return String(x == null ? "" : x).trim().toLowerCase().replace(/\s+/g, " ");
+}
+function findDuplicateEvent(db, { nameEn, nameAr, date, parentEventId }) {
+  const en = normEventName(nameEn);
+  const ar = normEventName(nameAr);
+  return db.events.find(
+    (e) =>
+      e.date === date &&
+      String(e.parentEventId || "") === String(parentEventId || "") &&
+      ((en && normEventName(e.nameEn) === en) || (ar && normEventName(e.nameAr) === ar))
+  );
+}
+// Works out what moving every registration of `from` into `to` would do,
+// without changing anything. A person already registered in `to` stays behind
+// (reported as a conflict). Checked-in people and confirmed spots keep their
+// status while `to` has room; once it is full the rest join `to`'s waiting list,
+// keeping their original registration time so the queue order is fair.
+function planEventMerge(db, from, to) {
+  if (!from || !to) return { error: "Event not found", status: 404 };
+  if (from.id === to.id) return { error: "Pick two different events", status: 400 };
+  if (eventHasChildren(db, from.id) || eventHasChildren(db, to.id)) {
+    return { error: "An event day that has activities nested under it can't be merged - merge the individual activities instead.", status: 400 };
+  }
+  for (const ev of [from, to]) {
+    if (tournamentIsGenerated(findTournament(db, ev.id))) {
+      return { error: `The tournament bracket of "${ev.nameEn}" has already been generated, so its registrations can't be moved.`, status: 400 };
+    }
+  }
+  const samePerson = (a, b) => a.membershipNumber === b.membershipNumber && String(a.dependentId == null ? "" : a.dependentId) === String(b.dependentId == null ? "" : b.dependentId);
+  const parent = to.parentEventId ? db.events.find((e) => e.id === to.parentEventId) : null;
+  const oneActivityOnly = !!(parent && !parent.allowMultipleActivities);
+  const siblingIds = new Set(oneActivityOnly ? db.events.filter((e) => e.parentEventId === parent.id && e.id !== to.id && e.id !== from.id).map((e) => e.id) : []);
+  const inTo = db.registrations.filter((r) => r.eventId === to.id);
+  let confirmedInTo = inTo.filter((r) => !r.waitlisted).length;
+  const cap = to.maxCapacity;
+  const src = db.registrations
+    .filter((r) => r.eventId === from.id)
+    .sort((a, b) => (b.checkedIn ? 1 : 0) - (a.checkedIn ? 1 : 0) || (a.waitlisted ? 1 : 0) - (b.waitlisted ? 1 : 0) || String(a.registeredAt).localeCompare(String(b.registeredAt)));
+  const plan = { moves: [], conflicts: [] };
+  for (const r of src) {
+    const label = r.dependentName || (db.members[r.membershipNumber] ? db.members[r.membershipNumber].name : r.membershipNumber);
+    const dup = inTo.some((x) => samePerson(x, r));
+    const sibling = siblingIds.size && db.registrations.some((x) => siblingIds.has(x.eventId) && samePerson(x, r));
+    if (dup || sibling) {
+      plan.conflicts.push({ registrationId: r.id, name: label, membershipNumber: r.membershipNumber, reason: dup ? "already_in_target" : "other_activity" });
+      continue;
+    }
+    let waitlisted = !!r.waitlisted;
+    if (!waitlisted && !r.checkedIn && cap !== null && cap !== undefined && confirmedInTo >= cap) waitlisted = true; // no room left
+    if (!waitlisted) confirmedInTo++;
+    plan.moves.push({ registrationId: r.id, name: label, wasWaitlisted: !!r.waitlisted, waitlisted, demoted: !r.waitlisted && waitlisted });
+  }
+  const sum = (f) => plan.moves.filter(f).length;
+  return {
+    ok: true,
+    plan,
+    summary: {
+      total: src.length,
+      moved: plan.moves.length,
+      movedConfirmed: sum((m) => !m.waitlisted),
+      movedWaitlisted: sum((m) => m.waitlisted),
+      demotedToWaitlist: sum((m) => m.demoted),
+      conflicts: plan.conflicts.length,
+      conflictList: plan.conflicts.slice(0, 50),
+    },
+  };
+}
+// Admin: move the registrations of one event into another (to merge two copies
+// of the same event). Body: { toEventId, dryRun?, deleteSourceWhenEmpty? }.
+app.post("/api/admin/events/:eventId/move-registrations", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const from = db.events.find((e) => e.id === Number(req.params.eventId));
+  const to = db.events.find((e) => e.id === Number(req.body && req.body.toEventId));
+  const result = planEventMerge(db, from, to);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  if (req.body && req.body.dryRun) return res.json({ ok: true, dryRun: true, from: { id: from.id, nameEn: from.nameEn, date: from.date }, to: { id: to.id, nameEn: to.nameEn, date: to.date }, ...result.summary });
+  const byId = new Map(db.registrations.map((r) => [r.id, r]));
+  for (const m of result.plan.moves) {
+    const reg = byId.get(m.registrationId);
+    reg.eventId = to.id;
+    if (m.demoted) {
+      reg.waitlisted = true;
+      reg.whatsappConfirmedAt = null;
+      reg.whatsappReminderAt = null;
+      reg.whatsappDayOfAt = null;
+    }
+  }
+  const remaining = db.registrations.filter((r) => r.eventId === from.id).length;
+  let sourceDeleted = false;
+  if (req.body && req.body.deleteSourceWhenEmpty && remaining === 0) {
+    db.events = db.events.filter((e) => e.id !== from.id);
+    db.tournaments = (db.tournaments || []).filter((t) => t.eventId !== from.id);
+    sourceDeleted = true;
+  }
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "events_merged",
+    details: `${from.nameEn} (#${from.id}) -> ${to.nameEn} (#${to.id}): ${result.summary.moved} moved, ${result.summary.demotedToWaitlist} to waiting list, ${result.summary.conflicts} left behind${sourceDeleted ? ", source event deleted" : ""}`,
+  });
+  writeDb(db);
+  res.json({ ok: true, ...result.summary, remainingInSource: remaining, sourceDeleted });
+});
+
 app.delete("/api/events/:eventId", requireStaffRole("admin"), (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
