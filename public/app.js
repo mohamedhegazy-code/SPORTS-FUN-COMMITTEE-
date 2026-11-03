@@ -2006,7 +2006,7 @@ function renderFeaturedEvents() {
 }
 
 // --------------------------------------------- landing: birthday greeting --
-// One video, shown beside "Coming up next" from the day BEFORE a birthday until
+// One video, shown below "Coming up next" from the day BEFORE a birthday until
 // its end (the server decides who qualifies). With several people the name on
 // the video rotates every few seconds, today's birthdays first.
 const BDL = { items: [], idx: 0, timer: null, loaded: false };

@@ -645,9 +645,11 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 }
 .event-grid.featured {
   /* wider cards than the regular grid so a banner cover is big enough to read */
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 560px));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   margin-bottom: 10px;
 }
+/* A lone featured event keeps a sensible card width instead of stretching across the page. */
+.event-grid.featured:has(> :only-child) { grid-template-columns: minmax(0, 560px); }
 .event-grid.featured .event-card {
   border-color: var(--gold);
   box-shadow: 0 3px 12px rgba(201, 162, 39, 0.25);
@@ -1572,10 +1574,10 @@ tr.dir-archived td { opacity: 0.6; }
 .bd-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; margin-top: 12px; }
 .bd-preview-col { position: sticky; top: 12px; text-align: center; }
 .featured-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
-.featured-row.has-bd { grid-template-columns: minmax(0, 1fr) 390px; }
+/* Birthday greeting sits BELOW the featured events (events side by side above it). */
 .featured-row > #featured-events-section { min-width: 0; }
 .bd-panel { min-width: 0; max-width: 640px; margin-bottom: 10px; }
-@media (max-width: 1000px) { .featured-row.has-bd { grid-template-columns: minmax(0, 1fr); } .bd-panel { max-width: none; } }
+@media (max-width: 1000px) { .bd-panel { max-width: none; } }
 .bd-wish { margin: 0 0 8px; font-weight: 700; color: var(--maroon, #8b0000); line-height: 1.6; font-size: 0.95rem; }
 .bd-preview-col .bd-stage { max-width: 300px; margin: 0 auto; }
 .bd-stage { position: relative; width: 100%; aspect-ratio: 16 / 11; container-type: inline-size; border-radius: 14px; overflow: hidden; background: radial-gradient(ellipse at 50% 100%, #5a0014 0%, #2a0008 80%); border: 2px solid var(--gold); box-shadow: 0 3px 12px rgba(201, 162, 39, 0.3); }
