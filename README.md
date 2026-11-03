@@ -366,6 +366,14 @@ one place to see "is this event filling up, and did the people who signed
 up actually show up" without cross-referencing the registrations list by
 hand.
 
+## Admin: clickable dashboard cards & report names
+
+Every number tile on the Overview, the Event dashboard and the Management dashboard is now a button. Click it to open a popup with the list behind the number (searchable, with a row count and a **Download .xlsx** button, plus a shortcut to the tab where that list is managed). Overview and Management lists come from `GET /api/admin/stat-details?kind=...&lang=...` (management/admin only) so a tile's number always equals its list's row count; Event-dashboard tiles use the rows already loaded in the page, which the tournament role only receives for events they manage. `POST /api/admin/export-table` turns any popup table into an Excel file (20,000 rows / 60 columns max, formulas neutralised).
+
+The report builder has a prominent **Report name** field at the top. The name is shown as the title above the result, becomes the title row and sheet name in Excel (and the file name), and is printed as the heading on the print/PDF version. It is also the name used when saving the report setup.
+
+Tests: `loadtest/dashboard_cards_e2e.js` (run on a fresh data folder).
+
 ## Admin: per-event hub (attendance, tournament & results in one place)
 
 Every row on the Event dashboard has a **Manage** button that opens that

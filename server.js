@@ -154,6 +154,15 @@ app.use(
     },
   })
 );
+// The dashboard-card Excel export posts the table the browser is showing (up to
+// 20,000 rows), which is larger than express.json()'s 100 KB default. Only that
+// one path gets the bigger limit, and only for a signed-in staff session, so an
+// anonymous visitor can never make the server parse a multi-megabyte body.
+app.use("/api/admin/export-table", cookieParser(), (req, res, next) => {
+  const session = getSession(req);
+  if (!session || session.type !== "staff") return res.status(401).json({ error: "Please sign in" });
+  next();
+}, express.json({ limit: "8mb" }));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -7705,6 +7714,17 @@ function customReportEnv(db) {
     pointsOf: (reg) => registrationPoints(db, reg),
   };
 }
+// The report name the admin types at the top of the report builder. It is
+// shown as the title on screen, in the Excel file and on the printout, so it
+// is trimmed, stripped of control characters and capped before use anywhere.
+function cleanReportTitle(v) {
+  return String(v == null ? "" : v).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+// Excel sheet names: max 31 chars and none of  [ ] : * ? / \
+function excelSheetName(title, fallback) {
+  const n = String(title || "").replace(/[\[\]:*?\/\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31);
+  return n || fallback;
+}
 const CUSTOM_REPORT_PREVIEW_LIMIT = 1000;
 const CUSTOM_REPORT_EXPORT_LIMIT = 20000;
 const SAVED_REPORTS_MAX = 100;
@@ -7729,33 +7749,40 @@ app.post("/api/admin/report-builder/run", requireStaffRole("admin"), (req, res) 
   const lang = customReportLang(req.body && req.body.lang);
   const out = CustomReport.runReport(customReportEnv(db), req.body && req.body.spec, lang, { limit: CUSTOM_REPORT_PREVIEW_LIMIT });
   res.set("Cache-Control", "no-store");
-  res.json({ ...out, filters: CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang)) });
+  res.json({ ...out, title: cleanReportTitle(req.body && req.body.title), filters: CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang)) });
 });
 
 app.post("/api/admin/report-builder/export", requireStaffRole("admin"), (req, res) => {
   const db = req.db;
   const lang = customReportLang(req.body && req.body.lang);
   const out = CustomReport.runReport(customReportEnv(db), req.body && req.body.spec, lang, { limit: CUSTOM_REPORT_EXPORT_LIMIT });
+  const title = cleanReportTitle(req.body && req.body.title);
   const wb = XLSX.utils.book_new();
   const safe = (v) => (typeof v === "string" && /^[=+\-@]/.test(v) && !/^[+-]?\d[\d\s().+-]*$/.test(v) ? "'" + v : v);
+  // When the admin typed a report name it becomes the first row of every
+  // data sheet (then a blank row, then the headers) and the name of the
+  // report sheet, so the file identifies itself when opened or printed.
+  const titleRows = title ? [[safe(title)], []] : [];
   if (out.spec.layout !== "summary") {
-    const aoa = [out.columns.map((c) => c.label), ...out.rows.map((r) => r.map(safe))];
+    const aoa = [...titleRows, out.columns.map((c) => c.label), ...out.rows.map((r) => r.map(safe))];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = out.columns.map((c, i) => ({ wch: Math.min(40, Math.max(String(c.label).length + 2, ...out.rows.slice(0, 200).map((r) => String(r[i] == null ? "" : r[i]).length + 2))) }));
-    XLSX.utils.book_append_sheet(wb, ws, lang === "ar" ? "التقرير" : "Report");
+    XLSX.utils.book_append_sheet(wb, ws, excelSheetName(title, lang === "ar" ? "التقرير" : "Report"));
   }
   if (out.summary) {
-    const ws = XLSX.utils.aoa_to_sheet([out.summary.head, ...out.summary.rows, out.summary.total].map((r) => r.map(safe)));
+    const ws = XLSX.utils.aoa_to_sheet([...titleRows, out.summary.head, ...out.summary.rows, out.summary.total].map((r) => r.map(safe)));
     ws["!cols"] = out.summary.head.map(() => ({ wch: 22 }));
     XLSX.utils.book_append_sheet(wb, ws, lang === "ar" ? "الملخص" : "Summary");
   }
   const filters = CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang));
+  if (title) filters.unshift((lang === "ar" ? "اسم التقرير: " : "Report name: ") + title);
   filters.push((lang === "ar" ? "عدد النتائج: " : "Results: ") + out.total + (out.truncated ? (lang === "ar" ? ` (المعروض أول ${out.rows.length})` : ` (first ${out.rows.length} exported)`) : ""));
   filters.push((lang === "ar" ? "تاريخ الإنشاء: " : "Generated: ") + new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[lang === "ar" ? "المرشحات" : "Filters"], ...filters.map((f) => [safe(f)])]), lang === "ar" ? "المرشحات" : "Filters");
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", 'attachment; filename="ahlawy-custom-report.xlsx"');
+  const fileBase = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+  res.setHeader("Content-Disposition", `attachment; filename="ahlawy-custom-report.xlsx"; filename*=UTF-8''${encodeURIComponent((fileBase || "ahlawy-custom-report") + ".xlsx")}`);
   res.send(buffer);
 });
 
@@ -7781,7 +7808,7 @@ app.get("/admin/print/custom-report", requireStaffRole("admin"), (req, res) => {
     renderCustomReport({
       result: out,
       lang,
-      title: saved ? saved.name : "",
+      title: cleanReportTitle(req.query.title) || (saved ? saved.name : ""),
       filtersText: CustomReport.describeSpec(out.spec, lang, eventNameMap(db, lang)),
       generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC",
     })
@@ -8159,6 +8186,143 @@ app.get("/api/admin/management/dashboard", requireStaffRole(["management"]), (re
     pointsActivity: computePointsActivity(db),
     tournamentActivity: computeTournamentActivity(db),
   });
+});
+
+// -------------------------------------------------------------------------
+// CLICKABLE DASHBOARD CARDS: the list behind a number
+// -------------------------------------------------------------------------
+// Every dashboard tile (Admin > Overview, Management dashboard) opens a table
+// of exactly the records that number counts, so the figure on the tile and the
+// rows in the table can never disagree. Admin and Management roles only.
+const STAT_DETAIL_KINDS = [
+  "members", "withAccount", "active", "neverRegistered", "events", "registrations", "checkedIn",
+  "redemptions_pending", "redemptions_all", "redemptions_fulfilled", "points", "tournaments", "tournaments_done",
+];
+function buildStatDetails(db, kind, lang) {
+  const ar = lang === "ar";
+  const L = (a, e) => (ar ? a : e);
+  const names = eventNameMap(db, lang);
+  const evName = (id) => names.get(id) || `#${id}`;
+  const eventById = new Map(db.events.map((e) => [e.id, e]));
+  const today = todayStr();
+  const dateOnly = (iso) => String(iso || "").slice(0, 10);
+  const memberRow = (m, extra) => {
+    const regs = db.registrations.filter((r) => r.membershipNumber === m.membershipNumber);
+    const snap = balanceSnapshot(db, m.membershipNumber);
+    return [
+      m.membershipNumber,
+      m.name,
+      m.phone || "",
+      m.passwordHash ? L("نعم", "Yes") : L("لا", "No"),
+      regs.filter((r) => !r.waitlisted).length,
+      snap ? snap.balance : 0,
+      m.archivedAt ? L("مؤرشف", "Archived") : L("نشط", "Active"),
+      ...(extra || []),
+    ];
+  };
+  const memberHead = [L("رقم العضوية", "Membership no."), L("الاسم", "Name"), L("الهاتف", "Phone"), L("لديه حساب", "Has login"), L("عدد التسجيلات", "Registrations"), L("رصيد النقاط", "Points balance"), L("الحالة", "Status")];
+  const membersOf = (filter) => Object.values(db.members).filter(filter).sort((a, b) => String(a.name).localeCompare(String(b.name), ar ? "ar" : "en"));
+  const registeredNumbers = new Set(db.registrations.map((r) => r.membershipNumber));
+  const regRow = (r, withCheckIn) => {
+    const m = db.members[r.membershipNumber];
+    const status = r.waitlisted ? L("قائمة الانتظار", "Waiting list") : r.checkedIn ? L("حضر", "Checked in") : L("مؤكد", "Confirmed");
+    return [
+      evName(r.eventId),
+      r.dependentName || (m ? m.name : r.membershipNumber),
+      r.membershipNumber,
+      status,
+      dateOnly(r.registeredAt),
+      ...(withCheckIn ? [String(r.checkInAt || "").replace("T", " ").slice(0, 16)] : []),
+    ];
+  };
+  const regHead = [L("الفعالية", "Event"), L("الاسم", "Name"), L("رقم العضوية", "Membership no."), L("الحالة", "Status"), L("تاريخ التسجيل", "Registered on")];
+  const redRow = (r) => {
+    const m = db.members[r.membershipNumber];
+    return [m ? m.name : r.membershipNumber, r.membershipNumber, r.tier, r.pointsCost, r.status, dateOnly(r.requestedAt)];
+  };
+  const redHead = [L("العضو", "Member"), L("رقم العضوية", "Membership no."), L("المستوى", "Tier"), L("النقاط", "Points"), L("الحالة", "Status"), L("تاريخ الطلب", "Requested on")];
+  const tournRow = (t) => {
+    const ev = eventById.get(t.eventId);
+    const fmtLabel = t.format === "groups" ? L("مجموعات ثم إقصاء", "Groups + knockout") : t.format === "casual" ? L("جلسة ترفيهية", "Fun session") : t.format === "swiss" ? L("سويسري", "Swiss") : L("خروج المغلوب", "Knockout");
+    const stLabel = t.status === "completed" ? L("مكتملة", "Completed") : L("جارية", "In progress");
+    return [ev ? evName(ev.id) : `#${t.eventId}`, ev ? ev.date : "", t.mode === "team" ? L("فرق", "Teams") : L("أفراد", "Individuals"), fmtLabel, stLabel, tournamentEntrants(db, t).length];
+  };
+  const tournHead = [L("الفعالية", "Event"), L("التاريخ", "Date"), L("النمط", "Mode"), L("الصيغة", "Format"), L("الحالة", "Status"), L("المشاركون", "Participants")];
+  const tournaments = (db.tournaments || []).filter((t) => eventById.has(t.eventId)).sort((a, b) => String((eventById.get(b.eventId) || {}).date || "").localeCompare(String((eventById.get(a.eventId) || {}).date || "")));
+
+  switch (kind) {
+    case "members": return { title: L("جميع الأعضاء", "All members"), head: memberHead, rows: membersOf(() => true).map((m) => memberRow(m)), goto: "members" };
+    case "withAccount": return { title: L("الأعضاء الذين لديهم حساب", "Members with a login"), head: memberHead, rows: membersOf((m) => m.passwordHash).map((m) => memberRow(m)), goto: "members" };
+    case "active": return { title: L("الأعضاء النشطون (سجّلوا مرة واحدة على الأقل)", "Active members (registered at least once)"), head: memberHead, rows: membersOf((m) => registeredNumbers.has(m.membershipNumber)).map((m) => memberRow(m)), goto: "members" };
+    case "neverRegistered": return { title: L("أعضاء لم يسجّلوا في أي فعالية", "Members who never registered"), head: memberHead, rows: membersOf((m) => !registeredNumbers.has(m.membershipNumber)).map((m) => memberRow(m)), goto: "members" };
+    case "events": {
+      const rows = db.events.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map((ev) => {
+        const regs = db.registrations.filter((r) => r.eventId === ev.id);
+        const confirmed = regs.filter((r) => !r.waitlisted);
+        return [evName(ev.id), ev.date, eventEndDate(ev) < today ? L("منتهية", "Ended") : L("قادمة", "Upcoming"), confirmed.length, regs.length - confirmed.length, confirmed.filter((r) => r.checkedIn).length];
+      });
+      return { title: L("جميع الفعاليات", "All events"), head: [L("الفعالية", "Event"), L("التاريخ", "Date"), L("الحالة", "Status"), L("المسجلون", "Registered"), L("قائمة الانتظار", "Waiting list"), L("الحضور", "Checked in")], rows, goto: "events" };
+    }
+    case "registrations": return { title: L("جميع التسجيلات", "All registrations"), head: regHead, rows: db.registrations.slice().sort((a, b) => String(b.registeredAt).localeCompare(String(a.registeredAt))).map((r) => regRow(r, false)), goto: "reports" };
+    case "checkedIn": return { title: L("الحاضرون (تم تسجيل دخولهم)", "Checked-in attendees"), head: [...regHead, L("وقت الدخول", "Checked in at")], rows: db.registrations.filter((r) => r.checkedIn).sort((a, b) => String(b.checkInAt || "").localeCompare(String(a.checkInAt || ""))).map((r) => regRow(r, true)), goto: "reports" };
+    case "redemptions_pending": return { title: L("طلبات استبدال معلّقة", "Pending redemption requests"), head: redHead, rows: db.redemptions.filter((r) => r.status === "Pending").sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt))).map(redRow), goto: "points" };
+    case "redemptions_all": return { title: L("جميع طلبات الاستبدال", "All redemption requests"), head: redHead, rows: db.redemptions.slice().sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt))).map(redRow), goto: "points" };
+    case "redemptions_fulfilled": return { title: L("طلبات استبدال تم تسليمها", "Fulfilled redemption requests"), head: redHead, rows: db.redemptions.filter((r) => r.status === "Fulfilled").sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt))).map(redRow), goto: "points" };
+    case "points": {
+      const earned = new Map();
+      for (const r of db.registrations) {
+        const pts = registrationPoints(db, r);
+        if (!pts) continue;
+        earned.set(r.membershipNumber, (earned.get(r.membershipNumber) || 0) + pts);
+      }
+      const rows = [...earned.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([mn, pts]) => {
+          const m = db.members[mn];
+          const snap = balanceSnapshot(db, mn);
+          return [mn, m ? m.name : mn, pts, snap ? snap.balance : 0];
+        });
+      return { title: L("النقاط الممنوحة لكل عضو", "Points awarded per member"), head: [L("رقم العضوية", "Membership no."), L("الاسم", "Name"), L("نقاط ممنوحة", "Points awarded"), L("الرصيد الحالي", "Current balance")], rows, goto: "points" };
+    }
+    case "tournaments": return { title: L("جميع البطولات", "All tournaments"), head: tournHead, rows: tournaments.map(tournRow), goto: "events" };
+    case "tournaments_done": return { title: L("البطولات المكتملة", "Completed tournaments"), head: tournHead, rows: tournaments.filter((t) => t.status === "completed").map(tournRow), goto: "events" };
+    default: return null;
+  }
+}
+app.get("/api/admin/stat-details", requireStaffRole(["management"]), (req, res) => {
+  const kind = String(req.query.kind || "");
+  if (!STAT_DETAIL_KINDS.includes(kind)) return res.status(400).json({ error: "Unknown dashboard card" });
+  const out = buildStatDetails(req.db, kind, customReportLang(req.query.lang));
+  res.set("Cache-Control", "no-store");
+  res.json(out);
+});
+
+// Excel download for whatever table a dashboard-card window is showing
+// (including the rows the staff member filtered down to). The browser sends the
+// visible table; formula-looking text is neutralised exactly like the report
+// builder's export. Staff roles that can see dashboards only.
+app.post("/api/admin/export-table", requireStaffRole(["tournament", "management"]), (req, res) => {
+  const body = req.body || {};
+  const head = Array.isArray(body.head) ? body.head.slice(0, 60).map((v) => String(v == null ? "" : v).slice(0, 200)) : [];
+  const rowsIn = Array.isArray(body.rows) ? body.rows.slice(0, CUSTOM_REPORT_EXPORT_LIMIT) : [];
+  if (!head.length) return res.status(400).json({ error: "Nothing to export" });
+  const title = cleanReportTitle(body.title);
+  const safe = (v) => {
+    if (typeof v === "number") return v;
+    const t = String(v == null ? "" : v).slice(0, 500);
+    return /^[=+\-@]/.test(t) && !/^[+-]?\d[\d\s().+-]*$/.test(t) ? "'" + t : t;
+  };
+  const rows = rowsIn.filter(Array.isArray).map((r) => head.map((_, i) => safe(r[i])));
+  const aoa = [...(title ? [[safe(title)], []] : []), head, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = head.map((h, i) => ({ wch: Math.min(40, Math.max(h.length + 2, ...rows.slice(0, 200).map((r) => String(r[i] == null ? "" : r[i]).length + 2))) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, excelSheetName(title, "Details"));
+  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const fileBase = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="ahlawy-details.xlsx"; filename*=UTF-8''${encodeURIComponent((fileBase || "ahlawy-details") + ".xlsx")}`);
+  res.send(buffer);
 });
 
 // Auto-generated per-event report: attendance, registration timing, points
