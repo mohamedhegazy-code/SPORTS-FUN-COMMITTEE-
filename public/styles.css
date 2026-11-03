@@ -1538,7 +1538,13 @@ tr.dir-archived td { opacity: 0.6; }
 .event-full-note { margin: 8px 0 16px; padding: 8px 12px; border-radius: 10px; background: #fff4e0; border: 1px solid #f0c987; color: #7a4a00; font-size: 0.86rem; line-height: 1.45; }
 
 /* Admin custom report builder */
-.rb-saved-bar { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 6px; }
+.rb-saved-bar { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; margin-top: 6px; }
+/* Report name: the first thing in the builder, written once and used as the report's title everywhere */
+.rb-title-box { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border); border-inline-start: 4px solid var(--gold); border-radius: 8px; background: #fffdf7; }
+.rb-title-box label { font-weight: 700; }
+.rb-title-box input { width: 100%; max-width: none; font-size: 1.05rem; font-weight: 600; margin-top: 4px; }
+.rb-title-box .hint-note { margin: 6px 0 0; }
+.rb-result-title { margin: 14px 0 4px; font-size: 1.15rem; color: var(--red-dark); border-bottom: 2px solid var(--gold); padding-bottom: 6px; }
 .rb-saved-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .rb-section { margin-top: 16px; }
 .rb-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
@@ -1599,3 +1605,24 @@ tr.dir-archived td { opacity: 0.6; }
 /* member -> committee WhatsApp */
 .committee-wa { display: inline-block; text-decoration: none; }
 .myreg-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+
+
+/* ------------------------------------------ clickable dashboard cards --- */
+button.stat { font: inherit; color: inherit; margin: 0; display: block; cursor: pointer; text-align: center; }
+.stat .n, .stat .l, .stat .more { display: block; }
+.stat-click { transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease; }
+.stat-click:hover, .stat-click:focus-visible { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); border-color: var(--gold); outline: none; }
+.stat-click:focus-visible { box-shadow: 0 0 0 3px rgba(200, 162, 74, 0.45); }
+.stat-click:disabled { opacity: 0.6; cursor: progress; }
+.stat .more { margin-top: 4px; font-size: 0.7rem; font-weight: 700; color: var(--gold-dark, #8a6a1f); }
+.stat .more::after { content: " \203A"; }
+[dir="rtl"] .stat .more::after { content: " \2039"; }
+.detail-box { max-width: 980px; }
+.detail-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.detail-tools input { flex: 1; min-width: 180px; max-width: 360px; }
+.detail-table-wrap { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.detail-table th { position: sticky; top: 0; background: #faf7ef; z-index: 1; }
+.detail-table td { vertical-align: middle; }
+.detail-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.detail-foot .secondary { margin-top: 0; }
+@media (max-width: 700px) { .rb-saved-bar { grid-template-columns: 1fr; } .detail-box { padding: 16px; } }

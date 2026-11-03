@@ -3635,13 +3635,13 @@ document.getElementById("admin-unlock").addEventListener("click", () =>
 
 async function loadAdminOverview() {
   const stats = await api("/api/admin/overview");
-  document.getElementById("admin-stats").innerHTML = `
-    <div class="stat"><div class="n">${stats.totalMembers}</div><div class="l">${t("statMembers")}</div></div>
-    <div class="stat"><div class="n">${stats.totalEvents}</div><div class="l">${t("statEvents")}</div></div>
-    <div class="stat"><div class="n">${stats.totalRegistrations}</div><div class="l">${t("statRegistrations")}</div></div>
-    <div class="stat"><div class="n">${stats.totalCheckedIn}</div><div class="l">${t("statCheckedIn")}</div></div>
-    <div class="stat"><div class="n">${stats.pendingRedemptions}</div><div class="l">${t("statPending")}</div></div>
-  `;
+  document.getElementById("admin-stats").innerHTML = [
+    statTileHtml("members", stats.totalMembers, t("statMembers")),
+    statTileHtml("events", stats.totalEvents, t("statEvents")),
+    statTileHtml("registrations", stats.totalRegistrations, t("statRegistrations")),
+    statTileHtml("checkedIn", stats.totalCheckedIn, t("statCheckedIn")),
+    statTileHtml("redemptions_pending", stats.pendingRedemptions, t("statPending")),
+  ].join("");
   const pointsBadge = document.getElementById("admin-tab-badge-points");
   if (pointsBadge) {
     if (stats.pendingRedemptions > 0) {
@@ -3652,6 +3652,178 @@ async function loadAdminOverview() {
     }
   }
 }
+
+// ------------------------------------------- admin: clickable dashboard cards --
+// Every number tile on the admin dashboards is a button. Clicking it opens one
+// shared window that lists the records behind the number, with a search box, an
+// Excel download of what is showing, and (for full admins) a shortcut to the tab
+// where that kind of record is managed.
+let ADMIN_DASH_ROWS = [];
+let DETAIL = null;
+function statTileHtml(kind, value, labelHtml, extraCls) {
+  return `<button type="button" class="stat stat-click ${extraCls || ""}" data-stat-kind="${kind}" title="${escapeAttr(t("statClickHint"))}">
+    <span class="n">${value}</span><span class="l">${labelHtml}</span><span class="more">${escapeAttr(t("statDetailsMore"))}</span></button>`;
+}
+const DETAIL_GOTO_LABEL = { members: "detailGotoMembers", events: "detailGotoEvents", reports: "detailGotoReports", points: "detailGotoPoints" };
+function detailIsAdmin() {
+  return !!(CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin");
+}
+function openDetailModal(cfg) {
+  DETAIL = { cfg, query: "", opener: cfg.opener || document.activeElement };
+  document.getElementById("detail-title").textContent = cfg.title || "";
+  const sub = document.getElementById("detail-sub");
+  sub.textContent = cfg.sub || "";
+  sub.classList.toggle("hidden", !cfg.sub);
+  const search = document.getElementById("detail-search");
+  search.value = "";
+  const go = document.getElementById("detail-goto");
+  const canGo = !!(cfg.goto && DETAIL_GOTO_LABEL[cfg.goto] && detailIsAdmin());
+  go.classList.toggle("hidden", !canGo);
+  if (canGo) go.textContent = t(DETAIL_GOTO_LABEL[cfg.goto]);
+  document.getElementById("detail-modal").classList.remove("hidden");
+  renderDetailTable();
+  search.focus();
+}
+function closeDetailModal() {
+  const modal = document.getElementById("detail-modal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  modal.classList.add("hidden");
+  const opener = DETAIL && DETAIL.opener;
+  DETAIL = null;
+  if (opener && opener.focus && document.contains(opener)) opener.focus();
+}
+function detailVisibleIndexes() {
+  const { cfg, query } = DETAIL;
+  const q = query.trim().toLowerCase();
+  const idx = [];
+  cfg.rows.forEach((r, i) => {
+    if (!q || r.some((c) => String(c == null ? "" : c).toLowerCase().includes(q))) idx.push(i);
+  });
+  return idx;
+}
+function renderDetailTable() {
+  if (!DETAIL) return;
+  const { cfg } = DETAIL;
+  const idx = detailVisibleIndexes();
+  const wrap = document.getElementById("detail-table");
+  const hasAct = !!cfg.actions;
+  if (!cfg.rows.length) {
+    wrap.innerHTML = `<p class="dashboard-empty-note" style="padding:14px;">${escapeAttr(t("detailEmpty"))}</p>`;
+  } else if (!idx.length) {
+    wrap.innerHTML = `<p class="dashboard-empty-note" style="padding:14px;">${escapeAttr(t("rbNoResults"))}</p>`;
+  } else {
+    const head = `<th>#</th>${cfg.head.map((h) => `<th>${escapeAttr(h)}</th>`).join("")}${hasAct ? "<th></th>" : ""}`;
+    const body = idx
+      .map((i, n) => {
+        const act = hasAct && cfg.actions[i] ? `<td><button type="button" class="secondary small" data-detail-act="${i}">${escapeAttr(cfg.actions[i].label)}</button></td>` : hasAct ? "<td></td>" : "";
+        return `<tr><td class="num">${n + 1}</td>${cfg.rows[i].map((c) => `<td>${escapeAttr(c == null ? "" : String(c))}</td>`).join("")}${act}</tr>`;
+      })
+      .join("");
+    wrap.innerHTML = `<table class="dashboard-table detail-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+  document.getElementById("detail-count").textContent = t("detailCount").replace("{shown}", fmt(idx.length)).replace("{n}", fmt(cfg.rows.length));
+  document.getElementById("detail-excel").disabled = !idx.length;
+}
+async function downloadDetailExcel() {
+  if (!DETAIL) return;
+  const { cfg } = DETAIL;
+  const idx = detailVisibleIndexes();
+  const btn = document.getElementById("detail-excel");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/admin/export-table", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+      body: JSON.stringify({ title: cfg.title, head: ["#", ...cfg.head], rows: idx.map((i, n) => [n + 1, ...cfg.rows[i]]) }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || t("errGeneric"));
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (String(cfg.title || "ahlawy-details").replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "ahlawy-details") + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch (err) {
+    document.getElementById("detail-count").textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+// Cards whose rows the browser already holds (the Event dashboard strip).
+function eventTileDetails(kind) {
+  const all = ADMIN_DASH_ROWS || [];
+  let list = all;
+  let title = "";
+  if (kind === "ev-upcoming") title = t("glanceUpcomingEvents");
+  else if (kind === "ev-regs") { title = t("glanceRegistrations"); list = all.slice().sort((a, b) => b.confirmedCount - a.confirmedCount); }
+  else if (kind === "ev-waitlist") { title = t("glanceWaitlisted"); list = all.filter((r) => r.waitlistCount > 0); }
+  else if (kind === "ev-next") { title = t("glanceNextEvent"); list = all.slice(0, 1); }
+  else { title = t("glanceTournamentsDone"); list = all.filter((r) => !r.hasChildren); }
+  const lbl = (r) => eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr });
+  const rows = list.map((r) => [
+    lbl(r),
+    r.date,
+    r.maxCapacity != null ? `${r.confirmedCount} / ${r.maxCapacity}` : r.confirmedCount,
+    r.waitlistCount,
+    r.checkedInCount,
+    r.attendanceRate === null ? "—" : `${r.attendanceRate}%`,
+    r.hasChildren ? "—" : tournamentDashboardStatusInfo(r).label,
+  ]);
+  const actions = list.map((r) => {
+    if (kind === "ev-waitlist") return { label: t("detailViewWaitlist"), run: () => { switchAdminTab("overview"); openAdminWaitlist(r.eventId, lbl(r)); } };
+    if (kind === "ev-tourn" && !r.hasChildren) return { label: t("btnOpenTournament"), run: () => jumpToTournamentCard(r.eventId) };
+    return { label: t("btnManageEvent"), run: () => { switchAdminTab("overview"); openAdminEventHub(r.eventId, lbl(r)); } };
+  });
+  return {
+    title,
+    head: [t("colEvent"), t("colDate"), t("colRegistrations"), t("colWaitlist"), t("colCheckedIn"), t("colAttendance"), t("colTournament")],
+    rows,
+    actions,
+  };
+}
+async function openStatDetails(kind, tile) {
+  if (kind.startsWith("ev-")) return openDetailModal({ ...eventTileDetails(kind), opener: tile });
+  tile.disabled = true;
+  try {
+    const d = await api(`/api/admin/stat-details?kind=${encodeURIComponent(kind)}&lang=${currentLang}`);
+    openDetailModal({ title: d.title, head: d.head, rows: d.rows, goto: d.goto, opener: tile });
+  } catch (err) {
+    openDetailModal({ title: tile.querySelector(".l") ? tile.querySelector(".l").textContent : "", head: [], rows: [], sub: err.message, opener: tile });
+  } finally {
+    tile.disabled = false;
+  }
+}
+(function wireDetailModal() {
+  const modal = document.getElementById("detail-modal");
+  if (!modal) return;
+  document.addEventListener("click", (e) => {
+    const tile = e.target.closest("[data-stat-kind]");
+    if (tile) openStatDetails(tile.dataset.statKind, tile);
+  });
+  document.getElementById("detail-close").addEventListener("click", closeDetailModal);
+  document.getElementById("detail-close2").addEventListener("click", closeDetailModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeDetailModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetailModal(); });
+  document.getElementById("detail-search").addEventListener("input", (e) => { if (DETAIL) { DETAIL.query = e.target.value; renderDetailTable(); } });
+  document.getElementById("detail-excel").addEventListener("click", downloadDetailExcel);
+  document.getElementById("detail-goto").addEventListener("click", () => {
+    const go = DETAIL && DETAIL.cfg.goto;
+    closeDetailModal();
+    if (go) { switchAdminTab(go); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  });
+  document.getElementById("detail-table").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-detail-act]");
+    if (!b || !DETAIL) return;
+    const act = DETAIL.cfg.actions[Number(b.dataset.detailAct)];
+    closeDetailModal();
+    if (act && act.run) act.run();
+  });
+})();
 
 // ---------------------------------------------------------- admin: sub-tabs --
 // The Admin section groups its ~19 cards into a handful of sub-tabs (Overview,
@@ -3970,7 +4142,8 @@ function rbTable(head, rows, totalRow) {
 }
 function rbRender(out) {
   const box = rbEl("rb-result");
-  let html = `<p class="rb-count"><b>${escapeAttr(t("rbResults").replace("{n}", fmt(out.total)))}</b></p>`;
+  let html = out.title ? `<h3 class="rb-result-title">${escapeAttr(out.title)}</h3>` : "";
+  html += `<p class="rb-count"><b>${escapeAttr(t("rbResults").replace("{n}", fmt(out.total)))}</b></p>`;
   html += `<p class="hint-note rb-filters-text">${(out.filters || []).map((f) => escapeAttr(f)).join(" · ")}</p>`;
   if (out.summary) html += rbTable(out.summary.head, out.summary.rows, out.summary.total);
   if (out.spec.layout !== "summary") {
@@ -3980,6 +4153,14 @@ function rbRender(out) {
     if (out.truncated) html += `<p class="hint-note">${escapeAttr(t("rbShowing").replace("{shown}", fmt(out.rows.length)).replace("{n}", fmt(out.total)))}</p>`;
   }
   box.innerHTML = html;
+}
+// The report name typed at the top of the builder: printed as the report's
+// title on screen, in the Excel file and on the printout, and used when saving.
+function rbTitle() {
+  return rbEl("rb-name").value.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+function rbFileName() {
+  return rbTitle().replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "ahlawy-custom-report";
 }
 function rbCheckSpec(spec) {
   if (!spec.columns.length && spec.layout !== "summary") {
@@ -3995,7 +4176,7 @@ async function rbRun() {
   msg.classList.remove("show");
   rbEl("rb-run").disabled = true;
   try {
-    const out = await api("/api/admin/report-builder/run", { method: "POST", body: JSON.stringify({ spec, lang: currentLang }) });
+    const out = await api("/api/admin/report-builder/run", { method: "POST", body: JSON.stringify({ spec, lang: currentLang, title: rbTitle() }) });
     RB.lastSpec = out.spec;
     rbRender(out);
   } catch (err) {
@@ -4014,7 +4195,7 @@ async function rbExcel() {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
-      body: JSON.stringify({ spec, lang: currentLang }),
+      body: JSON.stringify({ spec, lang: currentLang, title: rbTitle() }),
     });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
@@ -4023,7 +4204,7 @@ async function rbExcel() {
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "ahlawy-custom-report.xlsx";
+    a.download = rbFileName() + ".xlsx";
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -4039,7 +4220,8 @@ function rbPrint() {
     showMsg(rbEl("rb-msg"), t("rbPrintTooLong"), false);
     return;
   }
-  window.open(`/admin/print/custom-report?lang=${currentLang}&spec=${b64}`, "_blank", "noopener");
+  const title = rbTitle();
+  window.open(`/admin/print/custom-report?lang=${currentLang}&spec=${b64}${title ? "&title=" + encodeURIComponent(title) : ""}`, "_blank", "noopener");
 }
 async function rbSaveNew() {
   const msg = rbEl("rb-saved-msg");
@@ -4118,6 +4300,7 @@ async function rbDelete() {
     rbUpdateEventCount();
   });
   rbEl("rb-run").addEventListener("click", rbRun);
+  rbEl("rb-name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); rbRun(); } });
   rbEl("rb-excel").addEventListener("click", rbExcel);
   rbEl("rb-print").addEventListener("click", rbPrint);
   rbEl("rb-save-new").addEventListener("click", rbSaveNew);
@@ -4399,18 +4582,19 @@ function renderAdminDashboardGlance(rows) {
   const tournDone = tournEligible.filter((r) => r.tournamentStatus === "completed").length;
   const next = rows[0];
   const tournamentsTile = tournEligible.length
-    ? `<div class="stat"><div class="n">${fmt(tournDone)} / ${fmt(tournEligible.length)}</div><div class="l">${t("glanceTournamentsDone")}</div></div>`
+    ? statTileHtml("ev-tourn", `${fmt(tournDone)} / ${fmt(tournEligible.length)}`, t("glanceTournamentsDone"))
     : "";
-  wrap.innerHTML = `
-    <div class="stat"><div class="n">${fmt(rows.length)}</div><div class="l">${t("glanceUpcomingEvents")}</div></div>
-    <div class="stat"><div class="n">${fmt(totalRegs)}</div><div class="l">${t("glanceRegistrations")}</div></div>
-    <div class="stat"><div class="n">${fmt(totalWaitlist)}</div><div class="l">${t("glanceWaitlisted")}</div></div>
-    <div class="stat stat-accent"><div class="n">${escapeAttr(daysUntilLabel(next.date))}</div><div class="l">${escapeAttr(t("glanceNextEvent"))}: ${escapeAttr(eventLabel({ nameEn: next.nameEn, nameAr: next.nameAr }))}</div></div>
-    ${tournamentsTile}
-  `;
+  wrap.innerHTML = [
+    statTileHtml("ev-upcoming", fmt(rows.length), t("glanceUpcomingEvents")),
+    statTileHtml("ev-regs", fmt(totalRegs), t("glanceRegistrations")),
+    statTileHtml("ev-waitlist", fmt(totalWaitlist), t("glanceWaitlisted")),
+    statTileHtml("ev-next", escapeAttr(daysUntilLabel(next.date)), `${escapeAttr(t("glanceNextEvent"))}: ${escapeAttr(eventLabel({ nameEn: next.nameEn, nameAr: next.nameAr }))}`, "stat-accent"),
+    tournamentsTile,
+  ].join("");
 }
 function renderAdminDashboardTable(rows) {
   const wrap = document.getElementById("admin-dashboard-table");
+  ADMIN_DASH_ROWS = rows;
   renderAdminDashboardGlance(rows);
   if (!rows.length) {
     wrap.innerHTML = `<p class="dashboard-empty-note">${t("noEventsYet")}</p>`;
@@ -4772,10 +4956,10 @@ function renderManagementDashboard(data) {
   const growthHtml = `
     <h3>${t("mgmtClubGrowth")}</h3>
     <div class="stat-row">
-      <div class="stat"><div class="n">${fmt(g.totalMembers)}</div><div class="l">${t("mgmtTotalMembers")}</div></div>
-      <div class="stat"><div class="n">${fmt(g.membersWithAccount)}</div><div class="l">${t("mgmtMembersWithAccount")}</div></div>
-      <div class="stat"><div class="n">${fmt(g.activeCount)}</div><div class="l">${t("mgmtActiveMembers")}</div></div>
-      <div class="stat"><div class="n">${fmt(g.neverRegisteredCount)}</div><div class="l">${t("mgmtNeverRegistered")}</div></div>
+      ${statTileHtml("members", fmt(g.totalMembers), t("mgmtTotalMembers"))}
+      ${statTileHtml("withAccount", fmt(g.membersWithAccount), t("mgmtMembersWithAccount"))}
+      ${statTileHtml("active", fmt(g.activeCount), t("mgmtActiveMembers"))}
+      ${statTileHtml("neverRegistered", fmt(g.neverRegisteredCount), t("mgmtNeverRegistered"))}
     </div>
     <p class="hint-note">${t("mgmtNewSignups")}: ${g.newSignupsByMonth.map((r) => `${monthLabel(r.month)} (${fmt(r.count)})`).join(" · ")}</p>`;
 
@@ -4799,10 +4983,10 @@ function renderManagementDashboard(data) {
   const pointsHtml = `
     <h3>${t("mgmtPointsActivity")}</h3>
     <div class="stat-row">
-      <div class="stat"><div class="n">${fmt(p.totalPointsAwarded)}</div><div class="l">${t("mgmtTotalPointsAwarded")}</div></div>
-      <div class="stat"><div class="n">${fmt(p.redemptions.total)}</div><div class="l">${t("mgmtRedemptionRequests")}</div></div>
-      <div class="stat"><div class="n">${fmt(p.redemptions.pending)}</div><div class="l">${t("mgmtRedemptionsPending")}</div></div>
-      <div class="stat"><div class="n">${fmt(p.redemptions.fulfilled)}</div><div class="l">${t("mgmtRedemptionsFulfilled")}</div></div>
+      ${statTileHtml("points", fmt(p.totalPointsAwarded), t("mgmtTotalPointsAwarded"))}
+      ${statTileHtml("redemptions_all", fmt(p.redemptions.total), t("mgmtRedemptionRequests"))}
+      ${statTileHtml("redemptions_pending", fmt(p.redemptions.pending), t("mgmtRedemptionsPending"))}
+      ${statTileHtml("redemptions_fulfilled", fmt(p.redemptions.fulfilled), t("mgmtRedemptionsFulfilled"))}
     </div>
     ${
       p.leaderboard.length
@@ -4820,10 +5004,10 @@ function renderManagementDashboard(data) {
   const tournamentHtml = `
     <h3>${t("mgmtTournamentActivity")}</h3>
     <div class="stat-row">
-      <div class="stat"><div class="n">${fmt(ta.totalTournaments)}</div><div class="l">${t("mgmtTotalTournaments")}</div></div>
-      <div class="stat"><div class="n">${fmt(ta.completedCount)}</div><div class="l">${t("mgmtCompletedTournaments")}</div></div>
-      <div class="stat"><div class="n">${ta.completionRate === null ? "—" : ta.completionRate + "%"}</div><div class="l">${t("mgmtCompletionRate")}</div></div>
-      <div class="stat"><div class="n">${fmt(ta.totalParticipants)}</div><div class="l">${t("mgmtTotalParticipants")}</div></div>
+      ${statTileHtml("tournaments", fmt(ta.totalTournaments), t("mgmtTotalTournaments"))}
+      ${statTileHtml("tournaments_done", fmt(ta.completedCount), t("mgmtCompletedTournaments"))}
+      ${statTileHtml("tournaments", ta.completionRate === null ? "—" : ta.completionRate + "%", t("mgmtCompletionRate"))}
+      ${statTileHtml("tournaments", fmt(ta.totalParticipants), t("mgmtTotalParticipants"))}
     </div>
     <div id="mgmt-tournament-activity-table"></div>`;
 

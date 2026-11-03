@@ -938,14 +938,16 @@
           <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 4.5h14M3 10h14M3 15.5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="15" cy="15.5" r="2" stroke="currentColor" stroke-width="1.4"/></svg><span data-i18n="rbTitle">Custom report builder</span></h2>
           <p class="section-sub" data-i18n="rbIntro">Build any report you need: choose what to list, filter by age, age group, member type, phone number and more, pick the columns, then view it here, download Excel or print. Save a report to run it again later.</p>
 
+          <div class="rb-title-box">
+            <label for="rb-name" data-i18n="rbName">Report name</label>
+            <input id="rb-name" type="text" maxlength="80" data-i18n-ph="rbNamePh" placeholder="e.g. Kids under 12 - attendance, October" />
+            <p class="hint-note" data-i18n="rbNameHint">The name you write here is printed as the title of the report - on screen, in the Excel file and on the printout - and is the name used when you save the report.</p>
+          </div>
+
           <div class="rb-saved-bar">
             <div>
               <label for="rb-saved" data-i18n="rbSaved">Saved reports</label>
               <select id="rb-saved"></select>
-            </div>
-            <div>
-              <label for="rb-name" data-i18n="rbName">Report name</label>
-              <input id="rb-name" type="text" maxlength="80" />
             </div>
             <div class="rb-saved-actions">
               <button type="button" class="secondary small" id="rb-save-new" data-i18n="rbBtnSave">Save as new</button>
@@ -1756,6 +1758,27 @@
     <input id="fp-new-password" type="password" placeholder="At least 6 characters" />
     <button class="primary" id="fp-submit" data-i18n="btnResetPassword">Reset password</button>
     <div class="msg" id="fp-msg"></div>
+  </div>
+</div>
+
+<!-- Dashboard card details: one shared window opened by any clickable number tile
+     (Admin > Overview, Event dashboard strip, Management dashboard). Filled by
+     openDetailModal() in app.js. Closes with the X, the Close button, Esc, or a click outside. -->
+<div class="modal-overlay hidden" id="detail-modal" style="z-index:150;">
+  <div class="modal-box detail-box" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <button class="modal-close" id="detail-close" aria-label="Close" type="button">&times;</button>
+    <h2 id="detail-title"></h2>
+    <p class="hint-note hidden" id="detail-sub"></p>
+    <div class="detail-tools">
+      <input id="detail-search" type="search" data-i18n-ph="detailSearchPh" placeholder="Search in this list" />
+      <span class="hint-note" id="detail-count"></span>
+    </div>
+    <div class="detail-table-wrap" id="detail-table"></div>
+    <div class="detail-foot">
+      <button class="secondary small" id="detail-excel" type="button" data-i18n="btnDownloadXlsx">Download .xlsx</button>
+      <button class="secondary small hidden" id="detail-goto" type="button"></button>
+      <button class="secondary small" id="detail-close2" type="button" data-i18n="btnClose">Close</button>
+    </div>
   </div>
 </div>
 
