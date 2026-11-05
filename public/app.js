@@ -290,6 +290,14 @@ function isoToDatetimeLocal(iso) {
 // unsupported value (some browsers/autofill edge cases) should just be
 // dropped instead of blowing up the whole save/submit handler before it
 // even reaches the try/catch around the network call.
+// Registration status + optional auto-open time from the Add / Edit event forms.
+function appendRegistrationFields(fd, statusId, opensId) {
+  const st = document.getElementById(statusId);
+  const at = document.getElementById(opensId);
+  if (!st) return;
+  fd.append("registrationStatus", st.value === "soon" ? "soon" : "open");
+  fd.append("registrationOpensAt", st.value === "soon" && at ? datetimeLocalToIsoOrEmpty(at.value) : "");
+}
 function datetimeLocalToIsoOrEmpty(value) {
   if (!value) return "";
   const d = new Date(value);
@@ -1661,7 +1669,7 @@ function renderEventDropdowns() {
   // there's nothing to directly register for on the parent itself.
   const upcoming = sortEventsForChooser(EVENTS_DATA.filter(isUpcoming));
   const regOpts = upcoming
-    .filter((ev) => !isParentEventWithChildren(ev))
+    .filter((ev) => !isParentEventWithChildren(ev) && isRegOpen(ev))
     .map(
       (ev) =>
         `<option value="${ev.id}">${escapeAttr(eventLabel(ev))} — ${ev.date}${isEventFull(ev) ? " — " + t("badgeFull") : ""}</option>`
@@ -1823,6 +1831,36 @@ document.getElementById("reg-event").addEventListener("change", () => {
 function isEventFull(ev) {
   return ev.maxCapacity != null && (ev.confirmedCount || 0) >= ev.maxCapacity;
 }
+// Registration "opens soon": an event can be announced before its registration
+// is ready (see eventRegistrationOpen in server.js - the server is the one that
+// actually refuses early sign-ups; this only decides what the page shows). It
+// also opens by itself once its scheduled time passes, even on a page that
+// has been left open. An activity is closed while its parent event day is.
+function eventSelfRegOpen(ev) {
+  if (!ev || ev.registrationStatus !== "soon") return true;
+  return !!(ev.registrationOpensAt && Date.now() >= Date.parse(ev.registrationOpensAt));
+}
+function isRegOpen(ev) {
+  if (!eventSelfRegOpen(ev)) return false;
+  const parent = ev.parentEventId ? EVENTS_DATA.find((e) => e.id === ev.parentEventId) : null;
+  return parent ? eventSelfRegOpen(parent) : true;
+}
+function regOpensAtText(ev) {
+  const parent = ev.parentEventId ? EVENTS_DATA.find((e) => e.id === ev.parentEventId) : null;
+  const closed = !eventSelfRegOpen(ev) ? ev : parent && !eventSelfRegOpen(parent) ? parent : null;
+  if (!closed || !closed.registrationOpensAt) return "";
+  const d = new Date(closed.registrationOpensAt);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(currentLang === "ar" ? "ar-EG" : "en-GB", { dateStyle: "medium", timeStyle: "short" });
+}
+// "Registration opens soon" chip (plus the opening time when one is set) -
+// shown in place of the Register button while an event is closed.
+function regSoonHtml(ev, small) {
+  const when = regOpensAtText(ev);
+  return `<span class="reg-soon${small ? " small" : ""}">${escapeAttr(t("regSoonBadge"))}${
+    when ? `<small>${escapeAttr(t("regSoonAt"))} ${escapeAttr(when)}</small>` : ""
+  }</span>`;
+}
 // "Waiting list: 3" - shown next to the capacity badge, and inside the
 // "event is full" note, whenever somebody is on the waiting list.
 function waitlistCountBadgeHtml(ev) {
@@ -1858,6 +1896,8 @@ function activityRowsHtml(children, isPast) {
         ${
           isPast
             ? ""
+            : !isRegOpen(child)
+            ? regSoonHtml(child, true)
             : `<button class="secondary small" data-action="register-child" data-child-id="${child.id}">${t(
                 "btnRegisterCard"
               )}</button>`
@@ -1885,7 +1925,7 @@ function eventCardHtml(ev, isPast, featured) {
     isParent ? "" : capacityBadgeHtml(ev)
   }</div>
         <div class="snippet">${eventCardDescHtml(ev, isPast, 110)}</div>
-        ${!isPast && !isParent && isEventFull(ev) ? eventFullNoteHtml(ev, false) : ""}
+        ${!isPast && !isParent && isRegOpen(ev) && isEventFull(ev) ? eventFullNoteHtml(ev, false) : ""}
         ${
           isParent
             ? `<div class="activities-list"><div class="activities-title">${escapeAttr(
@@ -1895,7 +1935,7 @@ function eventCardHtml(ev, isPast, featured) {
         }
         <div class="actions">
           <button class="secondary" data-action="details">${t("btnMoreDetails")}</button>
-          ${isPast || isParent ? "" : `<button class="primary" data-action="register">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`}
+          ${isPast || isParent ? "" : !isRegOpen(ev) ? regSoonHtml(ev) : `<button class="primary" data-action="register">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`}
           ${TOURNAMENT_EVENT_IDS.has(ev.id) ? `<button class="secondary" data-action="view-tournament">${t("btnViewTournament")}</button>` : ""}
         </div>
       </div>
@@ -2253,12 +2293,14 @@ function openEventModal(ev, isPast) {
             children,
             isPast
           )}</div>`
+        : !isPast && !isRegOpen(ev)
+        ? `<div class="reg-soon-box">${regSoonHtml(ev)}<p>${escapeAttr(t("regSoonNote"))}</p></div>`
         : !isPast
         ? `${isEventFull(ev) ? eventFullNoteHtml(ev) : ""}<p style="color:var(--muted);font-size:0.85rem;">${t("goToRegisterHint")}</p><button class="primary" id="modal-register-btn" style="width:100%;">${t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnRegisterCard")}</button>`
         : ""
     }
   `;
-  if (!isPast && !isParent) {
+  if (!isPast && !isParent && isRegOpen(ev)) {
     document.getElementById("modal-register-btn").addEventListener("click", () => {
       closeEventModal();
       startRegisterFlow(ev);
@@ -2676,7 +2718,12 @@ async function submitRegistrations(eventId, attendees, joinWaitlist) {
       }
       entries.push({ ok: true, label: att.label, result });
     } catch (e) {
-      entries.push({ ok: false, label: att.label, error: e.message, data: e.data });
+      entries.push({
+        ok: false,
+        label: att.label,
+        error: e.data && e.data.code === "registration_not_open" ? t("regNotOpenYet") : e.message,
+        data: e.data,
+      });
     }
   }
 
@@ -4619,8 +4666,27 @@ function renderAdminDashboardTable(rows) {
       const tournBtn = r.hasChildren
         ? ""
         : `<button class="secondary small" data-tourn-jump="${r.eventId}">${t("btnOpenTournament")}</button>`;
+      // Registration open / "opens soon": a pill under the name and a one-click
+      // toggle. An activity under a closed event day is closed by its parent,
+      // so its own button is a plain "open" only when it is itself closed.
+      const dashEv = EVENTS_DATA.find((e) => e.id === r.eventId) || r;
+      const selfClosed = r.registrationStatus === "soon" && !eventSelfRegOpen(r);
+      const regClosed = !r.registrationOpen && !(r.registrationOpen === undefined);
+      const regPill = regClosed
+        ? `<div><span class="tourn-status-pill reg-pill-soon">${escapeAttr(t("regSoonBadge"))}${
+            r.registrationOpensAt && selfClosed ? " · " + escapeAttr(regOpensAtText(dashEv)) : ""
+          }</span></div>`
+        : "";
+      const isAdminUser = !!(CURRENT_SESSION && CURRENT_SESSION.type === "staff" && CURRENT_SESSION.staff.role === "admin");
+      // Closed only because its event day is closed: nothing to click here, the
+      // day's own button opens all of its activities.
+      const regBtn = !isAdminUser || (regClosed && !selfClosed)
+        ? ""
+        : selfClosed
+        ? `<button class="secondary small" data-reg-toggle="open" data-reg-event="${r.eventId}">${t("btnOpenRegistration")}</button>`
+        : `<button class="secondary small" data-reg-toggle="soon" data-reg-event="${r.eventId}">${t("btnCloseRegistration")}</button>`;
       return `<tr>
-        <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}</td>
+        <td>${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}${regPill}</td>
         <td>${escapeAttr(r.date)}</td>
         <td class="num">${capacityText}${minNote}</td>
         <td>${waitlistCell}</td>
@@ -4629,6 +4695,7 @@ function renderAdminDashboardTable(rows) {
         <td>${tournCell}</td>
         <td style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="secondary small" data-hub-event="${r.eventId}" data-hub-label="${escapeAttr(eventLabel({ nameEn: r.nameEn, nameAr: r.nameAr }))}">${t("btnManageEvent")}</button>
+          ${regBtn}
           ${tournBtn}
         </td>
       </tr>`;
@@ -4652,6 +4719,24 @@ function renderAdminDashboardTable(rows) {
   wrap.querySelectorAll("[data-tourn-jump]").forEach((btn) => {
     btn.addEventListener("click", () => jumpToTournamentCard(Number(btn.dataset.tournJump)));
   });
+  wrap.querySelectorAll("[data-reg-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleEventRegistration(Number(btn.dataset.regEvent), btn.dataset.regToggle, btn));
+  });
+}
+// One-click open / "opens soon" for an event's registration (the server decides
+// who may do it). Closing asks first; opening is immediate. A scheduled opening
+// time is set in the event's Edit form.
+async function toggleEventRegistration(eventId, status, btn) {
+  if (status === "soon" && !confirm(t("confirmCloseRegistration"))) return;
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/events/${eventId}/registration`, { method: "POST", body: JSON.stringify({ status }) });
+    await loadEvents();
+    await loadAdminDashboard();
+  } catch (e) {
+    alert(e.message);
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ------------------------------------------------------- activity log -----
@@ -4671,6 +4756,7 @@ function activityActionLabel(action) {
     event_created: "alActionEventCreated",
     event_edited: "alActionEventEdited",
     event_deleted: "alActionEventDeleted",
+    event_registration_toggled: "alActionEventRegistrationToggled",
     event_registered: "alActionEventRegistered",
     event_waitlisted: "alActionEventWaitlisted",
     event_registration_cancelled: "alActionEventRegistrationCancelled",
@@ -6695,6 +6781,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("maxCapacity", maxCapacity);
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
+  appendRegistrationFields(fd, "ev-reg-status", "ev-reg-opens");
   appendManagers(fd, "ev-managers-add");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
@@ -6722,6 +6809,8 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-end-time").value = "";
     document.getElementById("ev-parent-event").value = "";
     document.getElementById("ev-allow-multi").checked = false;
+    document.getElementById("ev-reg-status").value = "open";
+    document.getElementById("ev-reg-opens").value = "";
     photoInput.value = "";
     videoInput.value = "";
     whatsappQrInput.value = "";
@@ -6783,6 +6872,12 @@ function populateEditForm(ev) {
   document.getElementById("ev-edit-start-time").value = ev.startTime || "";
   document.getElementById("ev-edit-end-time").value = ev.endTime || "";
   document.getElementById("ev-edit-deadline").value = isoToDatetimeLocal(ev.earlyDeadline);
+  // "Opens soon" is shown only while it is still closed - once its scheduled
+  // time has passed the event is simply open, so saving other changes must not
+  // send the old (past) opening time back.
+  const stillClosed = ev.registrationStatus === "soon" && !eventSelfRegOpen(ev);
+  document.getElementById("ev-edit-reg-status").value = stillClosed ? "soon" : "open";
+  document.getElementById("ev-edit-reg-opens").value = stillClosed ? isoToDatetimeLocal(ev.registrationOpensAt) : "";
   document.getElementById("ev-edit-desc-en").value = ev.descriptionEn || "";
   document.getElementById("ev-edit-desc-ar").value = ev.descriptionAr || "";
   document.getElementById("ev-edit-min-capacity").value = ev.minCapacity != null ? ev.minCapacity : "";
@@ -6861,6 +6956,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("maxCapacity", maxCapacity);
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
+  appendRegistrationFields(fd, "ev-edit-reg-status", "ev-edit-reg-opens");
   appendManagers(fd, "ev-managers-edit");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);

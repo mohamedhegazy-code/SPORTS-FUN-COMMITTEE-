@@ -812,6 +812,8 @@
             <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-start-time" type="time" /></div>
             <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-end-time" type="time" /></div>
             <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-deadline" type="datetime-local" /></div>
+            <div class="admin-full-only"><label data-i18n="fieldRegStatus">Registration</label><select id="ev-reg-status"><option value="open" data-i18n="regStatusOpen">Open</option><option value="soon" data-i18n="regStatusSoon">Opens soon (closed for now)</option></select></div>
+            <div class="admin-full-only"><label data-i18n="fieldRegOpensAt">Open automatically at (optional)</label><input id="ev-reg-opens" type="datetime-local" /></div>
             <div><label data-i18n="fieldCoverPhoto">Cover photo</label><input id="ev-photo" type="file" accept="image/*" /></div>
             <div><label data-i18n="fieldCoverVideo">Cover video (optional)</label><input id="ev-video" type="file" accept="video/*" /></div>
             <div><label data-i18n="fieldWhatsappGroupQr">WhatsApp group QR (optional)</label><input id="ev-whatsapp-qr" type="file" accept="image/*" /></div>
@@ -820,6 +822,7 @@
             <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-parent-event"></select></div>
           </div>
           <p class="hint-note" data-i18n="coverVideoHint">Plays instead of the cover photo on the event's details page - the photo still shows as the card thumbnail and as a fallback while the video loads. Up to 60MB; a short, compressed clip works best.</p>
+          <p class="hint-note admin-full-only" data-i18n="regStatusHint">"Opens soon" shows a "registration opens soon" notice on the portal instead of the Register button; the event itself stays visible. Pick a time to open it by itself, or leave it empty and open it with the button on the Event dashboard. On an event day this applies to all of its activities.</p>
           <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
           <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
           <div class="admin-full-only ev-managers-block">
@@ -852,6 +855,8 @@
               <div><label data-i18n="fieldStartTime">Start time (optional)</label><input id="ev-edit-start-time" type="time" /></div>
               <div><label data-i18n="fieldEndTime">End time (optional)</label><input id="ev-edit-end-time" type="time" /></div>
               <div><label data-i18n="fieldDeadline">Early-registration deadline</label><input id="ev-edit-deadline" type="datetime-local" /></div>
+              <div class="admin-full-only"><label data-i18n="fieldRegStatus">Registration</label><select id="ev-edit-reg-status"><option value="open" data-i18n="regStatusOpen">Open</option><option value="soon" data-i18n="regStatusSoon">Opens soon (closed for now)</option></select></div>
+              <div class="admin-full-only"><label data-i18n="fieldRegOpensAt">Open automatically at (optional)</label><input id="ev-edit-reg-opens" type="datetime-local" /></div>
               <div><label data-i18n="fieldReplaceCoverPhoto">Replace cover photo (optional)</label><input id="ev-edit-photo" type="file" accept="image/*" /></div>
               <div><label data-i18n="fieldReplaceCoverVideo">Replace cover video (optional)</label><input id="ev-edit-video" type="file" accept="video/*" /></div>
               <div><label data-i18n="fieldReplaceWhatsappGroupQr">Replace WhatsApp group QR (optional)</label><input id="ev-edit-whatsapp-qr" type="file" accept="image/*" /></div>
@@ -859,6 +864,7 @@
               <div><label data-i18n="fieldMaxCapacity">Maximum registrations (optional)</label><input id="ev-edit-max-capacity" type="number" min="0" /></div>
               <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-edit-parent-event"></select></div>
             </div>
+            <p class="hint-note admin-full-only" data-i18n="regStatusHint">"Opens soon" shows a "registration opens soon" notice on the portal instead of the Register button; the event itself stays visible. Pick a time to open it by itself, or leave it empty and open it with the button on the Event dashboard. On an event day this applies to all of its activities.</p>
             <p class="hint-note" id="ev-edit-capacity-status"></p>
             <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
             <div class="admin-full-only ev-managers-block">

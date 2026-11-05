@@ -1628,3 +1628,13 @@ button.stat { font: inherit; color: inherit; margin: 0; display: block; cursor: 
 .detail-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .detail-foot .secondary { margin-top: 0; }
 @media (max-width: 700px) { .rb-saved-bar { grid-template-columns: 1fr; } .detail-box { padding: 16px; } }
+
+/* Registration "opens soon": replaces the Register button while an event is announced but not open. */
+.reg-soon { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 10px 16px; border-radius: 10px; border: 1px dashed var(--gold); background: #fff8e1; color: #7a5a00; font-weight: 700; font-size: 0.9rem; text-align: center; line-height: 1.3; }
+.reg-soon small { font-weight: 600; font-size: 0.75rem; color: #8a6a10; }
+.reg-soon.small { padding: 4px 10px; font-size: 0.78rem; border-radius: 8px; }
+.event-card .actions .reg-soon { flex: 1 1 140px; }
+.reg-soon-box { display: flex; flex-direction: column; gap: 8px; align-items: stretch; margin-top: 8px; }
+.reg-soon-box .reg-soon { width: 100%; }
+.reg-soon-box p { margin: 0; color: var(--muted); font-size: 0.85rem; text-align: center; }
+.tourn-status-pill.reg-pill-soon { background: #fff8e1; color: #7a5a00; border: 1px solid var(--gold); margin-top: 4px; }
