@@ -2522,6 +2522,52 @@ function eventEndDate(ev) {
   return ev.endDate || ev.date;
 }
 
+// ---- Registration open / "opens soon" -------------------------------------
+// An event can be announced on the portal before its registration is ready:
+// registrationStatus "soon" shows a "registration opens soon" notice instead of
+// the Register button. An optional registrationOpensAt (ISO time) opens it by
+// itself at that moment - nothing runs on a timer, the answer is simply worked
+// out from the clock whenever it is asked for. Events with no status are open
+// (everything created before this feature). An activity also stays closed while
+// its parent event day is closed, so closing the parent closes every activity.
+function parseRegistrationOpensAt(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
+function eventSelfRegistrationOpen(ev, nowIso) {
+  if (!ev || ev.registrationStatus !== "soon") return true;
+  return !!(ev.registrationOpensAt && (nowIso || new Date().toISOString()) >= ev.registrationOpensAt);
+}
+function eventRegistrationOpen(db, ev, nowIso) {
+  if (!eventSelfRegistrationOpen(ev, nowIso)) return false;
+  const parent = ev.parentEventId ? db.events.find((e) => e.id === ev.parentEventId) : null;
+  return parent ? eventSelfRegistrationOpen(parent, nowIso) : true;
+}
+// Reads a status + optional auto-open time from a request. "open" always clears
+// the time; "soon" may carry a time, which must be in the future (a time that
+// has already passed would just mean "open", so it is refused instead of being
+// silently ignored).
+function parseRegistrationSettings(status, opensAt) {
+  const st = status === undefined || status === null || status === "" ? "open" : String(status);
+  if (st !== "open" && st !== "soon") return { error: "Registration status must be open or soon" };
+  if (st === "open") return { status: "open", opensAt: null };
+  const at = parseRegistrationOpensAt(opensAt);
+  if (at === undefined) return { error: "The opening time is not a valid date and time" };
+  if (at && at <= new Date().toISOString()) return { error: "The opening time must be in the future" };
+  return { status: "soon", opensAt: at };
+}
+// The fields every event list/response carries so the page can show the right
+// button without asking again.
+function registrationFields(db, ev) {
+  return {
+    registrationStatus: ev.registrationStatus === "soon" ? "soon" : "open",
+    registrationOpensAt: ev.registrationOpensAt || null,
+    registrationOpen: eventRegistrationOpen(db, ev),
+  };
+}
+
 // ---- Event managers --------------------------------------------------------
 // A Tournament Manager (role "tournament") only works with the events an admin
 // assigned to them (event.managerUsernames, one or several managers per event;
@@ -2665,6 +2711,7 @@ app.get("/api/events", (req, res) => {
     managedByMe: viewer && viewer.role === "tournament" ? eventAccessCheck(db, viewer, ev.id).ok : undefined,
     confirmedCount: confirmedRegistrationCount(db, ev.id),
     waitlistCount: waitlistedRegistrationCount(db, ev.id),
+    ...registrationFields(db, ev),
     // Lets the Register tab show the Women / Juniors ranking tick-boxes for
     // events that run a Swiss (chess) tournament.
     rankingCategories: (() => {
@@ -2701,6 +2748,8 @@ app.post(
       maxCapacity,
       parentEventId,
       allowMultipleActivities,
+      registrationStatus,
+      registrationOpensAt,
     } = req.body;
     if (!nameEn || !date) return res.status(400).json({ error: "nameEn and date are required" });
     const min = parseCapacity(minCapacity);
@@ -2720,6 +2769,10 @@ app.post(
     if (parsedEndDate === undefined) {
       return res.status(400).json({ error: "End date must be empty or on/after the event date" });
     }
+    // Only an admin decides whether registration is open; an event a Tournament
+    // Manager creates is open as usual.
+    const regSettings = parseRegistrationSettings(req.staff.role === "admin" ? registrationStatus : "open", registrationOpensAt);
+    if (regSettings.error) return res.status(400).json({ error: regSettings.error });
     const parentCheck = validateParentEventId(db, null, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     if (parentCheck.parentEventId && req.staff.role === "tournament") {
@@ -2760,6 +2813,8 @@ app.post(
       maxCapacity: max,
       parentEventId: parentCheck.parentEventId,
       allowMultipleActivities: String(allowMultipleActivities) === "true",
+      registrationStatus: regSettings.status,
+      registrationOpensAt: regSettings.opensAt,
       // Admin picks the managers; a Tournament Manager who creates an event
       // is automatically its manager.
       managerUsernames:
@@ -2782,7 +2837,7 @@ app.post(
       details: `${nameEn} (${date})`,
     });
     writeDb(db);
-    res.status(201).json(event);
+    res.status(201).json({ ...event, ...registrationFields(db, event) });
   }
 );
 
@@ -2821,6 +2876,8 @@ app.put(
       maxCapacity,
       parentEventId,
       allowMultipleActivities,
+      registrationStatus,
+      registrationOpensAt,
     } = req.body;
     if (!nameEn || !date) return res.status(400).json({ error: "nameEn and date are required" });
     const min = parseCapacity(minCapacity);
@@ -2840,6 +2897,10 @@ app.put(
     if (parsedEndDate === undefined) {
       return res.status(400).json({ error: "End date must be empty or on/after the event date" });
     }
+    // Sending no status at all leaves the registration setting untouched.
+    // Admin only; a Tournament Manager's edit never changes it.
+    const regSettings = registrationStatus === undefined || req.staff.role !== "admin" ? null : parseRegistrationSettings(registrationStatus, registrationOpensAt);
+    if (regSettings && regSettings.error) return res.status(400).json({ error: regSettings.error });
     const parentCheck = validateParentEventId(db, event, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     event.nameEn = nameEn;
@@ -2856,6 +2917,10 @@ app.put(
     event.maxCapacity = max;
     event.parentEventId = parentCheck.parentEventId;
     event.allowMultipleActivities = String(allowMultipleActivities) === "true";
+    if (regSettings) {
+      event.registrationStatus = regSettings.status;
+      event.registrationOpensAt = regSettings.opensAt;
+    }
     // Only an admin changes who manages the event; sending nothing leaves it as is.
     if (req.staff.role === "admin" && req.body.managerUsernames !== undefined) {
       event.managerUsernames = parseManagerUsernames(db, req.body.managerUsernames);
@@ -2890,9 +2955,34 @@ app.put(
       ...event,
       confirmedCount: confirmedRegistrationCount(db, event.id),
       waitlistCount: waitlistedRegistrationCount(db, event.id),
+      ...registrationFields(db, event),
     });
   }
 );
+
+// One-click open / close of an event's registration (the button on the event
+// dashboard). Body: { status: "open" | "soon", opensAt?: ISO time }. "open"
+// opens it now; "soon" closes it, optionally with a time at which it opens by
+// itself. Admin only (a Tournament Manager cannot open or close registration);
+// not tied to the edit lock, so it also works after the event day.
+app.post("/api/events/:eventId/registration", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const event = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!event) return res.status(404).json({ error: "No such event" });
+  const settings = parseRegistrationSettings(req.body.status, req.body.opensAt);
+  if (settings.error) return res.status(400).json({ error: settings.error });
+  event.registrationStatus = settings.status;
+  event.registrationOpensAt = settings.opensAt;
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "event_registration_toggled",
+    details: `${event.nameEn} (${event.date}): ${settings.status === "soon" ? "closed" + (settings.opensAt ? " until " + settings.opensAt : "") : "opened"}`,
+  });
+  writeDb(db);
+  res.json({ eventId: event.id, ...registrationFields(db, event) });
+});
 
 // Admin-only: change who manages an event at any time (also for an event that
 // just finished, which can no longer be edited, so its report can still be
@@ -3976,6 +4066,16 @@ app.post("/api/register", requireMember, async (req, res) => {
       error: "This is a multi-activity event day - please register for one of its individual activities instead.",
     });
   }
+  // Announced but not open yet (see "Registration open / opens soon" above).
+  // Refused here on the server, not just hidden in the page, so a saved link or
+  // an old open tab can't get around it. Admin invites are unaffected.
+  if (!eventRegistrationOpen(db, event)) {
+    return res.status(403).json({
+      code: "registration_not_open",
+      error: "Registration for this event is not open yet - it will open soon.",
+      opensAt: event.registrationOpensAt || null,
+    });
+  }
 
   // Registering for a family member (dependent) instead of yourself: their
   // registration still lives under the primary member's membershipNumber
@@ -4631,6 +4731,7 @@ app.get("/api/admin/dashboard", requireStaffRole(["tournament"]), (req, res) => 
         tournamentStatus: tournament ? tournament.status : null,
         tournamentFormat: tournament ? tournament.format : null,
         hasChildren: eventHasChildren(db, ev.id),
+        ...registrationFields(db, ev),
       };
     });
   res.json(rows);

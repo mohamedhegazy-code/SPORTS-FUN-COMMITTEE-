@@ -374,6 +374,18 @@ The report builder has a prominent **Report name** field at the top. The name is
 
 Tests: `loadtest/dashboard_cards_e2e.js` (run on a fresh data folder).
 
+## Registration "opens soon" (admin only)
+
+An event can be announced on the portal before its registration is ready. In **Admin > Events** (Add / Edit an event) the **Registration** field is *Open* or *Opens soon (closed for now)*, with an optional **Open automatically at** time. While an event is closed, its card and details window show "Registration opens soon" (and the opening time, if set) instead of the Register button; the event stays visible, and it is left out of the Register tab's event list.
+
+- One-click button on the **Overview > event dashboard**: *Close registration* / *Open registration* (opening clears any schedule). Each row also carries a "Registration opens soon" pill while closed.
+- With an opening time, nothing runs on a timer - the answer is worked out from the clock whenever it is asked for, so the event simply becomes open at that moment (also on a page left open).
+- Enforced on the server: `POST /api/register` answers 403 `registration_not_open` for a closed event. Admin invites (Members > invite to an event) still work while closed. Members already registered are unaffected.
+- On an event day (parent), closing the day closes all its activities; an activity can also be closed on its own.
+- Admin only: `POST /api/events/:id/registration` ({status: "open"|"soon", opensAt?}); a Tournament Manager cannot change it (the fields are hidden for them and ignored by the server). Events created before this feature are open.
+- Data: `registrationStatus` ("open"/"soon") and `registrationOpensAt` (ISO time or null) on each event; every event response also carries the computed `registrationOpen`.
+- Tests: `loadtest/registration_open_e2e.js` (run on a fresh data folder).
+
 ## Admin: per-event hub (attendance, tournament & results in one place)
 
 Every row on the Event dashboard has a **Manage** button that opens that
