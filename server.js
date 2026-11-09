@@ -7187,6 +7187,7 @@ app.get("/api/tournaments", (req, res) => {
         date: ev.date,
         mode: t.mode,
         format: t.format,
+        finalsMode: t.finalsMode || undefined,
         status: t.status,
         hasSchedule: hasSchedule(t),
       };

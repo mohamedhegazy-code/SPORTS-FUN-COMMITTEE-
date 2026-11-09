@@ -598,6 +598,8 @@ Built for a multi-category league played over several days on shared pitches.
 
 **Modelling the season.** Create a parent event "Ahlawy 120"; under it one league activity per age category with its birth-year range and team settings (squad 5-8, max 6 teams, min 4); create a *League* tournament on each; once teams have registered, *Import teams* then *Season schedule*.
 
+**Admin > Tournaments tab.** The tournament card now lives in its own admin tab (visible to admins and event managers; a manager sees only the events assigned to them). The top of the tab lists every tournament and league with its mode, format and progress; *Open* loads it into the *Manage a tournament* card below (teams, seeding, schedule, results, season). To start a new tournament, pick an event in the dropdown and use the create form that appears. The "Tournament" shortcuts in the Overview and Reports tabs jump straight to this tab.
+
 Tests: `loadtest/league_e2e.js` (eligibility, league and finals, season scheduler, teams).
 
 ## Admin: Branding (colors & logo)
