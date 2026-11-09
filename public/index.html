@@ -694,6 +694,10 @@
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v3M14 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span data-i18n="adminTabEvents">Events</span>
         </button>
+        <button class="admin-tab evt-tab-only" type="button" data-admin-tab="tournaments" role="tab">
+          <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 3h10v3.5a5 5 0 0 1-10 0V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 4.5H2.8c0 2 1 3.3 2.6 3.6M15 4.5h2.2c0 2-1 3.3-2.6 3.6M10 11.5V15M7 17h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span data-i18n="adminTabTournaments">Tournaments</span>
+        </button>
         <button class="admin-tab evt-tab-only" type="button" data-admin-tab="reports" role="tab">
           <svg class="admin-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5V17.5H5V2.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <span data-i18n="adminTabReports">Reports</span>
@@ -931,16 +935,6 @@
           <div class="msg" id="res-msg"></div>
         </div>
 
-        <div class="card">
-          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3h12v3.5a5.5 5.5 0 0 1-6 5.5 5.5 5.5 0 0 1-6-5.5V3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M4 4H2a1 1 0 0 0-1 1.2c.4 1.6 1.5 2.7 3.4 2.9M16 4h2a1 1 0 0 1 1 1.2c-.4 1.6-1.5 2.7-3.4 2.9" stroke="currentColor" stroke-width="1.2"/><path d="M10 12v3M7.5 17.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8.3 14.5h3.4l.5 3H7.8l.5-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span data-i18n="adminTournamentTitle">Tournament</span></h2>
-          <p class="section-sub" data-i18n="adminTournamentIntro">Generate a group stage and/or knockout bracket from an event's registrations (or from teams you group them into), run it through to a winner, and optionally feed the final standings straight into that event's points.</p>
-          <label data-i18n="fieldEvent">Event</label>
-          <select id="tourn-event-select"></select>
-          <button class="secondary" id="tourn-load" style="margin-top:10px;" data-i18n="btnLoadTournament">Load</button>
-          <div id="tourn-body" style="margin-top:16px;"></div>
-          <div class="msg" id="tourn-msg"></div>
-        </div>
-
         <div class="card admin-full-only" id="ev-merge-card">
           <h2><span data-i18n="mergeEventsTitle">Merge duplicate events</span></h2>
           <p class="hint-note" data-i18n="mergeEventsHint">Moves every registration from one event into another.</p>
@@ -963,6 +957,25 @@
           <select id="ev-delete-select"></select>
           <button class="danger" id="ev-delete-btn" data-i18n="btnDeleteEvent" style="margin-top:10px;">Delete event</button>
           <div class="msg" id="ev-delete-msg"></div>
+        </div>
+      </div>
+
+      <div class="admin-tab-panel hidden evt-tab-only" data-admin-panel="tournaments">
+        <div class="card" id="admin-tourn-list-card">
+          <h2><span data-i18n="adminTournamentsListTitle">All tournaments</span></h2>
+          <p class="section-sub" data-i18n="adminTournamentsListIntro">Every tournament and league in one place. Open one to manage its teams, schedule, results and season. To start a new one, pick an event below.</p>
+          <div id="admin-tourn-list" class="admin-tourn-list"></div>
+          <div class="msg" id="admin-tourn-list-msg"></div>
+        </div>
+
+        <div class="card" id="tourn-manage-card">
+          <h2><svg class="card-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3h12v3.5a5.5 5.5 0 0 1-6 5.5 5.5 5.5 0 0 1-6-5.5V3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M4 4H2a1 1 0 0 0-1 1.2c.4 1.6 1.5 2.7 3.4 2.9M16 4h2a1 1 0 0 1 1 1.2c-.4 1.6-1.5 2.7-3.4 2.9" stroke="currentColor" stroke-width="1.2"/><path d="M10 12v3M7.5 17.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8.3 14.5h3.4l.5 3H7.8l.5-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span data-i18n="tournManageTitle">Manage a tournament</span></h2>
+          <p class="section-sub" data-i18n="adminTournamentIntro">Generate a group stage and/or knockout bracket from an event's registrations (or from teams you group them into), run it through to a winner, and optionally feed the final standings straight into that event's points.</p>
+          <label data-i18n="tournPickEventLabel">Event</label>
+          <select id="tourn-event-select"></select>
+          <button class="secondary" id="tourn-load" style="margin-top:10px;" data-i18n="btnLoadTournament">Load</button>
+          <div id="tourn-body" style="margin-top:16px;"></div>
+          <div class="msg" id="tourn-msg"></div>
         </div>
       </div>
 

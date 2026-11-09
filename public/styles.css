@@ -1661,3 +1661,19 @@ button.stat { font: inherit; color: inherit; margin: 0; display: block; cursor: 
 .tourn-season-link { color: var(--red, #8b0000); font-weight: 700; text-decoration: none; }
 .tourn-season-link:hover { text-decoration: underline; }
 a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; border: 1px solid var(--red); background: #fff; }
+
+/* Admin > Tournaments tab: list of every tournament */
+.admin-tourn-list { display: flex; flex-direction: column; gap: 8px; }
+.admin-tourn-row {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr) auto; gap: 8px 14px; align-items: center;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff;
+}
+.admin-tourn-row.active { border-color: var(--gold); background: #fff9ec; }
+.admin-tourn-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.admin-tourn-name .meta { font-size: 0.78rem; color: var(--muted); }
+.admin-tourn-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 640px) {
+  .admin-tourn-row { grid-template-columns: 1fr auto; }
+  .admin-tourn-badges { grid-column: 1 / -1; grid-row: 2; }
+}
+.admin-tourn-name .lang-ar, .admin-tourn-name .lang-en { text-align: start; }

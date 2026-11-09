@@ -3926,6 +3926,7 @@ function switchAdminTab(tabKey) {
   } catch (e) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
+  if (tabKey === "tournaments") loadAdminTournamentsList();
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
   if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
@@ -5528,7 +5529,7 @@ async function loadHubTournamentSummary() {
   }
 }
 function jumpToTournamentCard(eventId) {
-  switchAdminTab("events");
+  switchAdminTab("tournaments");
   const sel = document.getElementById("tourn-event-select");
   if (sel && Array.from(sel.options).some((o) => o.value === String(eventId))) {
     sel.value = String(eventId);
@@ -8019,6 +8020,56 @@ document.getElementById("res-save").addEventListener("click", async () => {
 // reg.position field Enter Event Results uses. All state lives server-side
 // (db.tournaments) - these globals just hold the last-loaded snapshot so
 // the UI doesn't have to refetch after every click.
+// Admin > Tournaments tab: one row per tournament/league (name, date, mode,
+// format, progress) with an Open button that loads it into the manage card
+// below. A Tournament Manager only sees the events assigned to them.
+async function loadAdminTournamentsList() {
+  const wrap = document.getElementById("admin-tourn-list");
+  const msg = document.getElementById("admin-tourn-list-msg");
+  if (!wrap) return;
+  try {
+    const list = await api("/api/tournaments");
+    const mine = isTournamentManagerSession()
+      ? list.filter((tn) => { const ev = EVENTS_DATA.find((e) => e.id === tn.eventId); return ev && ev.managedByMe; })
+      : list;
+    if (msg) msg.textContent = "";
+    if (!mine.length) {
+      wrap.innerHTML = `<p class="hint-note">${escapeAttr(t("tournListEmpty"))}</p>`;
+      return;
+    }
+    wrap.innerHTML = mine.map((tn) => {
+      const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
+      return `
+      <div class="admin-tourn-row${tn.eventId === TOURNAMENT_EVENT_ID ? " active" : ""}" data-event-id="${tn.eventId}">
+        <div class="admin-tourn-name">
+          <strong>${eventNameHtml(tn)}</strong>
+          <span class="meta">${escapeAttr(tn.date || "")}${tn.sport ? " &middot; " + escapeAttr(tn.sport) : ""}</span>
+        </div>
+        <div class="admin-tourn-badges">
+          <span class="tourn-summary-badge">${escapeAttr(modeLabel)}</span>
+          <span class="tourn-summary-badge">${escapeAttr(tournamentFormatLabel(tn.format, tn))}</span>
+          <span class="tourn-summary-badge">${escapeAttr(tournamentActiveStatusLabel(tn))}</span>
+        </div>
+        <button class="secondary small" type="button" data-admin-tourn-open="${tn.eventId}">${escapeAttr(t("btnOpenTournamentRow"))}</button>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    wrap.innerHTML = "";
+    if (msg) showMsg(msg, e.message, false);
+  }
+}
+document.getElementById("admin-tourn-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-admin-tourn-open]");
+  if (!btn) return;
+  const eventId = btn.dataset.adminTournOpen;
+  const sel = document.getElementById("tourn-event-select");
+  if (sel && Array.from(sel.options).some((o) => o.value === eventId)) sel.value = eventId;
+  loadTournamentPanel(eventId).then(() => {
+    document.querySelectorAll(".admin-tourn-row").forEach((r) => r.classList.toggle("active", r.dataset.eventId === eventId));
+    document.getElementById("tourn-manage-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+});
+
 let TOURNAMENT_EVENT_ID = null;
 let TOURNAMENT_DATA = null;
 // Team mode, pre-generation only: toggled on by the "Edit teams" button on
@@ -9352,6 +9403,7 @@ async function createTournament() {
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("tournamentCreated"), true);
     renderTournamentBody();
+    loadAdminTournamentsList();
   } catch (e) {
     showMsg(msg, e.message, false);
   }
@@ -9365,6 +9417,7 @@ async function deleteTournament() {
     TOURNAMENT_DATA = null;
     showMsg(msg, t("tournamentDeleted"), true);
     renderTournamentBody();
+    loadAdminTournamentsList();
   } catch (e) {
     showMsg(msg, e.message, false);
   }
