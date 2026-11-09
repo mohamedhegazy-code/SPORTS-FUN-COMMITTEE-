@@ -28,9 +28,13 @@
     if (from !== null && to !== null) return fill("bornBetween", { from, to });
     return from !== null ? fill("bornFrom", { from }) : fill("bornTo", { to });
   };
+  L.genderRuleText = function (g) {
+    return g === "female" ? t("genderBadgeFemale") : g === "male" ? t("genderBadgeMale") : "";
+  };
   L.bornBadgeHtml = function (ev) {
     const txt = L.bornRangeText(ev);
-    return txt ? `<span class="capacity-badge ok born-badge">${esc(txt)}</span>` : "";
+    const g = ev && ev.genderRestriction ? L.genderRuleText(ev.genderRestriction) : "";
+    return (txt ? `<span class="capacity-badge ok born-badge">${esc(txt)}</span>` : "") + (g ? `<span class="capacity-badge ok gender-badge">${esc(g)}</span>` : "");
   };
   L.teamBadgeHtml = function (ev) {
     const ts = ev && ev.teamRegistration;
@@ -72,6 +76,7 @@
     const val = (id) => ($(prefix + id) ? $(prefix + id).value.trim() : "");
     fd.append("birthYearFrom", val("-birth-from"));
     fd.append("birthYearTo", val("-birth-to"));
+    fd.append("genderRestriction", val("-gender"));
     const on = $(prefix + "-team-on");
     fd.append("teamRegistration", on && on.checked ? "true" : "false");
     if (on && on.checked) {
@@ -85,6 +90,7 @@
     const set = (id, v) => { if ($(prefix + id)) $(prefix + id).value = v == null ? "" : v; };
     set("-birth-from", ev ? ev.birthYearFrom : "");
     set("-birth-to", ev ? ev.birthYearTo : "");
+    set("-gender", ev ? ev.genderRestriction || "" : "");
     const ts = ev && ev.teamRegistration;
     if ($(prefix + "-team-on")) $(prefix + "-team-on").checked = !!ts;
     set("-team-min", ts ? ts.minPlayers : 5);
@@ -102,7 +108,14 @@
     return sel ? EVENTS_DATA.find((e) => e.id === Number(sel.value)) : null;
   }
   L.eligibilityFor = function (ev, person) {
-    if (!ev || (ev.birthYearFrom == null && ev.birthYearTo == null)) return null;
+    if (!ev) return null;
+    const gr = ev.genderRestriction || "";
+    if (gr) {
+      const pg = person && person.gender;
+      if (!pg) return { code: "gender_required" };
+      if (pg !== gr) return { code: "not_eligible_gender", rule: gr };
+    }
+    if (ev.birthYearFrom == null && ev.birthYearTo == null) return null;
     const bd = person && person.birthDate;
     if (!bd) return { code: "birthdate_required" };
     const y = Number(String(bd).slice(0, 4));
@@ -128,7 +141,9 @@
         box.disabled = true;
         const note = document.createElement("span");
         note.className = "att-elig-note capacity-badge full";
-        note.textContent = problem.code === "not_eligible" ? fill("attNotEligible", { year: problem.year }) : t("attNeedsBirth");
+        note.textContent = problem.code === "not_eligible" ? fill("attNotEligible", { year: problem.year })
+          : problem.code === "not_eligible_gender" ? fill("attNotEligibleGender", { rule: L.genderRuleText(problem.rule) })
+          : problem.code === "gender_required" ? t("attNeedsGender") : t("attNeedsBirth");
         const label = box.parentElement && box.parentElement.querySelector("label");
         if (label) { label.appendChild(document.createTextNode(" ")); label.appendChild(note); }
       } else if (box.dataset.eligOff) {
@@ -139,11 +154,12 @@
     }
     const hint = $("reg-born-hint");
     if (hint) hint.remove();
-    if (ev && L.bornRangeText(ev)) {
+    const ruleBits = ev ? [ev.genderRestriction ? L.genderRuleText(ev.genderRestriction) : "", L.bornRangeText(ev)].filter(Boolean) : [];
+    if (ruleBits.length) {
       const p = document.createElement("p");
       p.id = "reg-born-hint";
       p.className = "hint-note";
-      p.textContent = L.bornRangeText(ev);
+      p.textContent = ruleBits.join(" · ");
       const list = $("reg-attendees-list");
       if (list) list.parentNode.insertBefore(p, list);
     }
@@ -226,6 +242,10 @@
     if (d.code === "not_eligible") {
       const ev = { birthYearFrom: d.birthYearFrom, birthYearTo: d.birthYearTo };
       return fill("errNotEligible", { name: d.attendeeName || "", year: d.birthYear || "", range: L.bornRangeText(ev) });
+    }
+    if (d.code === "gender_required") return fill("errGenderNeeded", { name: d.attendeeName || "" });
+    if (d.code === "not_eligible_gender") {
+      return fill("errNotEligibleGender", { name: d.attendeeName || "", rule: d.genderRestriction === "female" ? t("genderFemaleOnly") : t("genderMaleOnly") });
     }
     const map = {
       birthdate_required: "errBirthDateNeeded", team_required: "errTeamRequired", team_full: "errTeamFull", team_name_taken: "errTeamNameTaken",

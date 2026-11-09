@@ -1367,6 +1367,7 @@ function updateUIForSession() {
   document.getElementById("mp-nickname-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-agegroup-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-phone-card").classList.toggle("hidden", !isMember);
+  document.getElementById("mp-gender-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-family-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-registrations-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-chat-card").classList.toggle("hidden", !isMember);
@@ -1377,6 +1378,7 @@ function updateUIForSession() {
     renderNicknameStatus();
     renderAgeGroupStatus();
     renderMyPhoneInput();
+    renderMyGenderInput();
     if (pointsVisible()) {
       document.getElementById("mp-points-disabled-note").classList.add("hidden");
       loadMyBalance();
@@ -1836,6 +1838,9 @@ function isEventFull(ev) {
 }
 // League-season features live in league.js (loaded after this file); a missing
 // or late file must never break the page, so every call goes through here.
+function aw(name, ...args) {
+  return window.AWARDS && typeof window.AWARDS[name] === "function" ? window.AWARDS[name](...args) : undefined;
+}
 function lg(name, ...args) {
   return window.LEAGUE && typeof window.LEAGUE[name] === "function" ? window.LEAGUE[name](...args) : undefined;
 }
@@ -2471,6 +2476,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   const phone = document.getElementById("su-phone").value.trim();
   const claimCode = document.getElementById("su-claimcode").value.trim();
   const birthDate = document.getElementById("su-birthdate").value;
+  const gender = document.getElementById("su-gender").value;
   const email = document.getElementById("su-email").value.trim();
   const agreeTerms = document.getElementById("su-agree-terms").checked;
   const memberType = document.getElementById("su-type-follower").checked ? "follower" : "main";
@@ -2509,7 +2515,7 @@ document.getElementById("su-submit").addEventListener("click", async () => {
   try {
     const result = await api("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, claimCode, birthDate, email, agreeTerms, memberType, relationshipToMain }),
+      body: JSON.stringify({ membershipNumber, name, password, familyGroup, phone, claimCode, birthDate, gender, email, agreeTerms, memberType, relationshipToMain }),
     });
     CURRENT_SESSION = { type: "member", member: result.member };
     SESSION_EXPIRY_HANDLED = false;
@@ -2938,6 +2944,7 @@ function renderFamilyList() {
           } <span class="fam-rel-badge ${d.birthDate ? "" : "fam-age-missing"}">${d.birthDate ? escapeAttr(ageGroupLabel(effectiveAgeGroup(d)) + " · " + bornAgeText(d)) : escapeAttr(t("famBirthMissing"))}</span>${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
         <span class="fam-rel-edit">
           <select class="fam-rel-select" data-dep-id="${d.id}">${familyRelationSelectHtml(d.relationship || "")}</select>
+          <select class="fam-gender-select" data-dep-id="${d.id}" style="margin-top:6px;"><option value="">${escapeAttr(t("genderSelect"))}</option><option value="male"${d.gender === "male" ? " selected" : ""}>${escapeAttr(t("genderMale"))}</option><option value="female"${d.gender === "female" ? " selected" : ""}>${escapeAttr(t("genderFemale"))}</option></select>
           <input class="fam-birth-input" type="date" data-dep-id="${d.id}" value="${escapeAttr(d.birthDate || "")}" min="1900-01-01" max="${todayISO()}" title="${escapeAttr(t("fieldBirthDateRequired"))}" style="margin-top:6px;" />
           <input class="fam-rel-other-input ${
             !!d.relationship && !FAMILY_RELATIONS.includes(d.relationship) ? "" : "hidden"
@@ -2995,6 +3002,8 @@ function renderFamilyList() {
       const relationship = sel.value === "other" ? otherInput.value.trim() : sel.value;
       const msg = document.getElementById("fam-msg");
       const payload = { relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim() };
+      const genderSelEl = wrap.querySelector(`.fam-gender-select[data-dep-id="${btn.dataset.depId}"]`);
+      if (genderSelEl && genderSelEl.value) payload.gender = genderSelEl.value;
       if (birthInput && birthInput.value) {
         if (birthInput.value > todayISO() || birthInput.value < "1900-01-01") return showMsg(msg, t("errBirthDateInvalid"), false);
         payload.birthDate = birthInput.value;
@@ -3050,7 +3059,7 @@ document.getElementById("fam-add").addEventListener("click", async () => {
   try {
     const result = await api("/api/me/dependents", {
       method: "POST",
-      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim(), birthDate: birthInputEl.value }),
+      body: JSON.stringify({ name, relationship, phone: phoneInput.value.trim(), email: emailInput.value.trim(), birthDate: birthInputEl.value, gender: document.getElementById("fam-gender").value }),
     });
     CURRENT_SESSION.member.dependents = result.dependents;
     renderAgeReminder();
@@ -3061,6 +3070,7 @@ document.getElementById("fam-add").addEventListener("click", async () => {
     relOtherInput.classList.add("hidden");
     phoneInput.value = "";
     emailInput.value = "";
+    document.getElementById("fam-gender").value = "";
     showMsg(msg, t("famAdded"), true);
     renderFamilyList();
     renderAttendeesChecklist();
@@ -5865,6 +5875,18 @@ function renderDirectoryTable() {
         ${m.dependents.map((d) => ageRow(d.name, d, d.id)).join("")}
         <div class="msg dir-age-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
       </div>`;
+    const genderRow = (label, person, depId) =>
+      `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0;">
+        <span style="min-width:120px;">${escapeAttr(label)}</span>
+        <select class="dir-gender-select" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="max-width:160px;padding:4px 6px;font-size:0.8rem;"><option value="">${escapeAttr(t("genderSelect"))}</option><option value="male"${person.gender === "male" ? " selected" : ""}>${escapeAttr(t("genderMale"))}</option><option value="female"${person.gender === "female" ? " selected" : ""}>${escapeAttr(t("genderFemale"))}</option></select>
+        <button class="secondary dir-gender-save" data-me="${escapeAttr(m.membershipNumber)}" data-dep="${depId == null ? "" : depId}" style="padding:3px 10px;font-size:0.75rem;">${t("btnSaveShort")}</button>
+      </div>`;
+    const genderEditorHtml = `<div style="margin-top:14px;">
+        <h4 style="margin:6px 0;">${t("directoryGenderTitle")}</h4>
+        ${genderRow(m.name, m, null)}
+        ${m.dependents.map((d) => genderRow(d.name, d, d.id)).join("")}
+        <div class="msg dir-gender-msg" data-me="${escapeAttr(m.membershipNumber)}"></div>
+      </div>`;
     const regsHtml = m.registrations.length
       ? `<table class="dashboard-table"><thead><tr>
           <th>${t("colEvent")}</th><th>${t("colDate")}</th><th>${t("colStatus")}</th><th>${t("colPoints")}</th><th></th>
@@ -6010,6 +6032,7 @@ function renderDirectoryTable() {
             <div><h4 style="margin:6px 0;">${t("colRegistrations")}</h4>${regsHtml}</div>
           </div>
           ${ageEditorHtml}
+          ${genderEditorHtml}
           ${detailsEditorHtml}
           ${pointsEditorHtml}
           ${familyLinkHtml}
@@ -6032,6 +6055,27 @@ function renderDirectoryTable() {
       detailRow.dataset.open = String(nowOpen);
       btn.textContent = nowOpen ? t("btnHideDetails") : t("btnDetails");
       applyDirectorySearchFilter();
+    });
+  });
+  wrap.querySelectorAll(".dir-gender-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const me = btn.dataset.me;
+      const dep = btn.dataset.dep;
+      const sel = wrap.querySelector(`.dir-gender-select[data-me="${me}"][data-dep="${dep}"]`);
+      const msg = wrap.querySelector(`.dir-gender-msg[data-me="${me}"]`);
+      if (!sel || !sel.value) return showMsg(msg, t("errGenderRequired"), false);
+      try {
+        await api(`/api/admin/members/${encodeURIComponent(me)}/gender`, {
+          method: "PUT",
+          body: JSON.stringify({ gender: sel.value, dependentId: dep === "" ? undefined : Number(dep) }),
+        });
+        const m = DIRECTORY_DATA.find((x) => x.membershipNumber === me);
+        const holder = m ? (dep === "" ? m : m.dependents.find((x) => String(x.id) === dep)) : null;
+        if (holder) holder.gender = sel.value;
+        showMsg(msg, t("okGenderSavedShort"), true);
+      } catch (e) {
+        showMsg(msg, e.message, false);
+      }
     });
   });
   wrap.querySelectorAll(".dir-age-save").forEach((btn) => {
@@ -8124,6 +8168,7 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "end-casual-session") setCasualSessionStatus("completed");
   else if (action === "reopen-casual-session") setCasualSessionStatus("casual");
   else if (action.startsWith("season-") || action.startsWith("team-")) lg("handleAction", action, btn);
+  else if (action.startsWith("scorers-") || action.startsWith("awards-")) aw("handleAction", action, btn);
 });
 document.getElementById("tourn-body").addEventListener("change", (e) => {
   if (e.target.id === "tourn-format") toggleTournamentGroupFields();
@@ -8290,6 +8335,7 @@ function renderTournamentBody() {
   const attendanceCard = TOURNAMENT_DATA.status !== "team-setup" ? renderTournamentAttendance() : "";
   const liveCard = tournCardHtml(TOURN_ICON.live, t("tournCardLiveTitle"), liveContent, "tourn-card-live");
   const standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), standingsContent, "tourn-card-standings");
+  const scorersCard = ["groups", "knockout", "completed"].includes(TOURNAMENT_DATA.status) ? tournCardHtml(TOURN_ICON.standings, t("scorersAwardsCardTitle"), aw("cardHtml") || "", "tourn-card-standings") : "";
 
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = tournamentFormatLabel(TOURNAMENT_DATA.format, TOURNAMENT_DATA);
@@ -8310,6 +8356,7 @@ function renderTournamentBody() {
     ${teamsCard}
     ${attendanceCard}
     ${liveCard}
+    ${scorersCard}
     ${standingsCard}
   `;
   refreshEditSetupPreview();
@@ -10068,6 +10115,7 @@ function renderPublicTournamentBody(tn, eventId) {
     ${notStartedHtml}
     ${groupsCard}
     ${bracketCard}
+    ${aw("publicHtml", tn) || ""}
     ${standingsCard}
     ${renderPublicAttendance(tn)}
   `;
@@ -10837,6 +10885,29 @@ function renderAgeGroupStatus() {
   const input = document.getElementById("mp-birthdate");
   if (input && document.activeElement !== input) input.value = (member && member.birthDate) || "";
 }
+
+function renderMyGenderInput() {
+  const sel = document.getElementById("mp-gender");
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  if (sel && member && document.activeElement !== sel) sel.value = member.gender || "";
+}
+document.getElementById("mp-gender-save").addEventListener("click", async () => {
+  const sel = document.getElementById("mp-gender");
+  const msg = document.getElementById("mp-gender-msg");
+  if (!sel.value) {
+    highlightMissingFields(["mp-gender"]);
+    return showMsg(msg, t("errGenderRequired"), false);
+  }
+  try {
+    const result = await api("/api/me/profile", { method: "PATCH", body: JSON.stringify({ gender: sel.value }) });
+    CURRENT_SESSION.member.gender = result.member.gender;
+    renderMyGenderInput();
+    if (typeof renderAttendeesChecklist === "function") renderAttendeesChecklist();
+    showMsg(msg, t("okGenderSaved"), true);
+  } catch (e) {
+    showMsg(msg, e.message, false);
+  }
+});
 
 function renderMyPhoneInput() {
   const input = document.getElementById("mp-phone");

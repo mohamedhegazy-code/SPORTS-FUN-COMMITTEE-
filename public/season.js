@@ -30,9 +30,24 @@ function matchRow(m) {
   const teams = m.tbd ? `<span class="tbd">${esc(T("seasonTbd"))}</span>` : `${esc(m.aLabel)} <span style="color:var(--muted)">–</span> ${esc(m.bLabel)}`;
   return `<tr><td>${esc(m.time || "")}</td><td>${m.court ? esc(T("courtLabel")) + " " + esc(m.court) : ""}</td><td>${esc(catName(m))}</td><td>${kindTag(m)}</td><td class="teams">${teams}</td><td>${resultHtml(m)}</td></tr>`;
 }
+const wt = (p) => (p.entrantLabel && p.entrantLabel !== p.name ? `${p.name} — ${p.entrantLabel}` : p.name);
+function awardsHtml(c) {
+  const aw = c.awards;
+  if (!aw) return "";
+  const top = (aw.topScorer || []).map((r) => `${r.name} (${r.goals})`).join("، ");
+  const lines = [
+    [T("awardTopScorer"), top],
+    [T("awardBestGoalkeeper"), aw.bestGoalkeeper ? wt(aw.bestGoalkeeper) : ""],
+    [T("awardBestPlayer"), aw.bestPlayer ? wt(aw.bestPlayer) : ""],
+    [T("awardFairPlay"), aw.fairPlay ? aw.fairPlay.label : ""],
+  ];
+  if (!lines.some((l) => l[1])) return "";
+  const scorers = (aw.topScorers || []).slice(0, 5).map((r, i) => `<tr><td>${i + 1}</td><td style="white-space:normal">${esc(r.name)}</td><td style="white-space:normal">${r.entrantLabel !== r.name ? esc(r.entrantLabel) : "—"}</td><td><strong>${r.goals}</strong></td></tr>`).join("");
+  return `<div class="awards"><h4>${esc(T("awardsCardTitle"))}</h4>${lines.map((l) => `<div class="award-line"><span>${esc(l[0])}</span><span>${l[1] ? esc(l[1]) : `<span class="tbd">${esc(T("awardNotSet"))}</span>`}</span></div>`).join("")}${scorers ? `<div class="rows"><table><thead><tr><th>#</th><th>${esc(T("colName"))}</th><th>${esc(T("scorersTeam"))}</th><th>${esc(T("scorersGoals"))}</th></tr></thead><tbody>${scorers}</tbody></table></div>` : ""}</div>`;
+}
 function standingsHtml(c) {
   const rows = (c.standings || []).map((s, i) => `<tr><td>${i + 1}</td><td style="white-space:normal">${esc(s.label)}</td><td>${s.played}</td><td>${s.gd}</td><td><strong>${s.points}</strong></td></tr>`).join("");
-  return `<div class="cat"><h3>${nameHtml(c)}</h3><div class="rows"><table><thead><tr><th>#</th><th>${esc(T("colName"))}</th><th>${esc(T("colPlayed"))}</th><th>${esc(T("colGD"))}</th><th>${esc(T("colPoints"))}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return `<div class="cat"><h3>${nameHtml(c)}</h3><div class="rows"><table><thead><tr><th>#</th><th>${esc(T("colName"))}</th><th>${esc(T("colPlayed"))}</th><th>${esc(T("colGD"))}</th><th>${esc(T("colPoints"))}</th></tr></thead><tbody>${rows}</tbody></table></div>${awardsHtml(c)}</div>`;
 }
 async function main() {
   const id = new URLSearchParams(location.search).get("event");
@@ -59,7 +74,7 @@ async function main() {
   }
   document.getElementById("subtitle").innerHTML = nameHtml(data);
   const dated = data.matches.filter((m) => m.date);
-  if (!dated.length) { body.innerHTML = `<div class="empty">${esc(T("seasonPageEmpty"))}</div>`; return; }
+  if (!dated.length && !(data.categories || []).length) { body.innerHTML = `<div class="empty">${esc(T("seasonPageEmpty"))}</div>`; return; }
   const days = [];
   for (const m of dated) {
     let d = days[days.length - 1];

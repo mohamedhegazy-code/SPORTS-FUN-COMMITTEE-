@@ -1677,3 +1677,18 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
   .admin-tourn-badges { grid-column: 1 / -1; grid-row: 2; }
 }
 .admin-tourn-name .lang-ar, .admin-tourn-name .lang-en { text-align: start; }
+
+/* Scorers & awards */
+.awards-sub { margin: 14px 0 6px; font-size: 0.85rem; color: var(--red-dark, #5c0000); }
+.awards-list { display: flex; flex-direction: column; gap: 6px; }
+.award-line { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.award-title { font-weight: 700; }
+.award-val.award-none { color: var(--muted); font-style: italic; }
+.awards-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.scorer-form { margin: 10px 0; }
+.scorer-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.scorer-side h5 { margin: 0 0 6px; }
+.scorer-score { color: var(--muted); font-weight: 400; margin-inline-start: 6px; }
+.scorer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.scorer-row input { width: 70px; margin: 0; padding: 4px 6px; }
+.gender-badge { background: #fbe9ef; color: #8b1a3d; }

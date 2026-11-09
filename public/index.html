@@ -269,6 +269,8 @@
         <label class="required-label" data-i18n="fieldBirthDateRequired">Date of birth</label>
         <input id="su-birthdate" type="date" min="1900-01-01" required />
         <p class="hint-note" data-i18n="birthDateHint">Your age and age group are calculated automatically from your date of birth, and update on their own every year.</p>
+        <label data-i18n="fieldGenderOptional">Gender (optional)</label>
+        <select id="su-gender"><option value="" data-i18n="genderSelect">Select gender</option><option value="male" data-i18n="genderMale">Male</option><option value="female" data-i18n="genderFemale">Female</option></select>
         <label data-i18n="fieldEmail">Email (optional)</label>
         <input id="su-email" type="email" placeholder="e.g. ahmed@example.com" />
         <label class="checkbox-row" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:0.85rem;">
@@ -436,6 +438,16 @@
       <div class="msg" id="mp-agegroup-msg"></div>
     </div>
 
+    <div class="card hidden" id="mp-gender-card">
+      <h2 data-i18n="mpGenderTitle">Gender</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="mpGenderIntro">Some events are limited by gender.</p>
+      <select id="mp-gender"><option value="" data-i18n="genderSelect">Select gender</option><option value="male" data-i18n="genderMale">Male</option><option value="female" data-i18n="genderFemale">Female</option></select>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button class="primary" id="mp-gender-save" data-i18n="btnSaveGender">Save gender</button>
+      </div>
+      <div class="msg" id="mp-gender-msg"></div>
+    </div>
+
     <div class="card hidden" id="mp-phone-card">
       <h2 data-i18n="phoneCardTitle">My mobile number</h2>
       <p style="color:var(--muted);font-size:0.85rem;" data-i18n="phoneCardIntro">Changed your number? Update it here so the club can reach you. Your family members' numbers are edited on each person in the My Family card below.</p>
@@ -492,6 +504,7 @@
           <label class="required-label" data-i18n="fieldBirthDateRequired">Date of birth</label>
           <input id="fam-birthdate" type="date" min="1900-01-01" />
         </div>
+        <div><label data-i18n="fieldGenderOptional">Gender (optional)</label><select id="fam-gender"><option value="" data-i18n="genderSelect">Select gender</option><option value="male" data-i18n="genderMale">Male</option><option value="female" data-i18n="genderFemale">Female</option></select></div>
         <div><label data-i18n="fieldFamilyMemberPhone">Mobile (optional)</label><input id="fam-phone" type="tel" /></div>
         <div><label data-i18n="fieldFamilyMemberEmail">Email (optional)</label><input id="fam-email" type="email" /></div>
       </div>
@@ -831,6 +844,7 @@
           <div class="grid-2 ev-season-fields">
             <div><label data-i18n="fieldBirthYearFrom">Born from year (optional)</label><input id="ev-birth-from" type="number" min="1900" max="2100" placeholder="2014" /></div>
             <div><label data-i18n="fieldBirthYearTo">Born up to year (optional)</label><input id="ev-birth-to" type="number" min="1900" max="2100" placeholder="2017" /></div>
+            <div><label data-i18n="fieldGenderRestriction">Open to (optional)</label><select id="ev-gender"><option value="" data-i18n="genderAny">Everyone</option><option value="female" data-i18n="genderFemaleOnly">Girls and women only</option><option value="male" data-i18n="genderMaleOnly">Boys and men only</option></select></div>
           </div>
           <p class="hint-note" data-i18n="birthYearHint">Limits registration to players born in these years - e.g. 2014 to 2017 for an age category. Leave both empty for no limit.</p>
           <label class="checkbox-row"><input type="checkbox" id="ev-team-on" /> <span data-i18n="fieldTeamReg">Players register as a team</span></label>
@@ -886,6 +900,7 @@
             <div class="grid-2 ev-season-fields">
               <div><label data-i18n="fieldBirthYearFrom">Born from year (optional)</label><input id="ev-edit-birth-from" type="number" min="1900" max="2100" placeholder="2014" /></div>
               <div><label data-i18n="fieldBirthYearTo">Born up to year (optional)</label><input id="ev-edit-birth-to" type="number" min="1900" max="2100" placeholder="2017" /></div>
+            <div><label data-i18n="fieldGenderRestriction">Open to (optional)</label><select id="ev-edit-gender"><option value="" data-i18n="genderAny">Everyone</option><option value="female" data-i18n="genderFemaleOnly">Girls and women only</option><option value="male" data-i18n="genderMaleOnly">Boys and men only</option></select></div>
             </div>
             <p class="hint-note" data-i18n="birthYearHint">Limits registration to players born in these years - e.g. 2014 to 2017 for an age category. Leave both empty for no limit.</p>
             <label class="checkbox-row"><input type="checkbox" id="ev-edit-team-on" /> <span data-i18n="fieldTeamReg">Players register as a team</span></label>
@@ -1964,5 +1979,6 @@
 <script src="jsQR.js"></script>
 <script src="app.js"></script>
 <script src="league.js"></script>
+<script src="awards.js"></script>
 </body>
 </html>
