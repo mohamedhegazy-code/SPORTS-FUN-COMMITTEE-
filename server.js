@@ -760,6 +760,9 @@ function readDb() {
   // for the full data model and bracket-math helpers.
   db.nextIds.tournament = db.nextIds.tournament || 1;
   db.tournaments = db.tournaments || [];
+  // Teams that players register as (events with team registration switched on).
+  db.nextIds.eventTeam = db.nextIds.eventTeam || 1;
+  db.eventTeams = db.eventTeams || [];
   // Global feature toggles the admin controls - currently just whether the
   // points system is surfaced to members at all. Points still accumulate
   // server-side either way; this only controls what members see.
@@ -2568,6 +2571,117 @@ function registrationFields(db, ev) {
   };
 }
 
+// ---- Eligibility by birth year + team registration settings -----------------
+// An event (typically one age category of a league) can be limited to a range
+// of birth years, e.g. 2014-2017. Either end may be left empty. The check runs
+// on the server at registration time; members without a birth date on file are
+// asked to add one first. Admin invites are not affected.
+function parseBirthYearValue(v) {
+  if (v === undefined || v === null || String(v).trim() === "") return null;
+  const n = Number(AgeUtils.toLatinDigits ? AgeUtils.toLatinDigits(v) : v);
+  if (!Number.isInteger(n) || n < 1900 || n > 2100) return undefined;
+  return n;
+}
+function parseEligibilityFields(body, current) {
+  const out = { birthYearFrom: current.birthYearFrom == null ? null : current.birthYearFrom, birthYearTo: current.birthYearTo == null ? null : current.birthYearTo };
+  for (const key of ["birthYearFrom", "birthYearTo"]) {
+    if (body[key] === undefined) continue;
+    const n = parseBirthYearValue(body[key]);
+    if (n === undefined) return { error: "Birth years must be empty or a year between 1900 and 2100" };
+    out[key] = n;
+  }
+  if (out.birthYearFrom !== null && out.birthYearTo !== null && out.birthYearFrom > out.birthYearTo) {
+    return { error: "The first birth year can't be later than the last birth year" };
+  }
+  return out;
+}
+function eligibilityProblem(ev, person) {
+  const from = ev.birthYearFrom == null ? null : ev.birthYearFrom;
+  const to = ev.birthYearTo == null ? null : ev.birthYearTo;
+  if (from === null && to === null) return null;
+  const bd = AgeUtils.parseBirthDate(person && person.birthDate);
+  if (!bd) {
+    return { code: "birthdate_required", from, to, error: "Please add the birth date on the profile first - this event is limited by birth year." };
+  }
+  const y = Number(bd.slice(0, 4));
+  if ((from !== null && y < from) || (to !== null && y > to)) {
+    return { code: "not_eligible", from, to, birthYear: y, error: `This event is for players born ${from !== null && to !== null ? `${from}-${to}` : from !== null ? `${from} or later` : `${to} or earlier`}.` };
+  }
+  return null;
+}
+// Team registration: players sign up as part of a team (a captain creates the
+// team, teammates join it). Capacity is counted in teams, and a team has a
+// minimum and maximum squad size. teamRegistration = null means ordinary
+// individual registration.
+function parseTeamSettings(body, current) {
+  if (body.teamRegistration === undefined) return { value: current || null };
+  if (String(body.teamRegistration) !== "true") return { value: null };
+  const num = (v, def, label, min) => {
+    if (v === undefined || v === null || String(v).trim() === "") return def;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < min || n > 200) return { error: `${label} must be a whole number of ${min} or more` };
+    return n;
+  };
+  const minPlayers = num(body.teamMinPlayers, 5, "Minimum players per team", 1);
+  if (minPlayers && minPlayers.error) return minPlayers;
+  const maxPlayers = num(body.teamMaxPlayers, 8, "Maximum players per team", 1);
+  if (maxPlayers && maxPlayers.error) return maxPlayers;
+  const maxTeams = num(body.teamMaxTeams, null, "Maximum teams", 1);
+  if (maxTeams && maxTeams.error) return maxTeams;
+  const minTeams = num(body.teamMinTeams, null, "Minimum teams", 1);
+  if (minTeams && minTeams.error) return minTeams;
+  if (minPlayers > maxPlayers) return { error: "Minimum players per team can't be more than the maximum" };
+  if (minTeams !== null && maxTeams !== null && minTeams > maxTeams) return { error: "Minimum teams can't be more than the maximum" };
+  return { value: { minPlayers, maxPlayers, maxTeams, minTeams } };
+}
+
+// Team helpers. A team belongs to one event; its players are ordinary
+// registrations carrying the team's id. A team is either confirmed or on the
+// waiting list as a whole (its players' registrations follow the team).
+function eventTeamsOf(db, eventId) {
+  return (db.eventTeams || []).filter((t) => t.eventId === eventId);
+}
+function teamRegistrations(db, teamId) {
+  return db.registrations.filter((r) => r.teamId === teamId);
+}
+function confirmedTeamCount(db, eventId) {
+  return eventTeamsOf(db, eventId).filter((t) => !t.waitlisted).length;
+}
+function waitlistedTeamCount(db, eventId) {
+  return eventTeamsOf(db, eventId).filter((t) => t.waitlisted).length;
+}
+function promoteTeam(db, team) {
+  team.waitlisted = false;
+  for (const r of teamRegistrations(db, team.id)) {
+    r.waitlisted = false;
+    r.whatsappConfirmedAt = null; r.whatsappReminderAt = null; r.whatsappDayOfAt = null;
+  }
+}
+// After a registration left a team event: hand the captaincy on if the captain
+// left, drop an empty team, and (when a confirmed team disappeared) bring in the
+// team that has waited longest. Returns the promoted team or null.
+function handleTeamRegistrationRemoved(db, event, reg) {
+  if (!reg.teamId) return null;
+  const team = (db.eventTeams || []).find((t) => t.id === reg.teamId);
+  if (!team) return null;
+  const rest = teamRegistrations(db, team.id).sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)));
+  if (rest.length) {
+    if (team.captainMembership === reg.membershipNumber && (team.captainDependentId || null) === (reg.dependentId || null)) {
+      team.captainMembership = rest[0].membershipNumber;
+      team.captainDependentId = rest[0].dependentId || null;
+    }
+    return null;
+  }
+  db.eventTeams = db.eventTeams.filter((t) => t.id !== team.id);
+  if (team.waitlisted) return null;
+  const max = event.teamRegistration && event.teamRegistration.maxTeams;
+  if (max !== null && max !== undefined && confirmedTeamCount(db, event.id) >= max) return null;
+  const next = eventTeamsOf(db, event.id).filter((t) => t.waitlisted).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+  if (!next) return null;
+  promoteTeam(db, next);
+  return next;
+}
+
 // ---- Event managers --------------------------------------------------------
 // A Tournament Manager (role "tournament") only works with the events an admin
 // assigned to them (event.managerUsernames, one or several managers per event;
@@ -2711,6 +2825,8 @@ app.get("/api/events", (req, res) => {
     managedByMe: viewer && viewer.role === "tournament" ? eventAccessCheck(db, viewer, ev.id).ok : undefined,
     confirmedCount: confirmedRegistrationCount(db, ev.id),
     waitlistCount: waitlistedRegistrationCount(db, ev.id),
+    teamCount: ev.teamRegistration ? confirmedTeamCount(db, ev.id) : undefined,
+    waitlistTeamCount: ev.teamRegistration ? waitlistedTeamCount(db, ev.id) : undefined,
     ...registrationFields(db, ev),
     // Lets the Register tab show the Women / Juniors ranking tick-boxes for
     // events that run a Swiss (chess) tournament.
@@ -2773,6 +2889,10 @@ app.post(
     // Manager creates is open as usual.
     const regSettings = parseRegistrationSettings(req.staff.role === "admin" ? registrationStatus : "open", registrationOpensAt);
     if (regSettings.error) return res.status(400).json({ error: regSettings.error });
+    const eligibility = parseEligibilityFields(req.body, {});
+    if (eligibility.error) return res.status(400).json({ error: eligibility.error });
+    const teamSettings = parseTeamSettings(req.body, null);
+    if (teamSettings.error) return res.status(400).json({ error: teamSettings.error });
     const parentCheck = validateParentEventId(db, null, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     if (parentCheck.parentEventId && req.staff.role === "tournament") {
@@ -2815,6 +2935,9 @@ app.post(
       allowMultipleActivities: String(allowMultipleActivities) === "true",
       registrationStatus: regSettings.status,
       registrationOpensAt: regSettings.opensAt,
+      birthYearFrom: eligibility.birthYearFrom,
+      birthYearTo: eligibility.birthYearTo,
+      teamRegistration: teamSettings.value,
       // Admin picks the managers; a Tournament Manager who creates an event
       // is automatically its manager.
       managerUsernames:
@@ -2901,6 +3024,10 @@ app.put(
     // Admin only; a Tournament Manager's edit never changes it.
     const regSettings = registrationStatus === undefined || req.staff.role !== "admin" ? null : parseRegistrationSettings(registrationStatus, registrationOpensAt);
     if (regSettings && regSettings.error) return res.status(400).json({ error: regSettings.error });
+    const eligibility = parseEligibilityFields(req.body, event);
+    if (eligibility.error) return res.status(400).json({ error: eligibility.error });
+    const teamSettings = parseTeamSettings(req.body, event.teamRegistration);
+    if (teamSettings.error) return res.status(400).json({ error: teamSettings.error });
     const parentCheck = validateParentEventId(db, event, parentEventId);
     if (!parentCheck.ok) return res.status(400).json({ error: parentCheck.error });
     event.nameEn = nameEn;
@@ -2921,6 +3048,9 @@ app.put(
       event.registrationStatus = regSettings.status;
       event.registrationOpensAt = regSettings.opensAt;
     }
+    event.birthYearFrom = eligibility.birthYearFrom;
+    event.birthYearTo = eligibility.birthYearTo;
+    event.teamRegistration = teamSettings.value;
     // Only an admin changes who manages the event; sending nothing leaves it as is.
     if (req.staff.role === "admin" && req.body.managerUsernames !== undefined) {
       event.managerUsernames = parseManagerUsernames(db, req.body.managerUsernames);
@@ -3039,6 +3169,9 @@ function planEventMerge(db, from, to) {
   if (eventHasChildren(db, from.id) || eventHasChildren(db, to.id)) {
     return { error: "An event day that has activities nested under it can't be merged - merge the individual activities instead.", status: 400 };
   }
+  if (from.teamRegistration || to.teamRegistration) {
+    return { error: "Events that register players in teams can't be merged.", status: 400 };
+  }
   for (const ev of [from, to]) {
     if (tournamentIsGenerated(findTournament(db, ev.id))) {
       return { error: `The tournament bracket of "${ev.nameEn}" has already been generated, so its registrations can't be moved.`, status: 400 };
@@ -3133,6 +3266,7 @@ app.delete("/api/events/:eventId", requireStaffRole("admin"), (req, res) => {
   }
   const removedRegistrations = db.registrations.filter((r) => r.eventId === eventId).length;
   db.registrations = db.registrations.filter((r) => r.eventId !== eventId);
+  db.eventTeams = (db.eventTeams || []).filter((t) => t.eventId !== eventId);
   db.events = db.events.filter((e) => e.id !== eventId);
   logActivity(db, {
     actorType: "staff",
@@ -3966,6 +4100,7 @@ app.get("/api/me/registrations", requireMember, async (req, res) => {
         return !!(tn && tn.format === "swiss");
       })(),
       categoriesLocked: tournamentIsGenerated(findTournament(db, r.eventId)),
+      teamName: r.teamId ? ((db.eventTeams || []).find((x) => x.id === r.teamId) || {}).name || null : null,
       points: registrationPoints(db, r),
       qrDataUrl: r.checkedIn || r.waitlisted ? null : await qrDataUrl(r), // no QR once checked in, or while still just a waitlist request
     }))
@@ -4027,7 +4162,11 @@ app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
   // been on the waiting list the longest, same effect as the admin's manual
   // "promote" action (see POST /api/admin/registrations/:id/promote above).
   let promoted = null;
-  if (!reg.waitlisted) {
+  let promotedTeam = null;
+  const teamEvent = db.events.find((e) => e.id === reg.eventId);
+  if (teamEvent && teamEvent.teamRegistration) {
+    promotedTeam = handleTeamRegistrationRemoved(db, teamEvent, reg);
+  } else if (!reg.waitlisted) {
     promoted = db.registrations
       .filter((r) => r.eventId === reg.eventId && r.waitlisted)
       .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
@@ -4044,7 +4183,7 @@ app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
     }`,
   });
   writeDb(db);
-  res.json({ ok: true, promoted: !!promoted });
+  res.json({ ok: true, promoted: !!promoted, promotedTeam: promotedTeam ? promotedTeam.name : null });
 });
 
 // This is the "online registration" endpoint: the logged-in member signs up
@@ -4087,6 +4226,18 @@ app.post("/api/register", requireMember, async (req, res) => {
     const dependent = (req.member.dependents || []).find((d) => d.id === normalizedDependentId);
     if (!dependent) return res.status(400).json({ error: "No such family member on your account" });
     dependentName = dependent.name;
+  }
+  // Limited to a range of birth years (an age category)?
+  const eligibility = eligibilityProblem(event, normalizedDependentId ? (req.member.dependents || []).find((d) => d.id === normalizedDependentId) : req.member);
+  if (eligibility) {
+    return res.status(eligibility.code === "birthdate_required" ? 400 : 403).json({
+      code: eligibility.code,
+      error: eligibility.error,
+      birthYearFrom: eligibility.from,
+      birthYearTo: eligibility.to,
+      birthYear: eligibility.birthYear || null,
+      attendeeName: dependentName || req.member.name,
+    });
   }
 
   const already = db.registrations.find(
@@ -4143,7 +4294,44 @@ app.post("/api/register", requireMember, async (req, res) => {
   // once that's full, new sign-ups need to explicitly opt into the waiting
   // list rather than silently becoming a confirmed spot (or a silent error).
   let isWaitlisted = false;
-  if (event.maxCapacity !== null && confirmedRegistrationCount(db, event.id) >= event.maxCapacity) {
+  let joinedTeam = null;
+  let newTeamName = "";
+  if (event.teamRegistration) {
+    // Team event: sign up by joining a team, or by starting one (becoming its
+    // captain). Capacity is counted in teams, not players.
+    const ts = event.teamRegistration;
+    const teamIdIn = req.body.teamId ? Number(req.body.teamId) : null;
+    newTeamName = typeof req.body.newTeamName === "string" ? req.body.newTeamName.trim().replace(/\s+/g, " ") : "";
+    if (teamIdIn) {
+      const team = (db.eventTeams || []).find((t) => t.id === teamIdIn && t.eventId === event.id);
+      if (!team) return res.status(404).json({ code: "team_not_found", error: "That team no longer exists - pick another team or start a new one." });
+      if (teamRegistrations(db, team.id).length >= ts.maxPlayers) {
+        return res.status(409).json({ code: "team_full", error: `This team already has the maximum of ${ts.maxPlayers} players.` });
+      }
+      joinedTeam = team;
+      isWaitlisted = !!team.waitlisted;
+    } else if (newTeamName) {
+      if (newTeamName.length < 2 || newTeamName.length > 40) {
+        return res.status(400).json({ code: "team_name_invalid", error: "The team name must be 2 to 40 characters." });
+      }
+      if (eventTeamsOf(db, event.id).some((t) => t.name.toLowerCase() === newTeamName.toLowerCase())) {
+        return res.status(409).json({ code: "team_name_taken", error: "Another team already uses this name - choose a different name." });
+      }
+      const teamsFull = ts.maxTeams !== null && ts.maxTeams !== undefined && confirmedTeamCount(db, event.id) >= ts.maxTeams;
+      if (teamsFull) {
+        if (!joinWaitlist) {
+          return res.status(200).json({
+            needsWaitlistConfirmation: true,
+            messageEn: "All team places for this event are taken. Would you like to put your team on the waiting list? A waiting-list place is not guaranteed - the committee will confirm your team if a place opens up.",
+            messageAr: "اكتمل عدد الفرق في هذه الفعالية. هل ترغب في وضع فريقك على قائمة الانتظار؟ الانضمام لقائمة الانتظار لا يضمن مكاناً - ستؤكد اللجنة فريقك في حال توفر مكان.",
+          });
+        }
+        isWaitlisted = true;
+      }
+    } else {
+      return res.status(400).json({ code: "team_required", error: "This event is played in teams - join a team or start a new one." });
+    }
+  } else if (event.maxCapacity !== null && confirmedRegistrationCount(db, event.id) >= event.maxCapacity) {
     if (!joinWaitlist) {
       return res.status(200).json({
         needsWaitlistConfirmation: true,
@@ -4158,6 +4346,18 @@ app.post("/api/register", requireMember, async (req, res) => {
 
   const registeredAt = new Date().toISOString();
   const earlyRegistration = event.earlyDeadline ? registeredAt <= event.earlyDeadline : false;
+  if (event.teamRegistration && !joinedTeam) {
+    joinedTeam = {
+      id: db.nextIds.eventTeam++,
+      eventId: event.id,
+      name: newTeamName,
+      captainMembership: membershipNumber,
+      captainDependentId: normalizedDependentId,
+      createdAt: registeredAt,
+      waitlisted: isWaitlisted,
+    };
+    db.eventTeams.push(joinedTeam);
+  }
 
   const registration = {
     id: db.nextIds.registration++,
@@ -4178,6 +4378,7 @@ app.post("/api/register", requireMember, async (req, res) => {
     catWomen: req.body.women === true,
     catJunior: req.body.junior === true,
   };
+  if (joinedTeam) registration.teamId = joinedTeam.id;
   db.registrations.push(registration);
   logActivity(db, {
     actorType: "member",
@@ -4192,6 +4393,7 @@ app.post("/api/register", requireMember, async (req, res) => {
   if (isWaitlisted) {
     return res.status(201).json({
       registration,
+      team: joinedTeam ? { id: joinedTeam.id, name: joinedTeam.name } : undefined,
       qrDataUrl: null,
       waitlisted: true,
       message: `${possessive} spot on the waiting list is confirmed. Check My Registrations for updates - you'll get a QR code here if a spot opens up.`,
@@ -4201,6 +4403,7 @@ app.post("/api/register", requireMember, async (req, res) => {
   const qr = await qrDataUrl(registration);
   res.status(201).json({
     registration,
+    team: joinedTeam ? { id: joinedTeam.id, name: joinedTeam.name } : undefined,
     qrDataUrl: qr,
     potentialPoints: potentialPoints(db, registration),
     message: earlyRegistration
@@ -4800,6 +5003,7 @@ app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]
   const reg = db.registrations.find((r) => r.id === id);
   if (!reg) return res.status(404).json({ error: "No such registration" });
   if (!reg.waitlisted) return res.status(400).json({ error: "This registration isn't on a waiting list" });
+  if (reg.teamId) return res.status(400).json({ code: "team_event", error: "This player is on a team that is on the waiting list - promote the whole team instead." });
   reg.waitlisted = false;
   // Any WhatsApp stamp from before the promotion no longer counts as a real
   // confirmation - the person is only confirmed from now on.
@@ -4834,7 +5038,11 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
   const attendeeName = reg.dependentName || (member ? member.name : reg.membershipNumber);
   db.registrations = db.registrations.filter((r) => r.id !== id);
   let promoted = null;
-  if (!reg.waitlisted) {
+  let promotedTeam = null;
+  const teamEvent = db.events.find((e) => e.id === reg.eventId);
+  if (teamEvent && teamEvent.teamRegistration) {
+    promotedTeam = handleTeamRegistrationRemoved(db, teamEvent, reg);
+  } else if (!reg.waitlisted) {
     promoted = db.registrations
       .filter((r) => r.eventId === reg.eventId && r.waitlisted)
       .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
@@ -4851,7 +5059,7 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
     }`,
   });
   writeDb(db);
-  res.json({ ok: true, promoted: !!promoted, attendeeName });
+  res.json({ ok: true, promoted: !!promoted, promotedTeam: promotedTeam ? promotedTeam.name : null, attendeeName });
 });
 
 // -------------------------------------------------------------------------
@@ -5923,6 +6131,12 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
   }
   const membershipNumbers = Array.isArray(req.body.membershipNumbers) ? req.body.membershipNumbers : [];
   if (!membershipNumbers.length) return res.status(400).json({ error: "membershipNumbers is required" });
+  // Team events: invited players must be placed in a team.
+  let inviteTeam = null;
+  if (event.teamRegistration) {
+    inviteTeam = (db.eventTeams || []).find((t) => t.id === Number(req.body.teamId) && t.eventId === eventId);
+    if (!inviteTeam) return res.status(400).json({ code: "team_required", error: "This event is played in teams - choose the team to add these players to." });
+  }
 
   const invited = [];
   const skipped = [];
@@ -5956,9 +6170,10 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
       position: null,
       checkedIn: false,
       checkInAt: null,
-      waitlisted: false,
+      waitlisted: inviteTeam ? !!inviteTeam.waitlisted : false,
       whatsappConfirmedAt: null,
     };
+    if (inviteTeam) registration.teamId = inviteTeam.id;
     db.registrations.push(registration);
     invited.push({ membershipNumber, name: member.name, registrationId: registration.id });
   });
@@ -6285,6 +6500,7 @@ function propagateKnockoutWinner(t, roundIndex, matchIndex, winnerId) {
 }
 
 function computeFinalStandings(t) {
+  if (t.finalsMode === "table") return computeTableFinalStandings(t);
   const rounds = t.knockout.rounds;
   const final = rounds[rounds.length - 1][0];
   const standings = [];
@@ -6303,6 +6519,26 @@ function computeFinalStandings(t) {
   }
   t.standings = standings;
   t.status = "completed";
+}
+
+// League with table finals: 1st/2nd from the final, 3rd/4th from the 3rd-place
+// match. The tournament is only "completed" once both matches are decided.
+function computeTableFinalStandings(t) {
+  const round = t.knockout.rounds[0];
+  const final = round.find((m) => m.place === 1);
+  const third = round.find((m) => m.place === 3);
+  const standings = [];
+  const other = (m) => (m.winnerId === m.a ? m.b : m.a);
+  if (final && final.winnerId) {
+    standings.push({ entrantId: final.winnerId, rank: 1 });
+    standings.push({ entrantId: other(final), rank: 2 });
+  }
+  if (third && third.winnerId) {
+    standings.push({ entrantId: third.winnerId, rank: 3 });
+    standings.push({ entrantId: other(third), rank: 4 });
+  }
+  t.standings = standings;
+  t.status = round.every((m) => m.winnerId) ? "completed" : "knockout";
 }
 
 // Group-stage -> knockout seeding: the plain seed order can put a group's
@@ -6482,6 +6718,28 @@ function scheduleKnockoutRounds(t) {
   t.estimatedFinishMinutes = slotStart;
 }
 
+// Gives every match of a single round-robin group a round number using the
+// circle method: with n teams (n+1 when odd, one sits out each round) there are
+// n-1 rounds and every team plays at most once per round. Match order and ids
+// are untouched, only a `round` field is added.
+function assignRoundNumbers(group) {
+  const ids = [...group.entrantIds];
+  if (ids.length < 2) return;
+  if (ids.length % 2) ids.push(null);
+  const n = ids.length;
+  const roundOf = {};
+  const key = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+  let ring = ids.slice();
+  for (let r = 1; r < n; r++) {
+    for (let i = 0; i < n / 2; i++) {
+      const a = ring[i], b = ring[n - 1 - i];
+      if (a !== null && b !== null) roundOf[key(a, b)] = r;
+    }
+    ring = [ring[0], ring[n - 1], ...ring.slice(1, n - 1)];
+  }
+  for (const m of group.matches) m.round = roundOf[key(m.a, m.b)] || null;
+}
+
 function buildGroups(t, orderedEntrantIds, numGroups) {
   const groups = Array.from({ length: numGroups }, () => ({ entrantIds: [], matches: [] }));
   orderedEntrantIds.forEach((id, i) => groups[i % numGroups].entrantIds.push(id));
@@ -6491,6 +6749,7 @@ function buildGroups(t, orderedEntrantIds, numGroups) {
         g.matches.push({ id: t.nextMatchId++, a: g.entrantIds[i], b: g.entrantIds[j], result: null, court: null, time: null });
       }
     }
+    assignRoundNumbers(g);
   }
   t.groups = groups;
   t.status = "groups";
@@ -6511,6 +6770,9 @@ function pointsConfigOf(t) {
     win: Number.isFinite(t.winPoints) ? t.winPoints : 3,
     draw: Number.isFinite(t.drawPoints) ? t.drawPoints : 1,
     loss: Number.isFinite(t.lossPoints) ? t.lossPoints : 0,
+    // League tournaments (table finals) break ties on points by the matches
+    // between the tied teams (head-to-head) before overall goal difference.
+    h2h: !!t.h2hTiebreak,
   };
 }
 function computeGroupStandings(group, seedOrder, points) {
@@ -6542,10 +6804,41 @@ function computeGroupStandings(group, seedOrder, points) {
       stat[loserId].points += pts.loss;
     }
   }
+  // Head-to-head (optional): among teams level on points, a mini-table made of
+  // only the matches between them decides first (points, then goal difference,
+  // then goals scored), and only after that the overall goal difference.
+  const h2hKey = {};
+  if (pts.h2h) {
+    const byPoints = {};
+    for (const id of group.entrantIds) (byPoints[stat[id].points] = byPoints[stat[id].points] || []).push(id);
+    for (const ids of Object.values(byPoints)) {
+      if (ids.length < 2) continue;
+      const set = new Set(ids);
+      const mini = {};
+      ids.forEach((id) => (mini[id] = { pts: 0, gf: 0, ga: 0 }));
+      for (const m of group.matches) {
+        if (!m.result || !set.has(m.a) || !set.has(m.b)) continue;
+        const sa = Number.isFinite(m.result.scoreA) ? m.result.scoreA : 0;
+        const sb = Number.isFinite(m.result.scoreB) ? m.result.scoreB : 0;
+        mini[m.a].gf += sa; mini[m.a].ga += sb;
+        mini[m.b].gf += sb; mini[m.b].ga += sa;
+        if (m.result.winnerId === null) { mini[m.a].pts += pts.draw; mini[m.b].pts += pts.draw; }
+        else {
+          const loserId = m.result.winnerId === m.a ? m.b : m.a;
+          mini[m.result.winnerId].pts += pts.win;
+          mini[loserId].pts += pts.loss;
+        }
+      }
+      for (const id of ids) h2hKey[id] = [mini[id].pts, mini[id].gf - mini[id].ga, mini[id].gf];
+    }
+  }
   return [...group.entrantIds]
     .sort((a, b) => {
       const sa = stat[a], sb = stat[b];
       if (sb.points !== sa.points) return sb.points - sa.points;
+      if (h2hKey[a] && h2hKey[b]) {
+        for (let i = 0; i < 3; i++) if (h2hKey[b][i] !== h2hKey[a][i]) return h2hKey[b][i] - h2hKey[a][i];
+      }
       const gda = sa.gf - sa.ga, gdb = sb.gf - sb.ga;
       if (gdb !== gda) return gdb - gda;
       if (sb.gf !== sa.gf) return sb.gf - sa.gf;
@@ -6808,6 +7101,7 @@ function serializeTournament(db, t, forPublic) {
     : null;
   const knockout = t.knockout
     ? {
+        finalsMode: t.finalsMode || null,
         rounds: t.knockout.rounds.map((round) =>
           round.map((m) => ({
             ...m,
@@ -6840,6 +7134,9 @@ function serializeTournament(db, t, forPublic) {
     format: t.format,
     numGroups: t.numGroups,
     advancePerGroup: t.advancePerGroup,
+    finalsMode: t.finalsMode || null,
+    h2hTiebreak: !!t.h2hTiebreak,
+    seasonSchedule: t.seasonSchedule || null,
     winPoints: pointsConfigOf(t).win,
     drawPoints: pointsConfigOf(t).draw,
     lossPoints: pointsConfigOf(t).loss,
@@ -6974,11 +7271,21 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), re
   }
   let numGroups = null;
   let advancePerGroup = null;
-  if (format === "groups") {
+  // "League with finals from the table": one round-robin table, then a final
+  // between 1st and 2nd and a 3rd-place match between 3rd and 4th, played
+  // straight from the table with no bracket. Ties on points use head-to-head.
+  const tableFinals = format === "groups" && String(req.body.finalsMode) === "table";
+  if (format === "groups" && tableFinals) {
+    numGroups = 1;
+    advancePerGroup = 4;
+  } else if (format === "groups") {
     numGroups = Number(req.body.numGroups);
     advancePerGroup = Number(req.body.advancePerGroup);
     if (!Number.isInteger(numGroups) || numGroups < 2) return res.status(400).json({ error: "numGroups must be a whole number of at least 2" });
     if (!Number.isInteger(advancePerGroup) || advancePerGroup < 1) return res.status(400).json({ error: "advancePerGroup must be a whole number of at least 1" });
+  }
+  if (String(req.body.finalsMode) === "table" && format !== "groups") {
+    return res.status(400).json({ error: "Finals from the table only apply to the league (groups) format" });
   }
   // Court/timing setup is entirely optional - fill in all three of
   // courts/matchMinutes/startTime to get an auto-generated schedule, or
@@ -7014,6 +7321,8 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), re
     drawPoints: setup.drawPoints,
     lossPoints: setup.lossPoints,
     availableHours: setup.availableHours,
+    finalsMode: tableFinals ? "table" : null,
+    h2hTiebreak: tableFinals || String(req.body.h2hTiebreak) === "true",
     courts,
     matchMinutes,
     startTime,
@@ -7128,6 +7437,7 @@ app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole(["tournamen
   const currentPts = pointsConfigOf(t);
   const setup = parseSetupFields(req.body, { winPoints: currentPts.win, drawPoints: currentPts.draw, lossPoints: currentPts.loss, availableHours: t.availableHours });
   if (setup.error) return res.status(400).json({ error: setup.error });
+  if (t.seasonSchedule) return res.status(400).json({ error: "This league is scheduled by the season scheduler - change its days and pitches there" });
   t.courts = courts;
   t.matchMinutes = matchMinutes;
   t.startTime = startTime;
@@ -7169,6 +7479,9 @@ app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tourname
   if (t.format === "groups") {
     if (entrants.length < t.numGroups * 2) {
       return res.status(400).json({ error: `Need at least ${t.numGroups * 2} entrants for ${t.numGroups} groups (2 per group minimum)` });
+    }
+    if (t.finalsMode === "table" && entrants.length < 4) {
+      return res.status(400).json({ error: "A league with a final and a 3rd-place match needs at least 4 teams" });
     }
     buildGroups(t, t.seedOrder, t.numGroups);
   } else {
@@ -7265,6 +7578,27 @@ function qualifiersFromGroups(t, standingsPerGroup) {
   return separateSameGroupFirstRound(qualifiers, groupOf, tierOf);
 }
 
+// League finals straight from the table: one round holding the Final (1st v
+// 2nd, place 1) and the 3rd-place match (3rd v 4th, place 3). Placing the
+// match on the date/time/pitch planned by the season scheduler is automatic.
+function buildTableFinals(t, orderedIds) {
+  const mk = (a, b, place) => ({ id: t.nextMatchId++, a, b, place, winnerId: null, scoreA: null, scoreB: null, note: "", bye: false, court: null, time: null, date: null });
+  const round = [mk(orderedIds[0], orderedIds[1], 1)];
+  if (orderedIds.length >= 4) round.push(mk(orderedIds[2], orderedIds[3], 3));
+  t.knockout = { rounds: [round] };
+  t.status = "knockout";
+  applyFinalsPlan(t);
+}
+function applyFinalsPlan(t) {
+  const plan = t.finalsPlan;
+  if (!plan || !t.knockout) return;
+  for (const m of t.knockout.rounds[0]) {
+    m.date = plan.date || null;
+    m.time = (m.place === 3 ? plan.thirdPlaceTime : plan.finalTime) || null;
+    m.court = plan.court || null;
+  }
+}
+
 app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
@@ -7289,9 +7623,19 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tourn
   // would silently disagree with the group tables.
   if (t.knockout) {
     const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)));
-    const nowQualified = new Set(qualifiersFromGroups(t, standingsPerGroup));
-    const inBracket = new Set(t.knockout.rounds[0].flatMap((m) => [m.a, m.b]).filter(Boolean));
-    const same = nowQualified.size === inBracket.size && [...nowQualified].every((id) => inBracket.has(id));
+    let same;
+    if (t.finalsMode === "table") {
+      // The final and 3rd-place pairings must still be exactly the same pairs.
+      const order = standingsPerGroup[0].map((s) => s.entrantId);
+      const pairKey = (x, y) => [x, y].sort().join("|");
+      const expected = new Set([pairKey(order[0], order[1]), order[3] ? pairKey(order[2], order[3]) : null].filter(Boolean));
+      const actual = new Set(t.knockout.rounds[0].map((m) => pairKey(m.a, m.b)));
+      same = expected.size === actual.size && [...expected].every((k) => actual.has(k));
+    } else {
+      const nowQualified = new Set(qualifiersFromGroups(t, standingsPerGroup));
+      const inBracket = new Set(t.knockout.rounds[0].flatMap((m) => [m.a, m.b]).filter(Boolean));
+      same = nowQualified.size === inBracket.size && [...nowQualified].every((id) => inBracket.has(id));
+    }
     if (!same) {
       match.result = previous;
       return res.status(400).json({ error: "The knockout stage was already drawn from these group tables - this correction would change who qualifies. Delete and recreate the tournament if the result really has to change." });
@@ -7336,6 +7680,11 @@ app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole([
     return res.status(400).json({ error: `${undecided} group-stage match(es) still need a result before the knockout stage can be generated` });
   }
   const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)));
+  if (t.finalsMode === "table") {
+    buildTableFinals(t, standingsPerGroup[0].map((s) => s.entrantId));
+    writeDb(db);
+    return res.json({ tournament: serializeTournament(db, t) });
+  }
   const qualifiers = qualifiersFromGroups(t, standingsPerGroup);
   if (qualifiers.length < 2) return res.status(400).json({ error: "Not enough qualifiers to build a knockout stage" });
   buildKnockoutRounds(t, qualifiers);
@@ -7425,6 +7774,369 @@ app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tour
   t.pointsAwardedAt = new Date().toISOString();
   writeDb(db);
   res.json({ updated, tournament: serializeTournament(db, t) });
+});
+
+// ---- Season scheduler (several leagues sharing the same pitches) -------------
+// A season (e.g. the Ahlawy 120 league) runs several age categories, each its
+// own event with its own league table, over several Saturdays on a limited
+// number of pitches. The scheduler places every unplayed league match of the
+// chosen events into dated time slots: round by round, categories interleaved,
+// never two matches of one team in the same slot, at most N matches per team
+// per day, and (where possible) a rest slot between a team's matches. It also
+// reserves the date, times and pitch of each league's 3rd-place match and Final
+// so they are filled in automatically as soon as the finals are drawn.
+const SEASON_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SEASON_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+function isRealIsoDate(d) {
+  if (!SEASON_DATE_RE.test(String(d))) return false;
+  const dt = new Date(String(d) + "T00:00:00Z");
+  return !Number.isNaN(dt.getTime()) && dt.toISOString().slice(0, 10) === d;
+}
+function planSeasonSchedule(tournaments, cfg) {
+  const step = cfg.matchMinutes + cfg.gapMinutes;
+  const k = (t, id) => t.id + ":" + id;
+  const perDay = {};
+  const bump = (date, key) => {
+    perDay[date] = perDay[date] || {};
+    perDay[date][key] = (perDay[date][key] || 0) + 1;
+  };
+  const queue = [];
+  let maxRound = 0;
+  for (const t of tournaments) for (const g of t.groups) for (const m of g.matches) maxRound = Math.max(maxRound, m.round || 0);
+  for (let r = 1; r <= maxRound + 1; r++) {
+    for (const t of tournaments) {
+      for (const g of t.groups) {
+        for (const m of g.matches) {
+          const rr = m.round || maxRound + 1;
+          if (rr !== r) continue;
+          if (m.result) {
+            if (m.date) { bump(m.date, k(t, m.a)); bump(m.date, k(t, m.b)); }
+            continue;
+          }
+          queue.push({ t, m });
+        }
+      }
+    }
+  }
+  const assignments = [];
+  const lastEnd = {};
+  for (const day of cfg.days) {
+    let prevBusy = new Set();
+    for (let slot = 0; slot < day.slots; slot++) {
+      const start = timeStrToMinutes(day.startTime) + slot * step;
+      const busy = new Set();
+      for (let court = 1; court <= day.pitches; court++) {
+        const free = (q, strict) => {
+          const ka = k(q.t, q.m.a), kb = k(q.t, q.m.b);
+          if (busy.has(ka) || busy.has(kb)) return false;
+          const cnt = perDay[day.date] || {};
+          if ((cnt[ka] || 0) >= cfg.maxPerTeamPerDay || (cnt[kb] || 0) >= cfg.maxPerTeamPerDay) return false;
+          if (strict && (prevBusy.has(ka) || prevBusy.has(kb))) return false;
+          return true;
+        };
+        let idx = queue.findIndex((q) => free(q, true));
+        if (idx === -1) idx = queue.findIndex((q) => free(q, false));
+        if (idx === -1) break;
+        const q = queue.splice(idx, 1)[0];
+        const ka = k(q.t, q.m.a), kb = k(q.t, q.m.b);
+        busy.add(ka); busy.add(kb);
+        bump(day.date, ka); bump(day.date, kb);
+        assignments.push({ match: q.m, date: day.date, time: minutesToTimeStr(start), court });
+        lastEnd[day.date] = Math.max(lastEnd[day.date] || 0, start + cfg.matchMinutes);
+      }
+      prevBusy = busy;
+    }
+  }
+  return { assignments, unscheduled: queue.length, lastEnd };
+}
+function parseSeasonConfig(body) {
+  const num = (v, def, min, max, label) => {
+    if (v === undefined || v === null || v === "") return def;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < min || n > max) return { error: `${label} must be a whole number from ${min} to ${max}` };
+    return n;
+  };
+  const matchMinutes = num(body.matchMinutes, 30, 1, 300, "Minutes per match");
+  if (matchMinutes.error) return matchMinutes;
+  const gapMinutes = num(body.gapMinutes, 5, 0, 120, "Minutes between matches");
+  if (gapMinutes.error) return gapMinutes;
+  const maxPerTeamPerDay = num(body.maxPerTeamPerDay, 2, 1, 10, "Matches per team per day");
+  if (maxPerTeamPerDay.error) return maxPerTeamPerDay;
+  if (!Array.isArray(body.days) || !body.days.length) return { error: "Add at least one match day" };
+  const days = [];
+  const seen = new Set();
+  for (const raw of body.days) {
+    const date = raw && raw.date;
+    if (!isRealIsoDate(date)) return { error: "Each match day needs a valid date (YYYY-MM-DD)" };
+    if (seen.has(date)) return { error: `The date ${date} is listed twice` };
+    seen.add(date);
+    const pitches = num(raw.pitches, undefined, 1, 30, "Pitches");
+    if (pitches === undefined || pitches.error) return { error: `Pitches on ${date} must be a whole number from 1 to 30` };
+    const slots = num(raw.slots, undefined, 1, 40, "Time slots");
+    if (slots === undefined || slots.error) return { error: `Time slots on ${date} must be a whole number from 1 to 40` };
+    if (!SEASON_TIME_RE.test(String(raw.startTime || ""))) return { error: `Start time on ${date} must be HH:MM` };
+    days.push({ date, pitches, slots, startTime: raw.startTime });
+  }
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  let finals = null;
+  if (body.finals) {
+    const f = body.finals;
+    if (!isRealIsoDate(f.date)) return { error: "The finals day needs a valid date (YYYY-MM-DD)" };
+    if (!SEASON_TIME_RE.test(String(f.thirdPlaceTime || "")) || !SEASON_TIME_RE.test(String(f.finalTime || ""))) {
+      return { error: "The 3rd-place and Final start times must be HH:MM" };
+    }
+    if (timeStrToMinutes(f.thirdPlaceTime) + matchMinutes > timeStrToMinutes(f.finalTime)) {
+      return { error: "The 3rd-place match must finish before the Final starts" };
+    }
+    let pitchList = [];
+    if (Array.isArray(f.pitches) && f.pitches.length) {
+      pitchList = f.pitches.map(Number);
+      if (!pitchList.every((n) => Number.isInteger(n) && n >= 1 && n <= 30)) return { error: "Finals pitches must be pitch numbers from 1 to 30" };
+    }
+    finals = { date: f.date, thirdPlaceTime: f.thirdPlaceTime, finalTime: f.finalTime, pitches: pitchList };
+  }
+  return { matchMinutes, gapMinutes, maxPerTeamPerDay, days, finals };
+}
+app.post("/api/admin/season-schedule", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const ids = Array.isArray(req.body.eventIds) ? [...new Set(req.body.eventIds.map(Number))] : [];
+  if (!ids.length || !ids.every((n) => Number.isInteger(n) && n > 0)) return res.status(400).json({ error: "Choose at least one league" });
+  const tournaments = [];
+  for (const id of ids) {
+    const access = eventAccessCheck(db, req.staff, id);
+    if (!access.ok) return res.status(403).json({ error: access.error });
+    const ev = db.events.find((e) => e.id === id);
+    const t = findTournament(db, id);
+    if (!ev || !t) return res.status(400).json({ error: `Event ${id} has no tournament yet` });
+    if (t.format !== "groups" || !t.groups) return res.status(400).json({ error: `${ev.nameEn}: generate the league first (round-robin matches are needed to schedule)` });
+    tournaments.push(t);
+  }
+  const cfg = parseSeasonConfig(req.body);
+  if (cfg.error) return res.status(400).json({ error: cfg.error });
+  const plan = planSeasonSchedule(tournaments, cfg);
+  if (plan.unscheduled > 0) {
+    const capacity = cfg.days.reduce((sum, d) => sum + d.pitches * d.slots, 0);
+    return res.status(400).json({
+      code: "not_enough_capacity",
+      error: `${plan.unscheduled} match(es) don't fit in the days given. Add a day, a pitch or more time slots, or allow more matches per team per day.`,
+      unscheduled: plan.unscheduled,
+      capacity,
+    });
+  }
+  // The finals day: pitches and times must not clash with league matches.
+  let finalsPitches = [];
+  if (cfg.finals) {
+    finalsPitches = cfg.finals.pitches.length ? cfg.finals.pitches : tournaments.map((_, i) => i + 1);
+    if (new Set(finalsPitches).size < tournaments.length) {
+      return res.status(400).json({ error: "Give each league its own pitch for the 3rd-place match and the Final (or they would clash)" });
+    }
+    const day = cfg.days.find((d) => d.date === cfg.finals.date);
+    if (day && finalsPitches.some((n) => n > day.pitches)) return res.status(400).json({ error: `There are only ${day.pitches} pitches on ${day.date}` });
+    if (day && plan.lastEnd[day.date] !== undefined && timeStrToMinutes(cfg.finals.thirdPlaceTime) < plan.lastEnd[day.date]) {
+      return res.status(400).json({ error: `The 3rd-place matches would start before the last league match ends (${minutesToTimeStr(plan.lastEnd[day.date])}) on ${day.date}` });
+    }
+  }
+  if (String(req.body.dryRun) === "true") {
+    return res.json({ ok: true, dryRun: true, scheduled: plan.assignments.length, lastEnd: Object.fromEntries(Object.entries(plan.lastEnd).map(([d, m]) => [d, minutesToTimeStr(m)])) });
+  }
+  for (const t of tournaments) {
+    for (const g of t.groups) for (const m of g.matches) if (!m.result) { m.date = null; m.time = null; m.court = null; }
+  }
+  for (const a of plan.assignments) { a.match.date = a.date; a.match.time = a.time; a.match.court = a.court; }
+  tournaments.forEach((t, i) => {
+    t.seasonSchedule = { matchMinutes: cfg.matchMinutes, gapMinutes: cfg.gapMinutes, maxPerTeamPerDay: cfg.maxPerTeamPerDay, days: cfg.days, finals: cfg.finals, updatedAt: new Date().toISOString() };
+    if (cfg.finals) {
+      t.finalsPlan = { date: cfg.finals.date, thirdPlaceTime: cfg.finals.thirdPlaceTime, finalTime: cfg.finals.finalTime, court: finalsPitches[i] };
+      applyFinalsPlan(t);
+    } else {
+      t.finalsPlan = null;
+    }
+  });
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "season_scheduled", details: `${tournaments.length} league(s), ${plan.assignments.length} matches` });
+  writeDb(db);
+  res.json({ ok: true, scheduled: plan.assignments.length, lastEnd: Object.fromEntries(Object.entries(plan.lastEnd).map(([d, m]) => [d, minutesToTimeStr(m)])) });
+});
+
+// Public: every dated match of a season (the parent event's activities, or one
+// event on its own), ready to show as a calendar by day, time and pitch.
+app.get("/api/season/:eventId", (req, res) => {
+  const db = readDb();
+  const parent = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!parent) return res.status(404).json({ error: "No such event" });
+  const kids = db.events.filter((e) => e.parentEventId === parent.id);
+  const events = kids.length ? kids : [parent];
+  const matches = [];
+  const categories = [];
+  for (const ev of events) {
+    const t = findTournament(db, ev.id);
+    if (!t || (!t.groups && !t.knockout)) continue;
+    const ser = serializeTournament(db, t, true);
+    categories.push({
+      eventId: ev.id, nameEn: ev.nameEn, nameAr: ev.nameAr || "", birthYearFrom: ev.birthYearFrom == null ? null : ev.birthYearFrom, birthYearTo: ev.birthYearTo == null ? null : ev.birthYearTo,
+      status: ser.status, finalsMode: ser.finalsMode, standings: ser.groups && ser.groups[0] ? ser.groups[0].standings : [], finalStandings: ser.standings,
+    });
+    for (const g of ser.groups || []) {
+      for (const m of g.matches) {
+        matches.push({ eventId: ev.id, eventNameEn: ev.nameEn, eventNameAr: ev.nameAr || "", kind: "league", round: m.round || null, date: m.date || null, time: m.time || null, court: m.court || null, aLabel: m.aLabel, bLabel: m.bLabel, result: m.result ? { scoreA: m.result.scoreA, scoreB: m.result.scoreB } : null });
+      }
+    }
+    if (ser.knockout) {
+      for (const round of ser.knockout.rounds) {
+        for (const m of round) {
+          if (m.bye) continue;
+          matches.push({ eventId: ev.id, eventNameEn: ev.nameEn, eventNameAr: ev.nameAr || "", kind: m.place === 3 ? "third" : "final", round: null, date: m.date || null, time: m.time || null, court: m.court || null, aLabel: m.aLabel, bLabel: m.bLabel, result: m.winnerId ? { scoreA: m.scoreA, scoreB: m.scoreB, winnerId: m.winnerId } : null });
+        }
+      }
+    }
+  }
+  // Reserved (not yet drawn) finals show up as "to be decided" lines.
+  for (const ev of events) {
+    const t = findTournament(db, ev.id);
+    if (t && t.finalsPlan && !t.knockout) {
+      for (const kind of ["third", "final"]) {
+        matches.push({ eventId: ev.id, eventNameEn: ev.nameEn, eventNameAr: ev.nameAr || "", kind, round: null, date: t.finalsPlan.date, time: kind === "third" ? t.finalsPlan.thirdPlaceTime : t.finalsPlan.finalTime, court: t.finalsPlan.court, aLabel: null, bLabel: null, result: null, tbd: true });
+      }
+    }
+  }
+  matches.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || (a.time || "99").localeCompare(b.time || "99") || (a.court || 0) - (b.court || 0));
+  res.json({ eventId: parent.id, nameEn: parent.nameEn, nameAr: parent.nameAr || "", categories, matches });
+});
+
+// ---- Team registration endpoints ----------------------------------------------
+// Public: the teams of an event (names and squad sizes only - never player names)
+// so the Register tab can offer "join a team".
+app.get("/api/events/:eventId/teams", (req, res) => {
+  const db = readDb();
+  const ev = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!ev) return res.status(404).json({ error: "No such event" });
+  const ts = ev.teamRegistration;
+  if (!ts) return res.json({ teamRegistration: null, teams: [] });
+  const teams = eventTeamsOf(db, ev.id)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .map((t) => {
+      const n = teamRegistrations(db, t.id).length;
+      return { id: t.id, name: t.name, playerCount: n, maxPlayers: ts.maxPlayers, full: n >= ts.maxPlayers, waitlisted: !!t.waitlisted };
+    });
+  res.json({ teamRegistration: ts, confirmedTeams: confirmedTeamCount(db, ev.id), waitlistedTeams: waitlistedTeamCount(db, ev.id), teams });
+});
+
+function teamForStaff(req, res) {
+  const team = (req.db.eventTeams || []).find((t) => t.id === Number(req.params.id));
+  if (!team) { res.status(404).json({ error: "No such team" }); return null; }
+  const access = eventAccessCheck(req.db, req.staff, team.eventId);
+  if (!access.ok) { res.status(403).json({ error: access.error }); return null; }
+  return team;
+}
+
+app.get("/api/admin/events/:eventId/teams", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const ev = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!ev) return res.status(404).json({ error: "No such event" });
+  const ts = ev.teamRegistration;
+  if (!ts) return res.json({ teamRegistration: null, teams: [] });
+  const teams = eventTeamsOf(db, ev.id)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .map((t) => {
+      const players = teamRegistrations(db, t.id).sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt))).map((r) => {
+        const m = db.members[r.membershipNumber];
+        return {
+          registrationId: r.id,
+          name: r.dependentName || (m ? m.name : r.membershipNumber),
+          membershipNumber: r.membershipNumber,
+          checkedIn: !!r.checkedIn,
+          isCaptain: t.captainMembership === r.membershipNumber && (t.captainDependentId || null) === (r.dependentId || null),
+        };
+      });
+      return { id: t.id, name: t.name, waitlisted: !!t.waitlisted, createdAt: t.createdAt, players, playerCount: players.length, complete: players.length >= ts.minPlayers, full: players.length >= ts.maxPlayers };
+    });
+  const confirmed = teams.filter((t) => !t.waitlisted).length;
+  res.json({
+    teamRegistration: ts,
+    confirmedTeams: confirmed,
+    waitlistedTeams: teams.length - confirmed,
+    belowMinTeams: ts.minTeams ? confirmed < ts.minTeams : false,
+    teams,
+  });
+});
+
+app.put("/api/admin/event-teams/:id", requireStaffRole(["tournament"]), (req, res) => {
+  const team = teamForStaff(req, res);
+  if (!team) return;
+  const name = typeof req.body.name === "string" ? req.body.name.trim().replace(/\s+/g, " ") : "";
+  if (name.length < 2 || name.length > 40) return res.status(400).json({ error: "The team name must be 2 to 40 characters." });
+  if (eventTeamsOf(req.db, team.eventId).some((t) => t.id !== team.id && t.name.toLowerCase() === name.toLowerCase())) {
+    return res.status(409).json({ error: "Another team already uses this name" });
+  }
+  const tn = findTournament(req.db, team.eventId);
+  if (tournamentIsGenerated(tn)) return res.status(400).json({ error: "The tournament is already generated - team names are locked" });
+  team.name = name;
+  writeDb(req.db);
+  res.json({ ok: true, team });
+});
+
+app.post("/api/admin/event-teams/:id/promote", requireStaffRole(["tournament"]), (req, res) => {
+  const team = teamForStaff(req, res);
+  if (!team) return;
+  if (!team.waitlisted) return res.status(400).json({ error: "This team isn't on the waiting list" });
+  promoteTeam(req.db, team);
+  writeDb(req.db);
+  res.json({ ok: true, team });
+});
+
+app.post("/api/admin/event-teams/:id/remove", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const team = teamForStaff(req, res);
+  if (!team) return;
+  const reason = String(req.body.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Please enter a reason for removing this team" });
+  const event = db.events.find((e) => e.id === team.eventId);
+  const tn = findTournament(db, team.eventId);
+  if (tournamentIsGenerated(tn) && !team.waitlisted) {
+    return res.status(400).json({ error: "This event's tournament has already been generated - the team can't be removed safely now." });
+  }
+  const regs = teamRegistrations(db, team.id);
+  const regIds = new Set(regs.map((r) => r.id));
+  db.registrations = db.registrations.filter((r) => !regIds.has(r.id));
+  db.eventTeams = db.eventTeams.filter((t) => t.id !== team.id);
+  let promoted = null;
+  if (!team.waitlisted && event && event.teamRegistration) {
+    const max = event.teamRegistration.maxTeams;
+    if (max === null || max === undefined || confirmedTeamCount(db, event.id) < max) {
+      const next = eventTeamsOf(db, event.id).filter((t) => t.waitlisted).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+      if (next) { promoteTeam(db, next); promoted = next; }
+    }
+  }
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "team_removed", details: `${team.name} (${regs.length} players) - ${event ? event.nameEn : "Event"} - reason: ${reason}${promoted ? ` - waiting-list team ${promoted.name} promoted` : ""}` });
+  writeDb(db);
+  res.json({ ok: true, removedPlayers: regs.length, promotedTeam: promoted ? promoted.name : null });
+});
+
+// Fills a team-mode tournament's teams from the event's confirmed registered
+// teams. Teams below the minimum squad size are left out unless asked for.
+app.post("/api/admin/tournaments/:eventId/import-teams", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const eventId = Number(req.params.eventId);
+  const ev = db.events.find((e) => e.id === eventId);
+  const t = findTournament(db, eventId);
+  if (!ev || !t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.mode !== "team") return res.status(400).json({ error: "This tournament is not in team mode" });
+  if (!ev.teamRegistration) return res.status(400).json({ error: "This event doesn't use team registration" });
+  if (tournamentIsGenerated(t)) return res.status(400).json({ error: "The tournament is already generated - teams are locked" });
+  const include = String(req.body.includeIncomplete) === "true";
+  const teams = [];
+  const skipped = [];
+  for (const et of eventTeamsOf(db, eventId).filter((x) => !x.waitlisted).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
+    const regs = teamRegistrations(db, et.id).filter((r) => !r.waitlisted);
+    if (regs.length < ev.teamRegistration.minPlayers && !include) { skipped.push({ name: et.name, players: regs.length, minPlayers: ev.teamRegistration.minPlayers }); continue; }
+    if (!regs.length) continue;
+    teams.push({ id: "team" + (teams.length + 1), name: et.name, memberIds: regs.map((r) => r.id), eventTeamId: et.id });
+  }
+  if (teams.length < 2) return res.status(400).json({ error: "At least 2 complete teams are needed to continue", skipped });
+  t.teams = teams;
+  t.status = t.format === "casual" ? "casual" : "seeding";
+  reconcileSeedOrder(db, t);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t), skipped });
 });
 
 // ---- Swiss endpoints -----------------------------------------------------

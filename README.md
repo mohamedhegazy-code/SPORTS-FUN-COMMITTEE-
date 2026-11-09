@@ -582,6 +582,24 @@ automatically), not inside `data/db.json` — keeps the JSON store small.
 Back up that `uploads` folder alongside `db.json` if you want event photos
 included in your backups.
 
+## Leagues & seasons (Ahlawy 120 football season)
+
+Built for a multi-category league played over several days on shared pitches.
+
+**Eligibility by birth year.** Add/Edit Event has *Born from year* / *Born to year*. A member (or family member) outside the range is refused at sign-up (HTTP 403 `not_eligible`); someone with no birth date gets `birthdate_required`. The Register tab greys out ineligible attendees and shows the range on every activity card.
+
+**Team registration.** Tick *Players register as a team* on an event and set squad min/max, max teams and (optionally) min teams. A captain starts a team by name; others join it from the Register tab. Capacity and the waiting list are counted in whole teams: a full league puts the *team* on the waiting list, and when a registered team withdraws the longest-waiting team is promoted. If the captain leaves, captaincy passes to the next player. Admin sees every team in the tournament panel (rename, promote, remove with a reason).
+
+**League with Final & 3rd-place match.** In the tournament panel choose *League* (one table, round-robin). Points 3/1/0; ties are broken by head-to-head among the tied teams, then goal difference, goals scored, seed. The Final (1st v 2nd) and 3rd-place match (3rd v 4th) are drawn from the table once the league is done. Placings 1–4 feed the usual award-points action. Existing tournaments are not affected (head-to-head is opt-in per tournament).
+
+**Season scheduler (shared pitches, several days).** Under the League panel, *Season schedule* lays every category's matches over dated days: per day set the date, number of pitches, first kick-off and number of slots; also match length, gap and max matches per team per day. Reserve the finals day (3rd-place and Final times, pitches). *Check* is a dry run that reports any shortfall in capacity; *Apply* writes date/time/pitch on every match. Played matches keep their slot when you re-run it. The old single-day scheduler is disabled on a league that has a season schedule.
+
+**Public season calendar.** `/season.html?event=<parent event id>` (add `&lang=en`) lists matches by day with results, the reserved finals ("to be decided") and each category's table. No login. The Tournaments tab links to it, and the live board (`/matches.html`) shows only today's dated matches.
+
+**Modelling the season.** Create a parent event "Ahlawy 120"; under it one league activity per age category with its birth-year range and team settings (squad 5-8, max 6 teams, min 4); create a *League* tournament on each; once teams have registered, *Import teams* then *Season schedule*.
+
+Tests: `loadtest/league_e2e.js` (eligibility, league and finals, season scheduler, teams).
+
 ## Admin: Branding (colors & logo)
 
 A "Branding" card near the top of the Admin tab lets the committee set a
