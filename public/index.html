@@ -318,6 +318,7 @@
 
       <label data-i18n="whoAttending">Who's attending?</label>
       <div id="reg-attendees-list"></div>
+      <div id="reg-team-box" class="reg-team-box hidden"></div>
       <p class="hint-note" data-i18n="manageFamilyHint">Want to register a family member? Add them under Member Profile → My Family, then come back here.</p>
       <p class="hint-note"><a href="#" class="howto-link" data-howto="register-family" data-i18n="howToLinkRegisterFamily">▶ Watch how to register family members for an event</a></p>
 
@@ -823,6 +824,19 @@
           </div>
           <p class="hint-note" data-i18n="coverVideoHint">Plays instead of the cover photo on the event's details page - the photo still shows as the card thumbnail and as a fallback while the video loads. Up to 60MB; a short, compressed clip works best.</p>
           <p class="hint-note admin-full-only" data-i18n="regStatusHint">"Opens soon" shows a "registration opens soon" notice on the portal instead of the Register button; the event itself stays visible. Pick a time to open it by itself, or leave it empty and open it with the button on the Event dashboard. On an event day this applies to all of its activities.</p>
+          <div class="grid-2 ev-season-fields">
+            <div><label data-i18n="fieldBirthYearFrom">Born from year (optional)</label><input id="ev-birth-from" type="number" min="1900" max="2100" placeholder="2014" /></div>
+            <div><label data-i18n="fieldBirthYearTo">Born up to year (optional)</label><input id="ev-birth-to" type="number" min="1900" max="2100" placeholder="2017" /></div>
+          </div>
+          <p class="hint-note" data-i18n="birthYearHint">Limits registration to players born in these years - e.g. 2014 to 2017 for an age category. Leave both empty for no limit.</p>
+          <label class="checkbox-row"><input type="checkbox" id="ev-team-on" /> <span data-i18n="fieldTeamReg">Players register as a team</span></label>
+          <div class="grid-2 hidden" id="ev-team-fields">
+            <div><label data-i18n="fieldTeamMinPlayers">Minimum players per team</label><input id="ev-team-min" type="number" min="1" value="5" /></div>
+            <div><label data-i18n="fieldTeamMaxPlayers">Maximum players per team</label><input id="ev-team-max" type="number" min="1" value="8" /></div>
+            <div><label data-i18n="fieldTeamMaxTeams">Maximum teams (optional)</label><input id="ev-team-maxteams" type="number" min="1" /></div>
+            <div><label data-i18n="fieldTeamMinTeams">Minimum teams to hold it (optional)</label><input id="ev-team-minteams" type="number" min="1" /></div>
+          </div>
+          <p class="hint-note hidden" id="ev-team-hint" data-i18n="teamRegHint">A captain starts a team and teammates join it. Places are counted in teams.</p>
           <p class="hint-note" data-i18n="capacityHint">Leave either blank for no limit. Minimum is just a target shown on the dashboard — it never blocks sign-ups. Once maximum is reached, new registrants are offered a waiting list instead.</p>
           <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
           <div class="admin-full-only ev-managers-block">
@@ -865,6 +879,19 @@
               <div><label data-i18n="fieldParentEvent">Parent event (optional)</label><select id="ev-edit-parent-event"></select></div>
             </div>
             <p class="hint-note admin-full-only" data-i18n="regStatusHint">"Opens soon" shows a "registration opens soon" notice on the portal instead of the Register button; the event itself stays visible. Pick a time to open it by itself, or leave it empty and open it with the button on the Event dashboard. On an event day this applies to all of its activities.</p>
+            <div class="grid-2 ev-season-fields">
+              <div><label data-i18n="fieldBirthYearFrom">Born from year (optional)</label><input id="ev-edit-birth-from" type="number" min="1900" max="2100" placeholder="2014" /></div>
+              <div><label data-i18n="fieldBirthYearTo">Born up to year (optional)</label><input id="ev-edit-birth-to" type="number" min="1900" max="2100" placeholder="2017" /></div>
+            </div>
+            <p class="hint-note" data-i18n="birthYearHint">Limits registration to players born in these years - e.g. 2014 to 2017 for an age category. Leave both empty for no limit.</p>
+            <label class="checkbox-row"><input type="checkbox" id="ev-edit-team-on" /> <span data-i18n="fieldTeamReg">Players register as a team</span></label>
+            <div class="grid-2 hidden" id="ev-edit-team-fields">
+              <div><label data-i18n="fieldTeamMinPlayers">Minimum players per team</label><input id="ev-edit-team-min" type="number" min="1" value="5" /></div>
+              <div><label data-i18n="fieldTeamMaxPlayers">Maximum players per team</label><input id="ev-edit-team-max" type="number" min="1" value="8" /></div>
+              <div><label data-i18n="fieldTeamMaxTeams">Maximum teams (optional)</label><input id="ev-edit-team-maxteams" type="number" min="1" /></div>
+              <div><label data-i18n="fieldTeamMinTeams">Minimum teams to hold it (optional)</label><input id="ev-edit-team-minteams" type="number" min="1" /></div>
+            </div>
+            <p class="hint-note hidden" id="ev-edit-team-hint" data-i18n="teamRegHint">A captain starts a team and teammates join it. Places are counted in teams.</p>
             <p class="hint-note" id="ev-edit-capacity-status"></p>
             <p class="hint-note" data-i18n="parentEventHint">Pick a parent event to make this a sub-activity of an "event day" (e.g. foot volley under Sports Entertainment Day). Leave as "none" for a normal standalone event.</p>
             <div class="admin-full-only ev-managers-block">
@@ -1923,5 +1950,6 @@
 <script src="i18n.js"></script>
 <script src="jsQR.js"></script>
 <script src="app.js"></script>
+<script src="league.js"></script>
 </body>
 </html>

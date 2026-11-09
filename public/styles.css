@@ -980,11 +980,15 @@ html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bo
 }
 .activities-title { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
 .activity-row {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap;
   padding: 6px 0; font-size: 0.85rem;
 }
 .activity-row + .activity-row { border-top: 1px dashed var(--border); }
-.activity-row .activity-name { flex: 1; font-weight: 600; }
+/* The name always gets a full line when badges (birth years, team counts,
+   capacity) and the Register button don't fit beside it, so a narrow card
+   never squeezes the title into a one-letter column. */
+.activity-row .activity-name { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.activity-row > button, .activity-row > .reg-soon { margin-inline-start: auto; }
 .activity-row .activity-time { font-weight: 400; color: var(--muted); font-size: 0.78rem; }
 .activity-row .capacity-badge { margin: 0; }
 button.secondary.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
@@ -1638,3 +1642,22 @@ button.stat { font: inherit; color: inherit; margin: 0; display: block; cursor: 
 .reg-soon-box .reg-soon { width: 100%; }
 .reg-soon-box p { margin: 0; color: var(--muted); font-size: 0.85rem; text-align: center; }
 .tourn-status-pill.reg-pill-soon { background: #fff8e1; color: #7a5a00; border: 1px solid var(--gold); margin-top: 4px; }
+
+/* ---- League season: team registration, eligibility, season scheduler ---- */
+.reg-team-box { border: 1px solid var(--border, #e2ddd2); border-radius: 12px; padding: 14px 16px; margin: 14px 0; background: rgba(201, 162, 39, 0.07); }
+.reg-team-box .reg-team-title { margin: 0 0 6px; font-size: 1.05rem; }
+.reg-team-box select, .reg-team-box input[type="text"] { width: 100%; margin: 6px 0 12px; }
+.att-elig-note { margin-inline-start: 6px; font-size: 0.72rem; }
+.born-badge { white-space: nowrap; }
+.team-admin-row { border: 1px solid var(--border, #e2ddd2); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.team-admin-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.team-admin-players { margin: 0 0 8px; padding-inline-start: 22px; font-size: 0.9rem; }
+.team-admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.season-day { border: 1px dashed var(--border, #e2ddd2); border-radius: 10px; padding: 8px 10px; margin: 8px 0; align-items: end; }
+.tourn-bracket-title { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--red, #8b0000); margin-bottom: 4px; }
+
+/* Final / 3rd-place cards: keep the title off the card's border. */
+.tourn-bracket-title { padding: 6px 8px 0; margin-bottom: 0; }
+.tourn-season-link { color: var(--red, #8b0000); font-weight: 700; text-decoration: none; }
+.tourn-season-link:hover { text-decoration: underline; }
+a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; border: 1px solid var(--red); background: #fff; }

@@ -1792,7 +1792,7 @@ function updateRegCapacityNote() {
   if (!note) return;
   const sel = document.getElementById("reg-event");
   const ev = EVENTS_DATA.find((e) => e.id === Number(sel.value));
-  if (!ev || ev.maxCapacity == null) {
+  if (!ev || ev.teamRegistration || ev.maxCapacity == null) {
     note.classList.add("hidden");
     return;
   }
@@ -1818,6 +1818,7 @@ function updateRegSelectedEventLabel() {
   }
   label.classList.remove("empty");
   label.textContent = `${t("regSelectedEventPrefix")} ${eventLabel(ev)} — ${ev.date}`;
+  lg("onRegEventChanged");
 }
 document.getElementById("reg-event").addEventListener("change", () => {
   updateRegCapacityNote();
@@ -1829,7 +1830,14 @@ document.getElementById("reg-event").addEventListener("change", () => {
 // Small helper shared by the event cards and the Register dropdown: is this
 // event at/over its admin-set maximum? (null maxCapacity = no limit.)
 function isEventFull(ev) {
+  // A team event counts places in teams (the player limit is not used).
+  if (ev.teamRegistration) return ev.teamRegistration.maxTeams != null && (ev.teamCount || 0) >= ev.teamRegistration.maxTeams;
   return ev.maxCapacity != null && (ev.confirmedCount || 0) >= ev.maxCapacity;
+}
+// League-season features live in league.js (loaded after this file); a missing
+// or late file must never break the page, so every call goes through here.
+function lg(name, ...args) {
+  return window.LEAGUE && typeof window.LEAGUE[name] === "function" ? window.LEAGUE[name](...args) : undefined;
 }
 // Registration "opens soon": an event can be announced before its registration
 // is ready (see eventRegistrationOpen in server.js - the server is the one that
@@ -1868,16 +1876,18 @@ function waitlistCountBadgeHtml(ev) {
   return n > 0 ? `<span class="capacity-badge waitlist">${escapeAttr(t("waitlistLabel"))}: ${fmt(n)}</span>` : "";
 }
 function eventFullNoteHtml(ev, withCount) {
-  const n = Number(ev.waitlistCount) || 0;
+  const n = ev.teamRegistration ? Number(ev.waitlistTeamCount) || 0 : Number(ev.waitlistCount) || 0;
   const count = withCount !== false && n > 0 ? ` <strong>${escapeAttr(t("waitlistLabel"))}: ${fmt(n)}</strong>` : "";
   return `<p class="event-full-note">${escapeAttr(t("eventFullWaitlistNote"))}${count}</p>`;
 }
 function capacityBadgeHtml(ev) {
-  if (ev.maxCapacity == null) return "";
+  const born = lg("bornBadgeHtml", ev) || "";
+  if (ev.teamRegistration) return born + (lg("teamBadgeHtml", ev) || "");
+  if (ev.maxCapacity == null) return born;
   if (isEventFull(ev)) {
-    return `<span class="capacity-badge full">${escapeAttr(t("badgeFull"))}</span>${waitlistCountBadgeHtml(ev)}`;
+    return `${born}<span class="capacity-badge full">${escapeAttr(t("badgeFull"))}</span>${waitlistCountBadgeHtml(ev)}`;
   }
-  return `<span class="capacity-badge ok">${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)}</span>${waitlistCountBadgeHtml(ev)}`;
+  return `${born}<span class="capacity-badge ok">${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)}</span>${waitlistCountBadgeHtml(ev)}`;
 }
 // Builds the inline "activities" list shown on a parent event day's card -
 // one row per sub-activity, each with its own capacity badge and its own
@@ -2597,6 +2607,7 @@ function renderAttendeesChecklist() {
   ];
   wrap.innerHTML = rows.join("") + `<p class="hint-note hidden" id="reg-cat-note">${escapeAttr(t("regCatNote"))}</p>`;
   updateRegCategoryVisibility();
+  lg("refreshAttendeeEligibility");
 }
 
 // Points might be hidden from members right now (admin toggle) - when so,
@@ -2692,7 +2703,9 @@ document.getElementById("reg-submit").addEventListener("click", async () => {
   if (selfChecked) attendees.push({ dependentId: null, label: member.name, cats: catFor("self") });
   depChecked.forEach((d) => attendees.push({ dependentId: d.id, label: d.name, cats: catFor(String(d.id)) }));
 
-  await submitRegistrations(eventId, attendees, false);
+  const team = lg("teamChoice") || {};
+  if (team.error) return showMsg(msg, team.error, false);
+  await submitRegistrations(eventId, attendees, false, team);
 });
 
 // Registers every attendee in the batch. If the event is full, the server
@@ -2702,13 +2715,17 @@ document.getElementById("reg-submit").addEventListener("click", async () => {
 // even for attendees who already got a confirmed spot in the first pass -
 // the server just hands their existing registration back again (see the
 // "already registered" branch), nothing is double-booked.
-async function submitRegistrations(eventId, attendees, joinWaitlist) {
+async function submitRegistrations(eventId, attendees, joinWaitlist, team) {
   const msg = document.getElementById("reg-msg");
   const entries = [];
   let waitlistPrompt = null;
+  // Team events: the first attendee may start the team; everyone after joins it.
+  const teamCtx = { ...(team || {}) };
   for (const att of attendees) {
     try {
       const body = { eventId, dependentId: att.dependentId };
+      if (teamCtx.teamId) body.teamId = teamCtx.teamId;
+      else if (teamCtx.newTeamName) body.newTeamName = teamCtx.newTeamName;
       if (att.cats) { body.women = att.cats.women; body.junior = att.cats.junior; }
       if (joinWaitlist) body.joinWaitlist = true;
       const result = await api("/api/register", { method: "POST", body: JSON.stringify(body) });
@@ -2716,19 +2733,20 @@ async function submitRegistrations(eventId, attendees, joinWaitlist) {
         waitlistPrompt = waitlistPrompt || result;
         continue;
       }
+      if (result.team && result.team.id) { teamCtx.teamId = result.team.id; delete teamCtx.newTeamName; }
       entries.push({ ok: true, label: att.label, result });
     } catch (e) {
       entries.push({
         ok: false,
         label: att.label,
-        error: e.data && e.data.code === "registration_not_open" ? t("regNotOpenYet") : e.message,
+        error: e.data && e.data.code === "registration_not_open" ? t("regNotOpenYet") : lg("mapRegError", e) || e.message,
         data: e.data,
       });
     }
   }
 
   if (waitlistPrompt) {
-    PENDING_REG_SUBMISSION = { eventId, attendees };
+    PENDING_REG_SUBMISSION = { eventId, attendees, team };
     document.getElementById("reg-waitlist-message-en").textContent = waitlistPrompt.messageEn;
     document.getElementById("reg-waitlist-message-ar").textContent = waitlistPrompt.messageAr;
     document.getElementById("reg-waitlist-confirm-check").checked = false;
@@ -2744,6 +2762,7 @@ async function submitRegistrations(eventId, attendees, joinWaitlist) {
   document.getElementById("reg-qr-card").classList.remove("hidden");
   loadMyRegistrations();
   loadEvents(); // refresh capacity badges/counts everywhere else on the page
+  lg("onRegEventChanged");
 }
 
 document.getElementById("reg-waitlist-confirm").addEventListener("click", async () => {
@@ -2753,9 +2772,9 @@ document.getElementById("reg-waitlist-confirm").addEventListener("click", async 
     return;
   }
   if (!PENDING_REG_SUBMISSION) return;
-  const { eventId, attendees } = PENDING_REG_SUBMISSION;
+  const { eventId, attendees, team } = PENDING_REG_SUBMISSION;
   PENDING_REG_SUBMISSION = null;
-  await submitRegistrations(eventId, attendees, true);
+  await submitRegistrations(eventId, attendees, true, team);
 });
 document.getElementById("reg-waitlist-cancel").addEventListener("click", () => {
   PENDING_REG_SUBMISSION = null;
@@ -3114,7 +3133,7 @@ async function loadMyRegistrations() {
         return `<div class="my-reg-item" data-reg-id="${r.id}">
           <div class="info">
             <div class="name">${escapeAttr(attendee)} — ${escapeAttr(evLabel)}</div>
-            <div class="meta">${escapeAttr(evDate)}</div>
+            <div class="meta">${escapeAttr(evDate)}${r.teamName ? ` · ${escapeAttr(t("regTeamLabel"))}: ${escapeAttr(r.teamName)}` : ""}</div>
             ${statusBadge}
           </div>
           <div class="myreg-actions">
@@ -5477,7 +5496,7 @@ async function loadHubTournamentSummary() {
     } else {
       const tn = data.tournament;
       const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-      const formatLabel = tournamentFormatLabel(tn.format);
+      const formatLabel = tournamentFormatLabel(tn.format, tn);
       const statusLabel = tournamentActiveStatusLabel(tn);
       let standingsHtml;
       if (tn.format === "casual") {
@@ -6782,6 +6801,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   appendRegistrationFields(fd, "ev-reg-status", "ev-reg-opens");
+  lg("appendSeasonFields", fd, "ev");
   appendManagers(fd, "ev-managers-add");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
@@ -6811,6 +6831,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-allow-multi").checked = false;
     document.getElementById("ev-reg-status").value = "open";
     document.getElementById("ev-reg-opens").value = "";
+    lg("fillSeasonFields", "ev", null);
     photoInput.value = "";
     videoInput.value = "";
     whatsappQrInput.value = "";
@@ -6882,6 +6903,7 @@ function populateEditForm(ev) {
   document.getElementById("ev-edit-desc-ar").value = ev.descriptionAr || "";
   document.getElementById("ev-edit-min-capacity").value = ev.minCapacity != null ? ev.minCapacity : "";
   document.getElementById("ev-edit-max-capacity").value = ev.maxCapacity != null ? ev.maxCapacity : "";
+  lg("fillSeasonFields", "ev-edit", ev);
   document.getElementById("ev-edit-photo").value = "";
   document.getElementById("ev-edit-video").value = "";
   document.getElementById("ev-edit-whatsapp-qr").value = "";
@@ -6957,6 +6979,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
   appendRegistrationFields(fd, "ev-edit-reg-status", "ev-edit-reg-opens");
+  lg("appendSeasonFields", fd, "ev-edit");
   appendManagers(fd, "ev-managers-edit");
   if (photoInput.files[0]) fd.append("coverPhoto", photoInput.files[0]);
   if (videoInput.files[0]) fd.append("coverVideo", videoInput.files[0]);
@@ -8049,6 +8072,7 @@ document.getElementById("tourn-body").addEventListener("click", (e) => {
   else if (action === "swiss-withdraw") swissWithdraw(btn.dataset.entrantId, btn.dataset.withdrawn === "1");
   else if (action === "end-casual-session") setCasualSessionStatus("completed");
   else if (action === "reopen-casual-session") setCasualSessionStatus("casual");
+  else if (action.startsWith("season-") || action.startsWith("team-")) lg("handleAction", action, btn);
 });
 document.getElementById("tourn-body").addEventListener("change", (e) => {
   if (e.target.id === "tourn-format") toggleTournamentGroupFields();
@@ -8096,6 +8120,7 @@ async function loadTournamentPanel(eventId) {
     const data = await api("/api/admin/tournaments/" + eventId);
     TOURNAMENT_DATA = data.tournament;
     TOURNAMENT_REGISTRATIONS = data.registrations || [];
+    await lg("loadTeams", eventId); // registered teams (team events) + the tournament list for the season scheduler
     renderTournamentBody();
   } catch (e) {
     document.getElementById("tourn-body").innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
@@ -8121,7 +8146,8 @@ const TOURN_ICON = {
 // "casual" ("just for fun", see below) is a third format alongside
 // knockout/groups, and gets its own status wording while active since
 // "In progress" implies matches are actually being played.
-function tournamentFormatLabel(format) {
+function tournamentFormatLabel(format, tn) {
+  if (format === "groups" && tn && tn.finalsMode === "table") return t("tournamentFormatLeague");
   if (format === "groups") return t("tournamentFormatGroups");
   if (format === "casual") return t("tournamentFormatCasual");
   if (format === "swiss") return t("tournamentFormatSwiss");
@@ -8173,7 +8199,7 @@ function renderTournamentBody() {
   const body = document.getElementById("tourn-body");
   if (!body) return;
   if (!TOURNAMENT_DATA) {
-    body.innerHTML = renderTournamentCreateForm();
+    body.innerHTML = (lg("teamsCardHtml") ? tournCardHtml(TOURN_ICON.teams, t("adminTeamsTitle"), lg("teamsCardHtml"), "tourn-card-teams") : "") + renderTournamentCreateForm();
     refreshCreateSetupPreview();
     return;
   }
@@ -8202,6 +8228,8 @@ function renderTournamentBody() {
   const standingsContent = TOURNAMENT_DATA.status === "completed" ? renderTournamentStandings() : "";
 
   const setupCard = tournCardHtml(TOURN_ICON.setup, t("tournCardSetupTitle"), renderTournamentScheduleEditor(), "tourn-card-setup");
+  const registeredTeamsCard = tournCardHtml(TOURN_ICON.teams, t("adminTeamsTitle"), lg("teamsCardHtml") || "", "tourn-card-teams");
+  const seasonCard = tournCardHtml(TOURN_ICON.setup, t("seasonCardTitle"), lg("seasonCardHtml") || "", "tourn-card-setup");
   const teamsCard = tournCardHtml(
     TOURN_ICON.teams,
     TOURNAMENT_DATA.status === "team-setup" ? t("tournCardTeamsTitle") : t("tournCardSeedingTitle"),
@@ -8213,7 +8241,7 @@ function renderTournamentBody() {
   const standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), standingsContent, "tourn-card-standings");
 
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-  const formatLabel = tournamentFormatLabel(TOURNAMENT_DATA.format);
+  const formatLabel = tournamentFormatLabel(TOURNAMENT_DATA.format, TOURNAMENT_DATA);
   const matchesLink = TOURNAMENT_DATA.schedule
     ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
     : "";
@@ -8225,7 +8253,9 @@ function renderTournamentBody() {
       <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
     </div>
     ${renderTournamentProgressStepper()}
+    ${registeredTeamsCard}
     ${setupCard}
+    ${seasonCard}
     ${teamsCard}
     ${attendanceCard}
     ${liveCard}
@@ -8244,7 +8274,7 @@ function renderTournamentBody() {
 function renderCasualTournamentBody(body) {
   const tn = TOURNAMENT_DATA;
   const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-  const formatLabel = tournamentFormatLabel(tn.format);
+  const formatLabel = tournamentFormatLabel(tn.format, tn);
   const statusLabel = tournamentActiveStatusLabel(tn);
   let mainContent;
   if (tn.status === "team-setup" || (tn.mode === "team" && TOURN_EDITING_TEAMS)) {
@@ -9209,6 +9239,7 @@ function renderTournamentCreateForm() {
         <select id="tourn-format">
           <option value="knockout">${t("tournamentFormatKnockout")}</option>
           <option value="groups">${t("tournamentFormatGroups")}</option>
+          <option value="league">${t("tournamentFormatLeague")}</option>
           <option value="casual">${t("tournamentFormatCasual")}</option>
           <option value="swiss">${t("tournamentFormatSwiss")}</option>
         </select>
@@ -9223,6 +9254,7 @@ function renderTournamentCreateForm() {
     </div>
     <p class="hint-note" id="tourn-swiss-hint" style="display:none;">${t("swissCreateHint")}</p>
     <p class="hint-note" id="tourn-casual-hint" style="display:none;">${t("tournCasualCreateHint")}</p>
+    <p class="hint-note" id="tourn-league-hint" style="display:none;">${t("leagueCreateHint")}</p>
     <div id="tourn-match-config-fields">
       <div class="grid-2" id="tourn-points-fields">
         <div><label>${t("fieldWinPoints")}</label><input id="tourn-win-points" type="number" min="0" value="3" /></div>
@@ -9254,6 +9286,8 @@ function toggleTournamentGroupFields() {
   if (matchConfig) matchConfig.style.display = casual ? "none" : "";
   const casualHint = document.getElementById("tourn-casual-hint");
   if (casualHint) casualHint.style.display = casual ? "" : "none";
+  const leagueHint = document.getElementById("tourn-league-hint");
+  if (leagueHint) leagueHint.style.display = format === "league" ? "" : "none";
   const swiss = format === "swiss";
   const swissFields = document.getElementById("tourn-swiss-fields");
   if (swissFields) swissFields.style.display = swiss ? "grid" : "none";
@@ -9280,10 +9314,12 @@ function toggleTournamentGroupFields() {
 async function createTournament() {
   const msg = document.getElementById("tourn-msg");
   const mode = document.getElementById("tourn-mode").value;
-  const format = document.getElementById("tourn-format").value;
+  let format = document.getElementById("tourn-format").value;
   const body = { mode, format };
+  // "League with Final & 3rd-place match" is the groups format with finals drawn from the table.
+  if (format === "league") { format = "groups"; body.format = "groups"; body.finalsMode = "table"; }
   if (format === "swiss") body.swissRounds = Number(document.getElementById("tourn-swiss-rounds").value) || 7;
-  if (format === "groups") {
+  if (format === "groups" && body.finalsMode !== "table") {
     body.numGroups = Number(document.getElementById("tourn-num-groups").value);
     body.advancePerGroup = Number(document.getElementById("tourn-advance-per-group").value);
   }
@@ -9515,6 +9551,11 @@ async function reseedTournament() {
 // existed (or a tournament with no schedule at all) just show nothing here.
 function matchTimeBadge(m) {
   if (!m.court || !m.time) return "";
+  // Season leagues carry a calendar date (and a round number) as well.
+  if (m.date) {
+    const round = m.round && m.place === undefined ? `${escapeAttr(t("roundNo").replace("{n}", m.round))} &middot; ` : "";
+    return `<span class="tourn-match-time">${round}${escapeAttr(lg("fmtDate", m.date) || m.date)} &middot; ${escapeAttr(m.time)} &middot; ${escapeAttr(t("courtLabel"))} ${m.court}</span>`;
+  }
   return `<span class="tourn-match-time">${escapeAttr(t("courtLabel"))} ${m.court} &middot; ${escapeAttr(m.time)}</span>`;
 }
 
@@ -9578,7 +9619,8 @@ function collectAllTournamentMatches(tn) {
       const isSemi = ri === rounds.length - 2;
       const stage = isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
       round.forEach((m) => {
-        if (!m.bye) list.push({ ...m, stage, kind: "knockout" });
+        const mStage = m.place === 3 ? t("matchThirdTitle") : m.place === 1 ? t("matchFinalTitle") : stage;
+        if (!m.bye) list.push({ ...m, stage: mStage, kind: "knockout" });
       });
     });
   }
@@ -9686,9 +9728,10 @@ function renderTournamentGroups() {
   const undecided = TOURNAMENT_DATA.groups.reduce((sum, g) => sum + g.matches.filter((m) => !m.result).length, 0);
   return `
     <div class="tourn-groups-grid">${groupsHtml}</div>
+    ${TOURNAMENT_DATA.h2hTiebreak ? `<p class="hint-note">${t("tournTiebreakNote")}</p>` : ""}
     <div style="margin-top:14px;">
       ${undecided > 0 ? `<p class="hint-note">${t("groupsRemainingHint").replace("{count}", undecided)}</p>` : ""}
-      <button class="primary" ${undecided > 0 ? "disabled" : ""} data-tourn-action="generate-knockout">${t("btnGenerateKnockout")}</button>
+      <button class="primary" ${undecided > 0 ? "disabled" : ""} data-tourn-action="generate-knockout">${t(TOURNAMENT_DATA.finalsMode === "table" ? "btnGenerateFinals" : "btnGenerateKnockout")}</button>
     </div>
   `;
 }
@@ -9730,11 +9773,12 @@ function knockoutResultText(m) {
 function renderTournamentBracket() {
   const entrants = TOURNAMENT_DATA.entrants;
   const rounds = TOURNAMENT_DATA.knockout.rounds;
+  const tableFinals = TOURNAMENT_DATA.finalsMode === "table";
   const roundsHtml = rounds
     .map((round, ri) => {
       const isFinal = ri === rounds.length - 1;
       const isSemi = ri === rounds.length - 2;
-      const roundLabel = isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
+      const roundLabel = tableFinals ? t("roundFinals") : isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
       const matchesHtml = round
         .map((m) => {
           const aLabel = m.aLabel || t("tbd");
@@ -9777,6 +9821,7 @@ function renderTournamentBracket() {
             footer = `<div class="tourn-bracket-pending">${t("waitingOnPreviousRound")}</div>`;
           }
           return `<div class="tourn-bracket-match">
+            ${m.place ? `<div class="tourn-bracket-title">${escapeAttr(t(m.place === 3 ? "matchThirdTitle" : "matchFinalTitle"))}</div>` : ""}
             ${timeBadge ? `<div class="tourn-bracket-time">${timeBadge}</div>` : ""}
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}${teamRosterHtml(entrants, m.a)}</div>
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}${teamRosterHtml(entrants, m.b)}</div>
@@ -9873,7 +9918,7 @@ function renderPublicTournamentsList() {
   empty.classList.toggle("hidden", PUBLIC_TOURNAMENTS_LIST.length > 0);
   grid.innerHTML = PUBLIC_TOURNAMENTS_LIST.map((tn) => {
     const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-    const formatLabel = tournamentFormatLabel(tn.format);
+    const formatLabel = tournamentFormatLabel(tn.format, tn);
     const statusLabel = tournamentActiveStatusLabel(tn);
     return `
     <div class="event-card" data-event-id="${tn.eventId}">
@@ -9928,7 +9973,7 @@ function renderPublicTournamentBody(tn, eventId) {
   const meta = PUBLIC_TOURNAMENTS_LIST.find((x) => x.eventId === eventId);
   const ev = EVENTS_DATA.find((e) => e.id === eventId);
   const modeLabel = tn.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
-  const formatLabel = tournamentFormatLabel(tn.format);
+  const formatLabel = tournamentFormatLabel(tn.format, tn);
   if (tn.format === "swiss" && tn.swiss) return renderPublicSwiss(tn, eventId, meta, ev);
   let notStartedHtml = "";
   let groupsCard = "";
@@ -9939,7 +9984,7 @@ function renderPublicTournamentBody(tn, eventId) {
   } else if (tn.status === "team-setup" || tn.status === "setup" || tn.status === "seeding") {
     notStartedHtml = `<p class="hint-note">${t("tournPublicNotStarted")}</p>`;
   } else if (tn.status === "groups") {
-    groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups, tn.entrants), "tourn-card-live");
+    groupsCard = tournCardHtml(TOURN_ICON.live, t("tournStepGroups"), renderPublicGroups(tn.groups, tn.entrants) + (tn.h2hTiebreak ? `<p class="hint-note">${t("tournTiebreakNote")}</p>` : ""), "tourn-card-live");
   } else if (tn.status === "knockout") {
     bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout, tn.entrants), "tourn-card-live");
   } else if (tn.status === "completed") {
@@ -9947,9 +9992,15 @@ function renderPublicTournamentBody(tn, eventId) {
     bracketCard = tournCardHtml(TOURN_ICON.live, t("tournStepKnockout"), renderPublicBracket(tn.knockout, tn.entrants), "tourn-card-live");
     standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), renderPublicStandings(tn.standings, tn.entrants), "tourn-card-standings");
   }
-  const matchesLink = tn.schedule
-    ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${eventId}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
-    : "";
+  const hasDates = !!(tn.groups || []).some((g) => g.matches.some((m) => m.date));
+  const seasonParent = ev && ev.parentEventId ? ev.parentEventId : eventId;
+  const matchesLink =
+    (tn.schedule
+      ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${eventId}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
+      : "") +
+    (hasDates || tn.finalsMode === "table"
+      ? `<a class="secondary small tourn-live-link" href="/season.html?event=${seasonParent}&lang=${currentLang}" target="_blank" rel="noopener">${t("seasonViewPublic")}</a>`
+      : "");
   return `
     <div class="tourn-summary tourn-hero">
       ${meta ? `<h3 style="margin:0 0 6px;">${eventNameHtml(meta)}</h3>` : ""}
@@ -10051,11 +10102,12 @@ function renderPublicGroups(groups, entrants) {
 function renderPublicBracket(knockout, entrants) {
   if (!knockout) return "";
   const rounds = knockout.rounds;
+  const tableFinals = knockout.finalsMode === "table";
   const roundsHtml = rounds
     .map((round, ri) => {
       const isFinal = ri === rounds.length - 1;
       const isSemi = ri === rounds.length - 2;
-      const roundLabel = isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
+      const roundLabel = tableFinals ? t("roundFinals") : isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
       const matchesHtml = round
         .map((m) => {
           const aLabel = m.aLabel || t("tbd");
@@ -10070,6 +10122,7 @@ function renderPublicBracket(knockout, entrants) {
             footer = `<div class="tourn-bracket-pending">${t("waitingOnPreviousRound")}</div>`;
           }
           return `<div class="tourn-bracket-match">
+            ${m.place ? `<div class="tourn-bracket-title">${escapeAttr(t(m.place === 3 ? "matchThirdTitle" : "matchFinalTitle"))}</div>` : ""}
             ${timeBadge ? `<div class="tourn-bracket-time">${timeBadge}</div>` : ""}
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.a ? "winner" : ""}">${escapeAttr(aLabel)}${teamRosterHtml(entrants, m.a)}</div>
             <div class="tourn-bracket-slot ${m.winnerId && m.winnerId === m.b ? "winner" : ""}">${escapeAttr(bLabel)}${teamRosterHtml(entrants, m.b)}</div>

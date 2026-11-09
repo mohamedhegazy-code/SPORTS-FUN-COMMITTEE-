@@ -47,6 +47,14 @@ async function applyTheme() {
   } catch (e) { /* theme is cosmetic only - never block the page on it */ }
 }
 
+// Season leagues give every match a calendar date; the live board only shows
+// today's (matches without a date belong to the classic single-day schedule).
+function isTodayOrUndated(m) {
+  if (!m.date) return true;
+  const d = new Date();
+  const today = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  return m.date === today;
+}
 function timeToMinutes(hhmm) {
   const [h, m] = String(hhmm).split(":").map(Number);
   return h * 60 + m;
@@ -60,7 +68,7 @@ function collectScheduledMatches(tn) {
   (tn.groups || []).forEach((g, gi) => {
     const groupLabel = `${t("groupLabel")} ${String.fromCharCode(65 + gi)}`;
     g.matches.forEach((m) => {
-      if (!m.court || !m.time) return;
+      if (!m.court || !m.time || !isTodayOrUndated(m)) return;
       list.push({ ...m, stage: groupLabel, decided: !!m.result });
     });
   });
@@ -71,7 +79,7 @@ function collectScheduledMatches(tn) {
       const isSemi = ri === rounds.length - 2;
       const roundLabel = isFinal ? t("roundFinal") : isSemi ? t("roundSemifinal") : `${t("roundLabel")} ${ri + 1}`;
       round.forEach((m) => {
-        if (!m.court || !m.time || m.bye) return;
+        if (!m.court || !m.time || m.bye || !isTodayOrUndated(m)) return;
         list.push({ ...m, stage: roundLabel, decided: !!m.winnerId });
       });
     });
