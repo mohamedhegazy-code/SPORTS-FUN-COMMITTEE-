@@ -602,6 +602,18 @@ Built for a multi-category league played over several days on shared pitches.
 
 Tests: `loadtest/league_e2e.js` (eligibility, league and finals, season scheduler, teams).
 
+## Scorers, awards & gender (Ahlawy 120, Red Rose Cup)
+
+**Scorers.** In *Admin > Tournaments*, a league or knockout with results has a *Scorers & awards* card. Pick a match that has a score, enter each player's goals, save. A side's scorers can't add up to more than its score (goals nobody is credited with, e.g. own goals, are simply left out), and a score can't be lowered below the goals already credited. The *Top scorers* table and the *Top scorer* award are calculated from these goals (ties show every leader).
+
+**Awards.** Best goalkeeper and best player are picked from the tournament's players, fair play from its teams (or players in individual mode). Each can be left unannounced. Awards and the top scorers appear on the public tournament page and on the public season calendar (`season.html`), per age category. API: `PUT /api/admin/tournaments/:eventId/match-scorers` and `.../awards`.
+
+**Gender.** Members and family members have an optional gender (male/female): at sign-up, on *Member Profile* (Gender card), when adding or editing a family member, and by an admin in *Members > Details > Gender* (`PUT /api/admin/members/:number/gender`). It is shown to staff only and exported in the members spreadsheet.
+
+**Girls-only (or boys-only) events.** Add/Edit Event has *Open to*: everyone, girls and women only, or boys and men only. It combines with the birth-year range - the Red Rose Cup is "girls and women only" with two birth-year ranges (13-20), and the mothers-vs-daughters exhibition is "girls and women only" with no range. A registration that doesn't match is refused (`not_eligible_gender`, 403); a person with no gender on file is asked to add it first (`gender_required`, 400). The Register tab greys out those attendees with the reason, and the event card shows a *Girls & women* / *Boys & men* badge.
+
+Tests: `loadtest/awards_e2e.js`.
+
 ## Admin: Branding (colors & logo)
 
 A "Branding" card near the top of the Admin tab lets the committee set a

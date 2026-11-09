@@ -608,6 +608,13 @@ function syncBirthAndAgeGroup(person) {
   if (birth) person.ageGroup = AgeUtils.ageInfo(person).ageGroup;
 }
 
+// Gender: "male" | "female" | "" (not set). Used to limit an event to one gender
+// (e.g. the girls-only Red Rose Cup); optional everywhere else.
+function sanitizeGender(v) {
+  const g = String(v == null ? "" : v).trim().toLowerCase();
+  return g === "male" || g === "female" ? g : "";
+}
+
 // { birthDate, birthYear, age } for API output (age as of today, Cairo).
 function ageFields(person) {
   const i = AgeUtils.ageInfo(person);
@@ -1513,6 +1520,7 @@ app.post("/api/auth/signup", async (req, res) => {
     familyGroup: familyGroup || (claiming ? claiming.familyGroup : "") || "",
     phone: trimmedPhone,
     birthDate: finalBirthDate,
+    gender: sanitizeGender(claiming && claiming.gender) || sanitizeGender(req.body.gender),
     // The member typed their own date at sign-up, so it counts as confirmed -
     // unless the committee's pre-loaded date was used instead; then they are
     // asked to confirm it at first login.
@@ -2583,7 +2591,12 @@ function parseBirthYearValue(v) {
   return n;
 }
 function parseEligibilityFields(body, current) {
-  const out = { birthYearFrom: current.birthYearFrom == null ? null : current.birthYearFrom, birthYearTo: current.birthYearTo == null ? null : current.birthYearTo };
+  const out = { birthYearFrom: current.birthYearFrom == null ? null : current.birthYearFrom, birthYearTo: current.birthYearTo == null ? null : current.birthYearTo, genderRestriction: sanitizeGender(current.genderRestriction) };
+  if (body.genderRestriction !== undefined) {
+    const raw = String(body.genderRestriction || "").trim().toLowerCase();
+    if (raw && raw !== "male" && raw !== "female") return { error: "Gender restriction must be empty, male or female" };
+    out.genderRestriction = raw;
+  }
   for (const key of ["birthYearFrom", "birthYearTo"]) {
     if (body[key] === undefined) continue;
     const n = parseBirthYearValue(body[key]);
@@ -2598,6 +2611,16 @@ function parseEligibilityFields(body, current) {
 function eligibilityProblem(ev, person) {
   const from = ev.birthYearFrom == null ? null : ev.birthYearFrom;
   const to = ev.birthYearTo == null ? null : ev.birthYearTo;
+  const gr = sanitizeGender(ev.genderRestriction);
+  if (gr) {
+    const pg = sanitizeGender(person && person.gender);
+    if (!pg) {
+      return { code: "gender_required", gender: gr, from, to, error: "Please add the gender on the profile first - this event is limited by gender." };
+    }
+    if (pg !== gr) {
+      return { code: "not_eligible_gender", gender: gr, from, to, error: gr === "female" ? "This event is for girls and women only." : "This event is for boys and men only." };
+    }
+  }
   if (from === null && to === null) return null;
   const bd = AgeUtils.parseBirthDate(person && person.birthDate);
   if (!bd) {
@@ -2937,6 +2960,7 @@ app.post(
       registrationOpensAt: regSettings.opensAt,
       birthYearFrom: eligibility.birthYearFrom,
       birthYearTo: eligibility.birthYearTo,
+      genderRestriction: eligibility.genderRestriction,
       teamRegistration: teamSettings.value,
       // Admin picks the managers; a Tournament Manager who creates an event
       // is automatically its manager.
@@ -3050,6 +3074,7 @@ app.put(
     }
     event.birthYearFrom = eligibility.birthYearFrom;
     event.birthYearTo = eligibility.birthYearTo;
+    event.genderRestriction = eligibility.genderRestriction;
     event.teamRegistration = teamSettings.value;
     // Only an admin changes who manages the event; sending nothing leaves it as is.
     if (req.staff.role === "admin" && req.body.managerUsernames !== undefined) {
@@ -3802,6 +3827,11 @@ app.patch("/api/me/profile", requireMember, (req, res) => {
     }
     member.phone = newPhone;
   }
+  if (req.body.gender !== undefined) {
+    const g = sanitizeGender(req.body.gender);
+    if (!g) return res.status(400).json({ error: "Please select male or female" });
+    member.gender = g;
+  }
   if (req.body.birthDate !== undefined) {
     // Date of birth can be corrected but never cleared or set to nonsense;
     // the age group is recalculated from it.
@@ -3919,7 +3949,7 @@ app.post("/api/me/dependents", requireMember, (req, res) => {
   const depAgeGroup = AgeUtils.ageInfo({ birthDate: depBirth }).ageGroup;
   const member = db.members[req.member.membershipNumber];
   member.dependents = member.dependents || [];
-  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email, birthDate: depBirth, ageGroup: depAgeGroup };
+  const dependent = { id: db.nextIds.dependent++, name, relationship, phone, email, birthDate: depBirth, ageGroup: depAgeGroup, gender: sanitizeGender(req.body.gender) };
   member.dependents.push(dependent);
   writeDb(db);
   res.status(201).json({ dependents: member.dependents });
@@ -3939,6 +3969,11 @@ app.put("/api/me/dependents/:id", requireMember, (req, res) => {
   if (typeof req.body.relationship === "string") dependent.relationship = req.body.relationship.trim();
   if (typeof req.body.phone === "string") dependent.phone = req.body.phone.trim();
   if (typeof req.body.email === "string") dependent.email = req.body.email.trim();
+  if (req.body.gender !== undefined) {
+    const g = sanitizeGender(req.body.gender);
+    if (!g) return res.status(400).json({ error: "Please select male or female" });
+    dependent.gender = g;
+  }
   if (req.body.birthDate !== undefined) {
     const bd = AgeUtils.parseBirthDate(req.body.birthDate);
     if (!bd) return res.status(400).json({ error: "Please enter a valid date of birth for this family member" });
@@ -4230,9 +4265,10 @@ app.post("/api/register", requireMember, async (req, res) => {
   // Limited to a range of birth years (an age category)?
   const eligibility = eligibilityProblem(event, normalizedDependentId ? (req.member.dependents || []).find((d) => d.id === normalizedDependentId) : req.member);
   if (eligibility) {
-    return res.status(eligibility.code === "birthdate_required" ? 400 : 403).json({
+    return res.status(eligibility.code === "birthdate_required" || eligibility.code === "gender_required" ? 400 : 403).json({
       code: eligibility.code,
       error: eligibility.error,
+      genderRestriction: eligibility.gender || "",
       birthYearFrom: eligibility.from,
       birthYearTo: eligibility.to,
       birthYear: eligibility.birthYear || null,
@@ -5608,6 +5644,30 @@ app.put("/api/admin/members/:membershipNumber/birth-date", requireStaffRole("adm
   res.json({ ok: true, ...out });
 });
 
+// Sets the gender of a member or one of their family members. Body:
+// { gender: "male"|"female", dependentId? }.
+app.put("/api/admin/members/:membershipNumber/gender", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const member = db.members[String(req.params.membershipNumber)];
+  if (!member) return res.status(404).json({ error: "No member found with that membership number" });
+  const g = sanitizeGender(req.body && req.body.gender);
+  if (!g) return res.status(400).json({ error: "Please select male or female" });
+  let target = member;
+  if (req.body.dependentId != null && req.body.dependentId !== "") {
+    target = (member.dependents || []).find((d) => d.id === Number(req.body.dependentId));
+    if (!target) return res.status(404).json({ error: "No such family member" });
+  }
+  const before = target.gender || "";
+  target.gender = g;
+  logActivity(db, {
+    actorType: "staff", actorId: req.staff.username, actorName: req.staff.name,
+    action: "member.gender_set",
+    details: `${target.name} (#${member.membershipNumber}): ${before || "-"} -> ${g}`,
+  });
+  writeDb(db);
+  res.json({ ok: true, gender: g });
+});
+
 // Lets an admin set/fix the age group of a member or one of their family
 // members (dependents) - used to fill in accounts created before age group
 // became mandatory. Body: { ageGroup, dependentId? }. Cannot be cleared.
@@ -5748,6 +5808,7 @@ app.get("/api/admin/members/export", requireStaffRole("admin"), (req, res) => {
     "Birth Date": AgeUtils.ageInfo(m).birthDate,
     "Birth Year": AgeUtils.ageInfo(m).birthYear || "",
     Age: AgeUtils.ageInfo(m).age == null ? "" : AgeUtils.ageInfo(m).age,
+    Gender: sanitizeGender(m.gender),
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
@@ -6241,6 +6302,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
         email: m.email || "",
         familyGroup: m.familyGroup || "",
         ageGroup: m.ageGroup || "",
+        gender: sanitizeGender(m.gender),
         ...ageFields(m),
         memberType: m.memberType || "main",
         relationshipToMain: m.relationshipToMain || "",
@@ -6263,6 +6325,7 @@ app.get("/api/admin/directory", requireStaffRole("admin"), async (req, res) => {
           phone: d.phone || "",
           email: d.email || "",
           ageGroup: d.ageGroup || "",
+          gender: sanitizeGender(d.gender),
           ...ageFields(d),
         })),
         registrations,
@@ -7086,6 +7149,81 @@ function refreshSwissStatus(db, t) {
 
 // Serializes a tournament for the client, resolving entrant ids to display
 // labels along the way so the frontend never has to cross-reference.
+// ---- Scorers & awards (top scorer, best goalkeeper, best player, fair play) --
+// t.scorers[matchId] = [{ regId, goals }]; t.awards = { bestGoalkeeper: regId|null,
+// bestPlayer: regId|null, fairPlay: entrantId|null }. The top scorer is
+// calculated from the recorded goals, never typed in.
+function allTournamentMatches(t) {
+  const out = [];
+  (t.groups || []).forEach((g) => g.matches.forEach((m) => out.push(m)));
+  if (t.knockout) t.knockout.rounds.forEach((round) => round.forEach((m) => out.push(m)));
+  return out;
+}
+function matchScoreOf(m) {
+  if (m.result) return { a: m.result.scoreA, b: m.result.scoreB };
+  if (Number.isInteger(m.scoreA) && Number.isInteger(m.scoreB)) return { a: m.scoreA, b: m.scoreB };
+  return null;
+}
+function scorersBySide(t, db, m) {
+  const list = (t.scorers && t.scorers[m.id]) || [];
+  const entrants = tournamentEntrants(db, t);
+  const ea = entrants.find((e) => e.id === m.a);
+  const eb = entrants.find((e) => e.id === m.b);
+  let a = 0, b = 0;
+  for (const s of list) {
+    if (ea && ea.registrationIds.includes(s.regId)) a += s.goals;
+    else if (eb && eb.registrationIds.includes(s.regId)) b += s.goals;
+  }
+  return { a, b };
+}
+// A score correction must not drop below the goals already credited to scorers.
+function scorersConflict(t, db, m, sa, sb) {
+  if (!t.scorers || !t.scorers[m.id] || !t.scorers[m.id].length) return false;
+  if (!Number.isInteger(sa) || !Number.isInteger(sb)) return false;
+  const by = scorersBySide(t, db, m);
+  return by.a > sa || by.b > sb;
+}
+function playerInfo(db, t, entrants, regId, forPublic) {
+  const entrant = entrants.find((e) => e.registrationIds.includes(regId));
+  if (!entrant) return null;
+  const reg = db.registrations.find((r) => r.id === regId);
+  return { registrationId: regId, name: tournamentEntrantName(db, reg, forPublic), entrantId: entrant.id, entrantLabel: entrant.label };
+}
+function tournamentTopScorers(db, t, entrants, forPublic) {
+  const totals = new Map();
+  for (const list of Object.values(t.scorers || {})) {
+    for (const s of list) totals.set(s.regId, (totals.get(s.regId) || 0) + s.goals);
+  }
+  const rows = [];
+  for (const [regId, goals] of totals) {
+    const info = playerInfo(db, t, entrants, regId, forPublic);
+    if (info && goals > 0) rows.push({ ...info, goals });
+  }
+  rows.sort((x, y) => y.goals - x.goals || x.name.localeCompare(y.name));
+  return rows;
+}
+function serializeAwards(db, t, entrants, forPublic) {
+  const top = tournamentTopScorers(db, t, entrants, forPublic);
+  const leaders = top.length ? top.filter((r) => r.goals === top[0].goals) : [];
+  const a = t.awards || {};
+  const entrantOf = (id) => {
+    const e = id ? entrants.find((x) => x.id === id) : null;
+    return e ? { entrantId: e.id, label: e.label } : null;
+  };
+  return {
+    topScorers: top.slice(0, 10),
+    topScorer: leaders,
+    bestGoalkeeper: a.bestGoalkeeper ? playerInfo(db, t, entrants, a.bestGoalkeeper, forPublic) : null,
+    bestPlayer: a.bestPlayer ? playerInfo(db, t, entrants, a.bestPlayer, forPublic) : null,
+    fairPlay: entrantOf(a.fairPlay),
+  };
+}
+
+function matchScorersOut(db, t, entrants, m, forPublic) {
+  return ((t.scorers && t.scorers[m.id]) || [])
+    .map((s) => { const info = playerInfo(db, t, entrants, s.regId, forPublic); return info ? { ...info, goals: s.goals } : null; })
+    .filter(Boolean);
+}
 function serializeTournament(db, t, forPublic) {
   const entrants = reconcileSeedOrder(db, t, forPublic);
   const labelOf = (id) => {
@@ -7096,7 +7234,7 @@ function serializeTournament(db, t, forPublic) {
     ? t.groups.map((g) => ({
         entrantIds: g.entrantIds,
         standings: computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)).map((s) => ({ ...s, label: labelOf(s.entrantId) })),
-        matches: g.matches.map((m) => ({ ...m, aLabel: labelOf(m.a), bLabel: labelOf(m.b) })),
+        matches: g.matches.map((m) => ({ ...m, aLabel: labelOf(m.a), bLabel: labelOf(m.b), scorers: matchScorersOut(db, t, entrants, m, forPublic) })),
       }))
     : null;
   const knockout = t.knockout
@@ -7107,6 +7245,7 @@ function serializeTournament(db, t, forPublic) {
             ...m,
             aLabel: m.a ? labelOf(m.a) : null,
             bLabel: m.b ? labelOf(m.b) : null,
+            scorers: matchScorersOut(db, t, entrants, m, forPublic),
           }))
         ),
       }
@@ -7165,6 +7304,7 @@ function serializeTournament(db, t, forPublic) {
         }
       : null,
     attendance: attendanceList,
+    awards: serializeAwards(db, t, entrants, forPublic),
   };
 }
 
@@ -7616,6 +7756,9 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tourn
   if (!Number.isInteger(sa) || sa < 0 || !Number.isInteger(sb) || sb < 0) {
     return res.status(400).json({ error: "scoreA and scoreB must both be whole numbers of 0 or more" });
   }
+  if (scorersConflict(t, db, match, sa, sb)) {
+    return res.status(409).json({ error: "This match already has scorers recorded for more goals than the new score - edit the scorers first.", code: "scorers_exceed_score" });
+  }
   const winnerId = sa === sb ? null : sa > sb ? match.a : match.b;
   const previous = match.result;
   match.result = { scoreA: sa, scoreB: sb, winnerId };
@@ -7725,6 +7868,9 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["to
   if (finalWinnerId !== match.a && finalWinnerId !== match.b) {
     return res.status(400).json({ error: "winnerId must be one of the match's two entrants" });
   }
+  if (sa !== null && sb !== null && scorersConflict(t, db, match, sa, sb)) {
+    return res.status(409).json({ error: "This match already has scorers recorded for more goals than the new score - edit the scorers first.", code: "scorers_exceed_score" });
+  }
   // Correcting a score without changing who won is always safe. Changing
   // who won is only safe if the next round hasn't already been decided off
   // the old winner - otherwise the next match (and anything past it) would
@@ -7743,6 +7889,88 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["to
   match.scoreB = sb;
   match.note = typeof note === "string" ? note.slice(0, 60) : "";
   propagateKnockoutWinner(t, rIdx, mIdx, finalWinnerId);
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Records who scored in one match. Body: { matchId, scorers: [{ registrationId, goals }] }
+// - replaces the match's list. Scorers must belong to one of the two sides and
+// a side's scorers can't add up to more goals than the side's score.
+app.put("/api/admin/tournaments/:eventId/match-scorers", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const m = allTournamentMatches(t).find((x) => x.id === Number(req.body.matchId));
+  if (!m) return res.status(404).json({ error: "No such match" });
+  if (!m.a || !m.b) return res.status(400).json({ error: "Both sides aren't set for this match yet" });
+  const incoming = Array.isArray(req.body.scorers) ? req.body.scorers : null;
+  if (!incoming) return res.status(400).json({ error: "scorers must be a list" });
+  const entrants = tournamentEntrants(db, t);
+  const ea = entrants.find((e) => e.id === m.a);
+  const eb = entrants.find((e) => e.id === m.b);
+  if (!ea || !eb) return res.status(400).json({ error: "Both sides aren't set for this match yet" });
+  const merged = new Map();
+  for (const row of incoming) {
+    const regId = Number(row && row.registrationId);
+    const goals = Number(row && row.goals);
+    if (!Number.isInteger(regId)) return res.status(400).json({ error: "Each scorer needs a registrationId" });
+    if (!Number.isInteger(goals) || goals < 0 || goals > 30) return res.status(400).json({ error: "Goals must be a whole number between 0 and 30" });
+    if (!ea.registrationIds.includes(regId) && !eb.registrationIds.includes(regId)) {
+      return res.status(400).json({ error: "A scorer must belong to one of the two sides of this match", code: "scorer_not_in_match" });
+    }
+    if (goals > 0) merged.set(regId, (merged.get(regId) || 0) + goals);
+  }
+  let ga = 0, gb = 0;
+  for (const [regId, goals] of merged) { if (ea.registrationIds.includes(regId)) ga += goals; else gb += goals; }
+  const score = matchScoreOf(m);
+  if (!score) return res.status(400).json({ error: "Enter the match score first, then the scorers", code: "score_first" });
+  if (ga > score.a || gb > score.b) {
+    return res.status(400).json({ error: "The scorers add up to more goals than the score of their side", code: "scorers_exceed_score", scorerGoals: { a: ga, b: gb }, score });
+  }
+  t.scorers = t.scorers || {};
+  if (merged.size) t.scorers[m.id] = [...merged].map(([regId, goals]) => ({ regId, goals }));
+  else delete t.scorers[m.id];
+  logActivity(db, {
+    actorType: "staff", actorId: req.staff.username, actorName: req.staff.name,
+    action: "tournament.scorers_set",
+    details: `event ${t.eventId} match ${m.id}: ${[...merged].map(([r, g]) => `${r}x${g}`).join(", ") || "none"}`,
+  });
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Sets the tournament awards. Body (any subset): { bestGoalkeeper, bestPlayer }
+// = a registrationId of a player in the tournament, { fairPlay } = an entrant
+// id (a team, or a player in individual mode); null/"" clears one.
+app.put("/api/admin/tournaments/:eventId/awards", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const entrants = tournamentEntrants(db, t);
+  const awards = { bestGoalkeeper: null, bestPlayer: null, fairPlay: null, ...(t.awards || {}) };
+  for (const key of ["bestGoalkeeper", "bestPlayer"]) {
+    if (req.body[key] === undefined) continue;
+    if (req.body[key] === null || req.body[key] === "") { awards[key] = null; continue; }
+    const regId = Number(req.body[key]);
+    if (!Number.isInteger(regId) || !entrants.some((e) => e.registrationIds.includes(regId))) {
+      return res.status(400).json({ error: "That player isn't part of this tournament" });
+    }
+    awards[key] = regId;
+  }
+  if (req.body.fairPlay !== undefined) {
+    if (req.body.fairPlay === null || req.body.fairPlay === "") awards.fairPlay = null;
+    else {
+      const id = String(req.body.fairPlay);
+      if (!entrants.some((e) => String(e.id) === id)) return res.status(400).json({ error: "That team isn't part of this tournament" });
+      awards.fairPlay = entrants.find((e) => String(e.id) === id).id;
+    }
+  }
+  t.awards = awards;
+  logActivity(db, {
+    actorType: "staff", actorId: req.staff.username, actorName: req.staff.name,
+    action: "tournament.awards_set",
+    details: `event ${t.eventId}: GK ${awards.bestGoalkeeper || "-"}, best ${awards.bestPlayer || "-"}, fair play ${awards.fairPlay || "-"}`,
+  });
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
@@ -7974,7 +8202,7 @@ app.get("/api/season/:eventId", (req, res) => {
     const ser = serializeTournament(db, t, true);
     categories.push({
       eventId: ev.id, nameEn: ev.nameEn, nameAr: ev.nameAr || "", birthYearFrom: ev.birthYearFrom == null ? null : ev.birthYearFrom, birthYearTo: ev.birthYearTo == null ? null : ev.birthYearTo,
-      status: ser.status, finalsMode: ser.finalsMode, standings: ser.groups && ser.groups[0] ? ser.groups[0].standings : [], finalStandings: ser.standings,
+      status: ser.status, finalsMode: ser.finalsMode, awards: ser.awards, standings: ser.groups && ser.groups[0] ? ser.groups[0].standings : [], finalStandings: ser.standings,
     });
     for (const g of ser.groups || []) {
       for (const m of g.matches) {
