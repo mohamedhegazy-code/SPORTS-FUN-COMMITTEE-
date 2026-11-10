@@ -614,6 +614,21 @@ Tests: `loadtest/league_e2e.js` (eligibility, league and finals, season schedule
 
 Tests: `loadtest/awards_e2e.js`.
 
+## Event code (mutually exclusive events)
+
+Admin-only field **Event code** on the Add / Edit event forms. Events that carry the **same code** can't both be joined by the same person - e.g. give "Amateurs Cup" and "Professionals Cup" the code `TENNIS CUP` and a player can register in only one of them.
+
+- The code is trimmed, upper-cased and capped at 30 characters; matching is case-insensitive. Leave it empty for no restriction.
+- Applies per person: a member and each family member are separate people (a parent can take one event and a child the other). A **waiting-list** place counts as registered.
+- The second attempt is refused with a clear message (Arabic / English) naming the event already joined. Players never see the code; only admins get it in the API (`eventCode`), and it is stripped from every other response.
+- Admin **Invite** skips people already in another event with the same code and says why; **Merge events** treats them as conflicts.
+- To switch, the player cancels the first registration, then registers in the other.
+- Setting a code on events that already share registrants doesn't cancel anything; the admin gets a note with the number of people already in more than one of them.
+- Tournament Managers can't set or see it (admin only), and an edit by a manager never changes an existing code.
+- Works independently of "Parent event" - the events stay as separate cards on the landing page.
+
+Tests: `loadtest/exclusive_code_e2e.js` (53 checks, fresh data folder).
+
 ## 1000-player tournament test
 
 `loadtest/tournament_1000_e2e.js` signs up 1000 members once, then, for each format, creates an event, has **all 1000 register themselves**, builds the tournament through the staff API, plays every match and checks the result. Formats (pick with `FORMATS=`, default all six):

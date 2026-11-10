@@ -128,6 +128,10 @@ const app = express();
 // secure flag relies on. Safe here because there is exactly one proxy
 // layer in front of this app (Railway's), never more.
 app.set("trust proxy", 1);
+// The event code is admin-only: never let it ride along in a response by
+// accident (e.g. an event embedded in "my registrations"). Admins get it as
+// `eventCode` where it is meant to be shown.
+app.set("json replacer", (key, value) => (key === "exclusiveCode" ? undefined : value));
 // Sets standard security-related response headers (clickjacking, MIME-
 // sniffing, etc.). The default Content-Security-Policy is replaced with one
 // that still fits this app: inline style="..." attributes are used
@@ -2569,6 +2573,44 @@ function parseRegistrationSettings(status, opensAt) {
   if (at && at <= new Date().toISOString()) return { error: "The opening time must be in the future" };
   return { status: "soon", opensAt: at };
 }
+// ---- Event code (admin only) ---------------------------------------------------
+// Events that carry the SAME code (e.g. "TENNIS-CUP") are mutually exclusive:
+// one person (a member, or one specific family member) can be registered for
+// only one of them - for example an Amateurs and a Professionals tournament.
+// Only an admin sets or sees the code; players just get a clear message when
+// they try the second event. A waiting-list place counts as registered.
+function parseExclusiveCode(raw) {
+  if (raw === undefined) return { unchanged: true };
+  const code = String(raw === null ? "" : raw).trim().replace(/\s+/g, " ").toUpperCase();
+  if (code.length > 30) return { error: "The event code can be at most 30 characters" };
+  return { code: code || null };
+}
+// How many people are ALREADY registered in two or more events sharing this
+// code (the rule only stops new registrations; admin sorts old ones out).
+function exclusiveOverlapCount(db, code) {
+  if (!code) return 0;
+  const ids = new Set(db.events.filter((e) => e.exclusiveCode === code).map((e) => e.id));
+  const seen = new Map();
+  for (const r of db.registrations) {
+    if (!ids.has(r.eventId)) continue;
+    const key = `${r.membershipNumber}|${r.dependentId == null ? "" : r.dependentId}`;
+    if (!seen.has(key)) seen.set(key, new Set());
+    seen.get(key).add(r.eventId);
+  }
+  return [...seen.values()].filter((v) => v.size > 1).length;
+}
+function exclusiveConflict(db, event, membershipNumber, dependentId, ignoreEventIds) {
+  const code = event && event.exclusiveCode;
+  if (!code) return null;
+  const skip = new Set([event.id, ...(ignoreEventIds || [])]);
+  const ids = new Set(db.events.filter((e) => !skip.has(e.id) && e.exclusiveCode === code).map((e) => e.id));
+  if (!ids.size) return null;
+  const dep = dependentId == null ? null : dependentId;
+  const reg = db.registrations.find((r) => ids.has(r.eventId) && r.membershipNumber === membershipNumber && (r.dependentId == null ? null : r.dependentId) === dep);
+  if (!reg) return null;
+  const other = db.events.find((e) => e.id === reg.eventId);
+  return { registration: reg, event: other };
+}
 // The fields every event list/response carries so the page can show the right
 // button without asking again.
 function registrationFields(db, ev) {
@@ -2842,6 +2884,8 @@ app.get("/api/events", (req, res) => {
     createdByName: creators && creators.get(ev.id) ? creators.get(ev.id).name : undefined,
     createdByUsername: creators && creators.get(ev.id) ? creators.get(ev.id).username : undefined,
     createdAtIso: creators && creators.get(ev.id) ? creators.get(ev.id).at : undefined,
+    // The event code is admin-only; everyone else just sees the rule applied.
+    eventCode: viewer && viewer.role === "admin" ? ev.exclusiveCode || "" : undefined,
     // Manager assignments are only shown to admins; a Tournament Manager just
     // learns whether this event is currently theirs.
     managerUsernames: viewer && viewer.role === "admin" ? ev.managerUsernames || [] : undefined,
@@ -2914,6 +2958,8 @@ app.post(
     if (regSettings.error) return res.status(400).json({ error: regSettings.error });
     const eligibility = parseEligibilityFields(req.body, {});
     if (eligibility.error) return res.status(400).json({ error: eligibility.error });
+    const exclusive = req.staff.role === "admin" ? parseExclusiveCode(req.body.exclusiveCode) : { unchanged: true };
+    if (exclusive.error) return res.status(400).json({ error: exclusive.error });
     const teamSettings = parseTeamSettings(req.body, null);
     if (teamSettings.error) return res.status(400).json({ error: teamSettings.error });
     const parentCheck = validateParentEventId(db, null, parentEventId);
@@ -2956,6 +3002,7 @@ app.post(
       maxCapacity: max,
       parentEventId: parentCheck.parentEventId,
       allowMultipleActivities: String(allowMultipleActivities) === "true",
+      exclusiveCode: exclusive.code || null,
       registrationStatus: regSettings.status,
       registrationOpensAt: regSettings.opensAt,
       birthYearFrom: eligibility.birthYearFrom,
@@ -2984,7 +3031,7 @@ app.post(
       details: `${nameEn} (${date})`,
     });
     writeDb(db);
-    res.status(201).json({ ...event, ...registrationFields(db, event) });
+    res.status(201).json({ ...event, ...registrationFields(db, event), eventCode: req.staff.role === "admin" ? event.exclusiveCode || "" : undefined });
   }
 );
 
@@ -3050,6 +3097,8 @@ app.put(
     if (regSettings && regSettings.error) return res.status(400).json({ error: regSettings.error });
     const eligibility = parseEligibilityFields(req.body, event);
     if (eligibility.error) return res.status(400).json({ error: eligibility.error });
+    const exclusive = req.staff.role === "admin" ? parseExclusiveCode(req.body.exclusiveCode) : { unchanged: true };
+    if (exclusive.error) return res.status(400).json({ error: exclusive.error });
     const teamSettings = parseTeamSettings(req.body, event.teamRegistration);
     if (teamSettings.error) return res.status(400).json({ error: teamSettings.error });
     const parentCheck = validateParentEventId(db, event, parentEventId);
@@ -3068,6 +3117,7 @@ app.put(
     event.maxCapacity = max;
     event.parentEventId = parentCheck.parentEventId;
     event.allowMultipleActivities = String(allowMultipleActivities) === "true";
+    if (!exclusive.unchanged) event.exclusiveCode = exclusive.code || null;
     if (regSettings) {
       event.registrationStatus = regSettings.status;
       event.registrationOpensAt = regSettings.opensAt;
@@ -3111,6 +3161,8 @@ app.put(
       confirmedCount: confirmedRegistrationCount(db, event.id),
       waitlistCount: waitlistedRegistrationCount(db, event.id),
       ...registrationFields(db, event),
+      eventCode: req.staff.role === "admin" ? event.exclusiveCode || "" : undefined,
+      exclusiveOverlap: exclusiveOverlapCount(db, event.exclusiveCode),
     });
   }
 );
@@ -3216,7 +3268,7 @@ function planEventMerge(db, from, to) {
   for (const r of src) {
     const label = r.dependentName || (db.members[r.membershipNumber] ? db.members[r.membershipNumber].name : r.membershipNumber);
     const dup = inTo.some((x) => samePerson(x, r));
-    const sibling = siblingIds.size && db.registrations.some((x) => siblingIds.has(x.eventId) && samePerson(x, r));
+    const sibling = (siblingIds.size && db.registrations.some((x) => siblingIds.has(x.eventId) && samePerson(x, r))) || !!exclusiveConflict(db, to, r.membershipNumber, r.dependentId, [from.id]);
     if (dup || sibling) {
       plan.conflicts.push({ registrationId: r.id, name: label, membershipNumber: r.membershipNumber, reason: dup ? "already_in_target" : "other_activity" });
       continue;
@@ -4323,6 +4375,20 @@ app.post("/api/register", requireMember, async (req, res) => {
           } under this event day. Only one activity per person is allowed here.`,
         });
       }
+    }
+  }
+
+  // Same event code on another event (e.g. Amateurs vs Professionals): only one.
+  {
+    const clash = exclusiveConflict(db, event, membershipNumber, normalizedDependentId);
+    if (clash) {
+      return res.status(409).json({
+        code: "exclusive_event",
+        error: `${dependentName ? dependentName + " is" : "You're"} already ${clash.registration.waitlisted ? "on the waiting list for" : "registered for"} ${clash.event ? clash.event.nameEn : "another event"}. Only one of these events is allowed per person.`,
+        otherEventNameEn: clash.event ? clash.event.nameEn : "",
+        otherEventNameAr: clash.event ? clash.event.nameAr || clash.event.nameEn : "",
+        attendeeName: dependentName || "",
+      });
     }
   }
 
@@ -6218,6 +6284,11 @@ app.post("/api/admin/events/:eventId/invite", requireStaffRole("admin"), (req, r
         membershipNumber,
         reason: already.waitlisted ? "Already on the waiting list" : "Already registered",
       });
+      return;
+    }
+    const clash = exclusiveConflict(db, event, membershipNumber, null);
+    if (clash) {
+      skipped.push({ membershipNumber, reason: `Already registered for ${clash.event ? clash.event.nameEn : "another event"} (same event code)` });
       return;
     }
     const registration = {
