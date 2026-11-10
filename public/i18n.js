@@ -899,6 +899,10 @@ const I18N = {
     fieldParentEvent: "Parent event (optional)",
     parentEventNone: "-- none / standalone event --",
     parentEventHint: "Pick a parent event to make this a sub-activity of an \"event day\" (e.g. foot volley under Sports Entertainment Day). Leave as \"none\" for a normal standalone event.",
+    fieldEventCode: "Event code (admin only, optional)",
+    eventCodeHint: "Events that share the same code are mutually exclusive: a player (or family member) can register in only one of them - e.g. give \"Amateurs\" and \"Professionals\" the same code. Players never see the code. Leave empty for no restriction.",
+    eventCodeOverlap: "Note: {count} player(s) are already registered in more than one event with this code. The rule only stops new registrations - review them in the registration lists.",
+    errExclusiveEvent: "{name} Already registered for \"{event}\" - only one of these events is allowed per person. Cancel that registration first if you want to switch.",
     fieldAllowMultiActivities: "Allow one person to register for more than one activity under this event",
     activitiesTitle: "Activities",
 
@@ -2564,6 +2568,10 @@ const I18N = {
     fieldParentEvent: "الفعالية الرئيسية (اختياري)",
     parentEventNone: "-- بدون / فعالية مستقلة --",
     parentEventHint: "اختر فعالية رئيسية لجعل هذه الفعالية نشاطاً فرعياً تابعاً ليوم فعاليات (مثال: فوت فولي تحت مظلة يوم الترفيه الرياضي). اتركها \"بدون\" لفعالية مستقلة عادية.",
+    fieldEventCode: "كود الفعالية (للإدارة فقط، اختياري)",
+    eventCodeHint: "الفعاليات التي تحمل الكود نفسه لا يجوز الجمع بينها: يستطيع اللاعب (أو فرد الأسرة) التسجيل في واحدة منها فقط، مثل إعطاء «الهواة» و«المحترفين» الكود نفسه. لا يظهر الكود للاعبين. اتركه فارغاً لعدم وجود قيد.",
+    eventCodeOverlap: "تنبيه: يوجد {count} لاعب مسجّل بالفعل في أكثر من فعالية بهذا الكود. القاعدة تمنع التسجيلات الجديدة فقط، فراجعهم في قوائم التسجيل.",
+    errExclusiveEvent: "{name} مسجّل بالفعل في «{event}» - لا يُسمح بالتسجيل إلا في إحدى هذه الفعاليات. ألغِ ذلك التسجيل أولاً إن أردت التبديل.",
     fieldAllowMultiActivities: "السماح للشخص الواحد بالتسجيل في أكثر من نشاط تحت هذه الفعالية",
     activitiesTitle: "الأنشطة",
 

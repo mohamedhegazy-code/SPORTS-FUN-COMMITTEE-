@@ -862,6 +862,12 @@
             <div class="ev-managers-list" id="ev-managers-add"></div>
             <p class="hint-note" data-i18n="hintEventManagers">Only the managers ticked here can see this event's check-in list, WhatsApp messages, reports and tournament - and their access closes automatically 7 days after the event ends. Create Tournament Manager accounts in Settings.</p>
           </div>
+          <div class="admin-full-only ev-code-block">
+            <label data-i18n="fieldEventCode">Event code (admin only, optional)</label>
+            <input id="ev-code" maxlength="30" placeholder="TENNIS-CUP" autocomplete="off" />
+            <p class="hint-note" data-i18n="eventCodeHint">Events that share the same code are mutually exclusive: a player (or family member) can register in only one of them - e.g. give "Amateurs" and "Professionals" the same code. Players never see the code. Leave empty for no restriction.</p>
+            <p class="hint-note hidden" id="ev-code-warn"></p>
+          </div>
           <label class="checkbox-row"><input type="checkbox" id="ev-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
           <label data-i18n="fieldDescAr">Description (AR)</label>
           <textarea id="ev-desc-ar" dir="rtl" rows="3"></textarea>
@@ -917,6 +923,12 @@
               <label data-i18n="fieldEventManagers">Event managers (Tournament Managers)</label>
               <div class="ev-managers-list" id="ev-managers-edit"></div>
               <p class="hint-note" data-i18n="hintEventManagers">Only the managers ticked here can see this event's check-in list, WhatsApp messages, reports and tournament - and their access closes automatically 7 days after the event ends. Create Tournament Manager accounts in Settings.</p>
+            </div>
+            <div class="admin-full-only ev-code-block">
+              <label data-i18n="fieldEventCode">Event code (admin only, optional)</label>
+              <input id="ev-edit-code" maxlength="30" placeholder="TENNIS-CUP" autocomplete="off" />
+              <p class="hint-note" data-i18n="eventCodeHint">Events that share the same code are mutually exclusive: a player (or family member) can register in only one of them - e.g. give "Amateurs" and "Professionals" the same code. Players never see the code. Leave empty for no restriction.</p>
+              <p class="hint-note hidden" id="ev-edit-code-warn"></p>
             </div>
             <label class="checkbox-row"><input type="checkbox" id="ev-edit-allow-multi" /> <span data-i18n="fieldAllowMultiActivities">Allow one person to register for more than one activity under this event</span></label>
             <label data-i18n="fieldDescAr">Description (AR)</label>

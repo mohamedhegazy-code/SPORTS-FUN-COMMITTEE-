@@ -243,6 +243,10 @@
       const ev = { birthYearFrom: d.birthYearFrom, birthYearTo: d.birthYearTo };
       return fill("errNotEligible", { name: d.attendeeName || "", year: d.birthYear || "", range: L.bornRangeText(ev) });
     }
+    if (d.code === "exclusive_event") {
+      const other = (currentLang === "ar" ? d.otherEventNameAr : d.otherEventNameEn) || d.otherEventNameEn || "";
+      return fill("errExclusiveEvent", { name: d.attendeeName || "", event: other });
+    }
     if (d.code === "gender_required") return fill("errGenderNeeded", { name: d.attendeeName || "" });
     if (d.code === "not_eligible_gender") {
       return fill("errNotEligibleGender", { name: d.attendeeName || "", rule: d.genderRestriction === "female" ? t("genderFemaleOnly") : t("genderMaleOnly") });

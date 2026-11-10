@@ -6821,6 +6821,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   const maxCapacity = document.getElementById("ev-max-capacity").value;
   const parentEventId = document.getElementById("ev-parent-event").value;
   const allowMultipleActivities = document.getElementById("ev-allow-multi").checked;
+  const eventCode = document.getElementById("ev-code").value.trim();
   const photoInput = document.getElementById("ev-photo");
   const videoInput = document.getElementById("ev-video");
   const whatsappQrInput = document.getElementById("ev-whatsapp-qr");
@@ -6845,6 +6846,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("maxCapacity", maxCapacity);
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
+  fd.append("exclusiveCode", eventCode);
   appendRegistrationFields(fd, "ev-reg-status", "ev-reg-opens");
   lg("appendSeasonFields", fd, "ev");
   appendManagers(fd, "ev-managers-add");
@@ -6874,6 +6876,7 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-end-time").value = "";
     document.getElementById("ev-parent-event").value = "";
     document.getElementById("ev-allow-multi").checked = false;
+    document.getElementById("ev-code").value = "";
     document.getElementById("ev-reg-status").value = "open";
     document.getElementById("ev-reg-opens").value = "";
     lg("fillSeasonFields", "ev", null);
@@ -6969,6 +6972,10 @@ function populateEditForm(ev) {
   if (editParentSel) editParentSel.value = ev.parentEventId ? String(ev.parentEventId) : "";
   const editAllowMulti = document.getElementById("ev-edit-allow-multi");
   if (editAllowMulti) editAllowMulti.checked = !!ev.allowMultipleActivities;
+  const editCode = document.getElementById("ev-edit-code");
+  if (editCode) editCode.value = ev.eventCode || "";
+  const editCodeWarn = document.getElementById("ev-edit-code-warn");
+  if (editCodeWarn) { editCodeWarn.textContent = ""; editCodeWarn.classList.add("hidden"); }
   renderEventManagerPicker("ev-managers-edit", ev.managerUsernames || []);
   fields.classList.remove("hidden");
 }
@@ -6999,6 +7006,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   const maxCapacity = document.getElementById("ev-edit-max-capacity").value;
   const parentEventId = document.getElementById("ev-edit-parent-event").value;
   const allowMultipleActivities = document.getElementById("ev-edit-allow-multi").checked;
+  const eventCode = document.getElementById("ev-edit-code").value.trim();
   const photoInput = document.getElementById("ev-edit-photo");
   const videoInput = document.getElementById("ev-edit-video");
   const whatsappQrInput = document.getElementById("ev-edit-whatsapp-qr");
@@ -7023,6 +7031,7 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("maxCapacity", maxCapacity);
   fd.append("parentEventId", parentEventId);
   fd.append("allowMultipleActivities", allowMultipleActivities ? "true" : "false");
+  fd.append("exclusiveCode", eventCode);
   appendRegistrationFields(fd, "ev-edit-reg-status", "ev-edit-reg-opens");
   lg("appendSeasonFields", fd, "ev-edit");
   appendManagers(fd, "ev-managers-edit");
@@ -7040,6 +7049,10 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
     // response instead of re-deriving from the select's value, since a
     // date change can move the event out of the (upcoming-only) dropdown.
     populateEditForm(saved);
+    if (saved.exclusiveOverlap) {
+      const w = document.getElementById("ev-edit-code-warn");
+      if (w) { w.textContent = t("eventCodeOverlap").replace("{count}", fmt(saved.exclusiveOverlap)); w.classList.remove("hidden"); }
+    }
     const sel = document.getElementById("ev-edit-select");
     if (sel && Array.from(sel.options).some((o) => o.value === String(saved.id))) sel.value = String(saved.id);
   } catch (e) {
