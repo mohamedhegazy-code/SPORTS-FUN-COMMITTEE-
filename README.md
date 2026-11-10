@@ -614,6 +614,32 @@ Tests: `loadtest/league_e2e.js` (eligibility, league and finals, season schedule
 
 Tests: `loadtest/awards_e2e.js`.
 
+## 1000-player tournament test
+
+`loadtest/tournament_1000_e2e.js` signs up 1000 members once, then, for each format, creates an event, has **all 1000 register themselves**, builds the tournament through the staff API, plays every match and checks the result. Formats (pick with `FORMATS=`, default all six):
+
+| `FORMATS` value | What runs |
+|---|---|
+| `knockout` | 1000-player single elimination (10 rounds, 24 byes), plus 5 extra members joining the waiting list on a full event |
+| `groups` | 250 groups of 4, top 2 advance, 500-player knockout |
+| `swiss` | 1000 players, 7 rounds, women/junior rankings, a withdrawal, no rematches, points conserved |
+| `teamgroups` | 200 teams of 5, 50 groups, knockout; every squad member receives the team's rank |
+| `casual` | a fun session with attendance marked for all 1000 |
+| `league` | 16 clubs of ~62 players, round robin, final + 3rd-place match, scorers for every match, awards |
+
+Every scenario also checks the public page (no membership numbers or phones leaked) and that finishing positions show on the members' own registrations.
+
+```bash
+# fresh server first (any free port), then:
+BASE_URL=http://localhost:3946 node loadtest/tournament_1000_e2e.js
+# smaller / selected runs:
+N=200 FORMATS=swiss,league BASE_URL=http://localhost:3946 node loadtest/tournament_1000_e2e.js
+```
+
+Options: `N`, `FORMATS`, `SWISS_ROUNDS`, `TEAM_SIZE`, `LEAGUE_TEAMS`, `EXTRA`, `CONCURRENCY`, `SIGNUP_CONCURRENCY`, `ADMIN_USER`, `ADMIN_PASS`, `REPORT=file.json`. The full run takes about 17 minutes on 2 CPU cores (sign-up ~100 s, each registration round 25-65 s as the data file grows) and the server stays around 230 MB. Always start it on a **fresh data folder** and with no other Node processes running.
+
+It found and fixed a real problem: the server worked out "today in Cairo" with a brand-new `Intl.DateTimeFormat` for every member on every request, which at ~1000 members used several GB of memory and nearly all the CPU. It is now built once and the date is cached for a second (`age_utils.js`).
+
 ## Admin: Branding (colors & logo)
 
 A "Branding" card near the top of the Admin tab lets the committee set a

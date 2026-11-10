@@ -5,9 +5,18 @@
 // "match birthdates file" tool. Pure functions - no I/O.
 
 // ------------------------------------------------------------- dates ----
+// The formatter is built once and today's date is cached for a second: the
+// server re-reads the whole member list on every request and asks for "today"
+// once per member, so constructing an Intl.DateTimeFormat each time cost
+// thousands of ICU objects per request (CPU + several GB of native memory
+// at ~1000 members). Found by the 1000-player E2E test.
+const CAIRO_DAY_FORMAT = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" });
+let cairoTodayCache = { at: 0, value: "" };
 function todayCairoISO() {
   // en-CA formats as YYYY-MM-DD. Cairo time so the age flips at midnight Cairo.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const now = Date.now();
+  if (now - cairoTodayCache.at >= 1000 || !cairoTodayCache.value) cairoTodayCache = { at: now, value: CAIRO_DAY_FORMAT.format(new Date(now)) };
+  return cairoTodayCache.value;
 }
 
 function toLatinDigits(s) {
