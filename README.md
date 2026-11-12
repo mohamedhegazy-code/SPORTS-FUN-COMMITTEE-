@@ -806,7 +806,7 @@ for your deployment.
 
 
 ### Event card covers
-All event cards are the same size: every cover (banner, ordinary photo or the "no photo" placeholder) uses one 4.5:1 frame with `object-fit: cover` (banners saved with white padding are trimmed to the banner), the grid uses `grid-auto-rows: 1fr`, and buttons sit at the bottom of each card. The per-card "Coming up next" tag was removed (the section title says it). The full picture is shown in the event's details window. The cover sits inset in the card inside a thin gold frame (1.5px border, 10px margin, faint outer ring).
+All event cards are the same size: every cover (banner, ordinary photo or the "no photo" placeholder) uses one 4.5:1 frame with `object-fit: cover` (banners saved with white padding are trimmed to the banner), the grid uses `grid-auto-rows: 1fr`, and buttons sit at the bottom of each card. The per-card "Coming up next" tag was removed (the section title says it). The full picture is shown in the event's details window. The same grid sizing (400px columns, equal row heights) applies to Annual Activities (landing preview and tab), More upcoming events and the register tab. The cover sits inset in the card inside a thin gold frame (1.5px border, 10px margin, faint outer ring).
 
 ### Hero layout
 Left column: the welcome block on top and the WhatsApp community card (QR + button) under it. Right column: the stats pill and the "Upcoming Events" card with fixed-height rows (date chip, single-line name in the visitor's language, weekday and start time), at most 6, then a "+N more events" line, so the hero keeps the same size however many events exist. On phones the order is welcome, stats, upcoming events, WhatsApp.
