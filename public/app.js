@@ -2218,25 +2218,42 @@ function shortDateBadge(dateStr) {
 // soonest-first upcoming events renderFeaturedEvents() shows in full-size
 // cards below the hero (same data/filter, no extra request), styled as a
 // quick-glance list with a date badge instead of a full event card.
+const HERO_UPCOMING_MAX = 4;
 function renderHeroUpcoming() {
   const list = document.getElementById("hero-upcoming-list");
   if (!list) return;
-  const upcoming = (EVENTS_DATA || [])
-    .filter((ev) => isUpcoming(ev) && !ev.parentEventId)
-    .sort(compareEventsBySoonest)
-    .slice(0, 4);
+  const all = (EVENTS_DATA || []).filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort(compareEventsBySoonest);
+  const upcoming = all.slice(0, HERO_UPCOMING_MAX);
   if (!upcoming.length) {
     list.innerHTML = `<div class="hero-upcoming-empty">${escapeAttr(t("heroUpcomingEmpty"))}</div>`;
     return;
   }
-  list.innerHTML = upcoming
-    .map(
-      (ev) => `<div class="hero-upcoming-item">
-        <div class="date">${escapeAttr(shortDateBadge(ev.date))}${ev.endDate && ev.endDate !== ev.date ? ` &ndash; ${escapeAttr(shortDateBadge(ev.endDate))}` : ""}</div>
-        <div class="name">${eventNameHtml(ev)}</div>
-      </div>`
-    )
+  // One fixed-height row per event (date chip + a single-line name in the
+  // visitor's language), at most HERO_UPCOMING_MAX rows, so the hero stays the
+  // same size however many events exist; the rest is a "+N more" count.
+  const locale = currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-US";
+  const chip = (dateStr) => {
+    const d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return { day: "", mon: "" };
+    const mon = d.toLocaleDateString(locale, { month: "short" });
+    return { day: String(d.getDate()), mon: currentLang === "ar" ? mon : mon.toUpperCase() };
+  };
+  const rows = upcoming
+    .map((ev) => {
+      const c = chip(ev.date);
+      const name = currentLang === "ar" ? ev.nameAr || ev.nameEn : ev.nameEn || ev.nameAr;
+      const multi = ev.endDate && ev.endDate !== ev.date;
+      return `<div class="hero-upcoming-item">
+        <div class="hu-chip"><span class="hu-day">${escapeAttr(c.day)}</span><span class="hu-mon">${escapeAttr(c.mon)}</span></div>
+        <div class="hu-body">
+          <div class="hu-name" title="${escapeAttr(name || "")}">${escapeAttr(name || "")}</div>
+          <div class="hu-sub">${escapeAttr(multi ? shortDateBadge(ev.date) + " – " + shortDateBadge(ev.endDate) : [weekdayName(ev.date), ev.startTime ? formatTimeOfDay(ev.startTime) : ""].filter(Boolean).join(" · "))}</div>
+        </div>
+      </div>`;
+    })
     .join("");
+  const more = all.length - upcoming.length;
+  list.innerHTML = rows + (more > 0 ? `<div class="hero-upcoming-more">${escapeAttr(t("heroUpcomingMore").replace("{n}", String(more)))}</div>` : "");
 }
 function renderNewsList(posts) {
   const wrap = document.getElementById("news-list");
