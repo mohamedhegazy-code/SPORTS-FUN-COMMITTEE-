@@ -1921,18 +1921,6 @@ function activityRowsHtml(children, isPast) {
     })
     .join("");
 }
-// Frame choice for card covers: wide banners get the 4.5:1 frame, anything
-// closer to a normal photo gets 16:9 (see .photo.has-img in styles.css).
-document.addEventListener(
-  "load",
-  (e) => {
-    const img = e.target;
-    if (!img || img.tagName !== "IMG" || !img.parentElement || !img.parentElement.classList.contains("has-img")) return;
-    if (!img.parentElement.closest(".event-card")) return;
-    if (img.naturalWidth && img.naturalWidth / img.naturalHeight < 2) img.parentElement.classList.add("photo-tall");
-  },
-  true
-);
 function eventCardHtml(ev, isPast, featured) {
   const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
   const isParent = children.length > 0;
@@ -2073,9 +2061,9 @@ function renderFeaturedEvents() {
   const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort(compareEventsBySoonest);
   const featured = upcoming.slice(0, FEATURED_EVENTS_COUNT);
   section.classList.toggle("hidden", featured.length === 0);
-  // The gold "coming up next" tag marks only the 3 soonest; with up to 10 cards
-  // the section title already says it.
-  grid.innerHTML = featured.map((ev, i) => eventCardHtml(ev, false, i < 3)).join("");
+  // No per-card "coming up next" tag: with up to 10 cards the section title
+  // says it, and a tag on only some cards made the cards differ in height.
+  grid.innerHTML = featured.map((ev) => eventCardHtml(ev, false, false)).join("");
   wireEventCardButtons(grid, featured, false);
 }
 
