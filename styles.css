@@ -1,0 +1,1740 @@
+:root {
+  --red: #8B0000;
+  --red-dark: #650000;
+  --gold: #C9A227;
+  --bg: #f7f5f2;
+  --card: #ffffff;
+  --text: #1c1c1c;
+  --muted: #6b6b6b;
+  --border: #e4dfd8;
+  --green: #1e7d34;
+  --amber: #b8860b;
+  --gray: #7a7a7a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+html[dir="rtl"] body { font-family: "Segoe UI", Tahoma, "Arial", sans-serif; }
+
+header.top {
+  background: linear-gradient(135deg, var(--red), var(--red-dark));
+  color: #fff;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+header.top h1 { margin: 0; font-size: 1.25rem; }
+header.top .sub { font-size: 0.8rem; opacity: 0.85; margin-top: 2px; }
+#site-logo { max-height: 44px; max-width: 140px; object-fit: contain; object-position: center; }
+#theme-logo-preview { max-height: 48px; max-width: 160px; object-fit: contain; object-position: center; display: block; margin-inline: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px; background: #fff; }
+
+.lang-toggle {
+  display: flex;
+  gap: 6px;
+}
+.lang-toggle button {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.lang-toggle button.active { background: #fff; color: var(--red); font-weight: 600; }
+
+nav.tabs {
+  display: flex;
+  gap: 4px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  overflow-x: auto;
+}
+nav.tabs button {
+  border: none;
+  background: transparent;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 0.92rem;
+  color: var(--muted);
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+nav.tabs button.active {
+  color: var(--red);
+  border-bottom-color: var(--red);
+  font-weight: 600;
+}
+.tab-wrap { position: relative; display: inline-block; }
+.tab-badge {
+  position: absolute; top: 6px; inset-inline-end: 2px;
+  background: var(--red); color: #fff; font-size: 0.68rem; font-weight: 700;
+  min-width: 16px; height: 16px; line-height: 16px; text-align: center;
+  border-radius: 20px; padding: 0 4px; pointer-events: none;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  background: var(--bg);
+  padding: 10px 0 16px;
+  margin-bottom: 4px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  position: relative;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  padding: 9px 14px;
+  border-radius: 30px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.admin-tab:hover { border-color: var(--red); color: var(--red); }
+.admin-tab.active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+.admin-tab-icon { width: 15px; height: 15px; flex-shrink: 0; }
+.admin-tab-badge {
+  background: var(--gold); color: #fff; font-size: 0.68rem; font-weight: 700;
+  min-width: 16px; height: 16px; line-height: 16px; text-align: center;
+  border-radius: 20px; padding: 0 4px;
+}
+.admin-tab.active .admin-tab-badge { background: #fff; color: var(--red); }
+.admin-tab-panel.hidden { display: none; }
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.view { display: none; }
+.view.active { display: block; }
+
+.card {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+/* A slim gold-to-red accent strip along the top of every card, the same
+   two-tone accent the landing page's hero/section system is built on -
+   so every card on every page reads as part of one visual identity, not
+   just the landing page. Drawn on ::before (rather than a real border)
+   so it can carry its own rounded top corners independent of .card's
+   own border-radius, with no layout/overflow side effects. */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0; inset-inline: 0;
+  height: 3px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, var(--gold), var(--red));
+}
+
+/* Section headings across every page (not just the landing page) share the
+   landing page's own display-font treatment - the same condensed uppercase
+   face and small gold accent bar used by .section-title on the Events tab -
+   so admin, register, member profile, ladder, tournaments and the gate
+   scanner all read as one system. Arabic has no glyphs in this display
+   font, so RTL titles fall back to the normal body font automatically
+   (same behavior already relied on by .section-title/.hero-banner h2). */
+.card h2 {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 1.1rem;
+  color: var(--red-dark);
+}
+.card h2::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 1em;
+  flex-shrink: 0;
+  background: var(--gold);
+  border-radius: 3px;
+}
+.card h3 { font-size: 0.95rem; color: var(--red-dark); }
+.card-icon { width: 19px; height: 19px; flex-shrink: 0; color: var(--gold); }
+
+/* --------------------------------------------------------- page hero --- */
+/* A compact version of the landing page's own hero banner, reused as the
+   header for every other page (Register, Member Profile, Ladder, Annual
+   Activities, Tournaments, Gate Scanner, Admin) so the whole platform
+   opens with the same branded moment the Events tab already has, not just
+   a plain card title. */
+.page-hero {
+  position: relative;
+  margin-bottom: 22px;
+  padding: 22px 24px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 65%, #3a0000 100%);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.page-hero-icon {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold);
+}
+.page-hero-icon svg { width: 24px; height: 24px; }
+.page-hero-text { min-width: 0; }
+.page-hero-text h2 {
+  margin: 0 0 4px;
+  color: #fff;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  line-height: 1.12;
+  font-size: clamp(1.25rem, 3vw, 1.7rem);
+  text-wrap: balance;
+}
+.page-hero-text p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.85rem;
+  max-width: 560px;
+}
+@media (max-width: 560px) {
+  .page-hero { flex-direction: column; align-items: flex-start; text-align: start; padding: 20px; }
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+
+label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+  margin-top: 10px;
+}
+input, select, textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.92rem;
+  background: #fff;
+  font-family: inherit;
+}
+textarea { resize: vertical; }
+input[type="file"] { padding: 6px 8px; }
+input[type="color"] { width: 64px; height: 40px; padding: 4px; cursor: pointer; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
+
+/* Required-field marker on labels: a small red asterisk appended via CSS so
+   it never has to be typed (or translated) into every label's text. Applied
+   by JS at render time (markRequiredLabel) or directly in markup via the
+   "required-label" class. */
+label.required-label::after {
+  content: " *";
+  color: var(--red);
+  font-weight: 700;
+}
+/* Highlight for a required field left empty on submit - paired with the
+   highlightMissingFields() helper in app.js. Clears itself the moment the
+   visitor edits the field (see the delegated input/change listener). */
+input.field-missing, select.field-missing, textarea.field-missing {
+  border-color: var(--red);
+  background: rgba(139, 0, 0, 0.05);
+  box-shadow: 0 0 0 1px var(--red);
+}
+
+button.primary {
+  margin-top: 16px;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  padding: 11px 20px;
+  border-radius: 7px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.primary:hover { background: var(--red-dark); }
+button.primary:disabled, button.primary:disabled:hover { background: var(--red); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.danger {
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid #a12626;
+  color: #a12626;
+  padding: 11px 20px;
+  border-radius: 7px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.danger:hover { background: #fdeaea; }
+button.secondary {
+  /* Shape (padding/border-radius/font-size/font-weight/margin-top) is
+     deliberately identical to button.primary/button.danger below, so a
+     primary and a secondary action sitting side by side (e.g. "Save
+     recovery PIN" + "Remove recovery PIN") always render at the same
+     size - only the fill (solid vs outline) tells them apart. Compact
+     inline-row buttons (delete/reorder icons, etc.) opt into the smaller
+     .small modifier further down instead of relying on this base rule
+     being small. */
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid var(--red);
+  color: var(--red);
+  padding: 11px 20px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.msg { margin-top: 14px; padding: 10px 12px; border-radius: 7px; font-size: 0.88rem; display: none; white-space: pre-line; }
+.msg.show { display: block; }
+.msg.ok { background: #e6f4ea; color: var(--green); border: 1px solid #b7e0c3; }
+.msg.err { background: #fdeaea; color: #a12626; border: 1px solid #f3bcbc; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+html[dir="rtl"] th, html[dir="rtl"] td { text-align: right; }
+th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
+
+.badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge.Pending { background: #fff3cd; color: var(--amber); }
+.badge.Approved { background: #d4edda; color: var(--green); }
+.badge.Fulfilled { background: #d0e7ff; color: #1a5fb4; }
+.badge.Rejected { background: #f8d7da; color: #a12626; }
+
+.ladder-grid { display: grid; gap: 10px; }
+.ladder-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: #fffdf8;
+}
+.ladder-item .pts { font-weight: 700; color: var(--red); min-width: 90px; }
+.ladder-item .info { flex: 1; margin: 0 12px; }
+.ladder-item .info .name { font-weight: 600; }
+.ladder-item .info .desc, .ladder-item .approver { font-size: 0.78rem; color: var(--muted); }
+.ladder-item.reachable { border-color: var(--gold); background: #fff9ec; }
+
+.balance-hero {
+  text-align: center; padding: 22px; background: linear-gradient(135deg, #fff9ec, #fff);
+  border: 1px solid var(--gold); border-radius: 10px; margin-bottom: 16px;
+}
+.balance-hero .num { font-size: 2.4rem; font-weight: 800; color: var(--red); }
+.balance-hero .label { color: var(--muted); font-size: 0.85rem; }
+.pool-note { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+
+.stat-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.stat { flex: 1; min-width: 120px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; text-align: center; }
+.stat .n { font-size: 1.5rem; font-weight: 700; color: var(--red); }
+.stat .l { font-size: 0.75rem; color: var(--muted); }
+/* Community section's own stat row echoes the hero's cream stat pill
+   (same background, same bold red figure) rather than the plain bordered
+   box every other .stat-row on the site (admin dashboards, member points)
+   still uses - scoped to this one id so those are untouched. */
+#community-stats-row.stat-row { gap: 16px; }
+#community-stats-row .stat {
+  background: #fbf7ec;
+  border: none;
+  border-radius: 14px;
+  padding: 16px 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+#community-stats-row .stat .n { font-size: 1.7rem; color: var(--red-dark); }
+#community-stats-row .stat .l { text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+
+.hidden { display: none !important; }
+.admin-lock { text-align: center; padding: 40px 20px; }
+.admin-lock h2 { justify-content: center; }
+
+.warn-note {
+  background: #fff4e5; color: #8a5a00; border: 1px solid #f2c98a;
+  border-radius: 7px; padding: 9px 12px; font-size: 0.82rem; margin: 4px 0 14px;
+}
+.ladder-edit-item {
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+  margin-bottom: 12px; background: #fffdf8;
+}
+.ladder-edit-item h4 { margin: 0 0 8px; font-size: 0.9rem; color: var(--red-dark); }
+.ladder-edit-item .grid-2 { margin-bottom: 8px; }
+.ladder-edit-item .msg { margin-top: 8px; }
+
+/* ---------------------------------------------------------- hero banner --- */
+/* A big rounded photo card (optional admin-uploaded background, falling
+   back to a plain club-color gradient when none is set) with a tinted
+   overlay in the site's own red/gold theme tokens so the bold headline
+   stays readable over almost any photo - plus a stat pill that floats over
+   its corner on wide screens and stacks below it on narrow ones. */
+/* Outer colored "band" the whole hero region sits on - a wider grid of the
+   photo card (left) plus a sidebar (right, stats pill + Upcoming Events
+   card), modeled on a two-column hero/sidebar reference layout the user
+   shared. Kept in the site's own maroon/gold palette rather than the
+   reference's own colors (an explicit choice - see the CTA-row comment
+   below for the same theme-token approach applied here). */
+.hero-banner {
+  position: relative;
+  margin-bottom: 46px;
+  padding: 22px;
+  border-radius: 26px;
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 65%, #3a0000 100%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 22px;
+}
+/* Left column: the welcome block on top, the WhatsApp community card under it,
+   so the right column has the full height for the upcoming-events list. */
+.hero-main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.hero-photo-card {
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 30px 32px 32px;
+  display: flex;
+  align-items: flex-start;
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 55%, #3a0000 100%) center / cover no-repeat;
+}
+/* Sits behind .hero-photo-overlay in DOM order (so the same club-color tint
+   that already works over a background photo also washes over a playing
+   video) and behind .hero-photo-content, with no z-index needed since both
+   later elements paint on top of it in normal stacking order. */
+.hero-video-bg {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+.hero-photo-overlay {
+  position: absolute; inset: 0;
+  /* A flat wash first (so no corner of any photo, however bright or oddly
+     colored, ever shows through untinted), then the directional gradient on
+     top for depth - text sits over the strong left side, a warm gold glow
+     marks the top-right corner under the stat pill. */
+  background:
+    linear-gradient(115deg, rgba(88, 0, 0, 0.92) 6%, rgba(80, 0, 0, 0.82) 45%, rgba(58, 0, 0, 0.72) 100%),
+    radial-gradient(circle at 88% 15%, rgba(201, 162, 39, 0.3), transparent 55%) rgba(58, 0, 0, 0.55);
+  pointer-events: none;
+}
+.hero-photo-content { position: relative; max-width: 620px; }
+.hero-eyebrow {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+.hero-banner h2 {
+  margin: 0 0 10px;
+  color: #fff;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  line-height: 1.06;
+  font-size: clamp(1.9rem, 4.2vw, 3.1rem);
+  text-wrap: balance;
+}
+.hero-banner p {
+  margin: 0; color: rgba(255,255,255,0.92); font-size: 0.98rem; max-width: 520px;
+}
+.hero-cta-row { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+.hero-cta-btn {
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  min-width: 210px;
+  text-align: center;
+}
+.hero-cta-btn:hover { transform: translateY(-1px); }
+/* padding/font-size/border are repeated identically on .primary and
+   .secondary (rather than left on the shared .hero-cta-btn rule above)
+   because this app also has global button.primary/button.secondary rules
+   (used on admin forms) with higher CSS specificity (element+class beats
+   a single class) - those were silently overriding padding/font-size/
+   border here, and since the two global rules use different values from
+   each other, the two hero buttons rendered at visibly different sizes.
+   Matching the values on both .hero-cta-btn.primary/.secondary (specificity
+   0,2,0) reliably beats the global rules (0,1,1) and keeps both identical. */
+.hero-cta-btn.primary {
+  padding: 11px 22px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-top: 0;
+  border: 1.5px solid transparent;
+  background: var(--gold);
+  color: #2a2205;
+  box-shadow: 0 4px 14px rgba(201, 162, 39, 0.35);
+}
+.hero-cta-btn.secondary {
+  padding: 11px 22px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-top: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.65);
+  background: transparent;
+  color: #fff;
+}
+.hero-cta-btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
+/* Right column: the stats pill floats (position: absolute, against
+   .hero-banner - its nearest positioned ancestor) so it overlaps the top
+   edge of the sidebar the way it already overlapped the photo card's
+   corner before this redesign; .hero-side-col itself stays position:static
+   so it isn't itself a positioning context. padding-top on the column
+   leaves room below the pill for the Upcoming Events card underneath it. */
+.hero-side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 30px;
+}
+.hero-stats-pill {
+  display: flex;
+  gap: 0;
+  background: #fbf7ec;
+  border-radius: 999px;
+  padding: 14px 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  position: absolute;
+  top: -22px;
+  right: 22px;
+  z-index: 2;
+}
+[dir="rtl"] .hero-stats-pill { right: auto; left: 22px; }
+.hero-stats-pill .hs {
+  padding: 0 18px;
+  text-align: center;
+  border-right: 1px solid rgba(139, 0, 0, 0.15);
+}
+.hero-stats-pill .hs:last-child { border-right: none; }
+[dir="rtl"] .hero-stats-pill .hs { border-right: none; border-left: 1px solid rgba(139, 0, 0, 0.15); }
+[dir="rtl"] .hero-stats-pill .hs:last-child { border-left: none; }
+.hero-stats-pill .hs .n { font-size: 1.3rem; font-weight: 800; color: var(--red-dark); line-height: 1.1; }
+.hero-stats-pill .hs .l { font-size: 0.66rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+/* Upcoming Events sidebar card - a translucent panel (rather than a solid
+   fill) so it reads as a distinct "floating" card against the hero band's
+   own gradient behind it, echoing the reference's lighter tournaments
+   panel against its own darker page background. */
+.hero-upcoming-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+}
+.hero-upcoming-title {
+  margin: 0 0 10px;
+  color: #fff;
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 1.02rem;
+}
+.hero-upcoming-list { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+/* Fixed-height rows: date chip + single-line name. Long names ellipsize, so the
+   card (and the hero) never grows with the number of events. */
+.hero-upcoming-item {
+  display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 10px 0 6px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
+}
+[dir="rtl"] .hero-upcoming-item { padding: 0 6px 0 10px; }
+.hu-chip {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 10px; background: var(--gold); color: #2a2205;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+}
+.hu-day { font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.hu-mon { font-size: 0.56rem; font-weight: 700; letter-spacing: 0.5px; margin-top: 2px; }
+.hu-body { min-width: 0; flex: 1 1 auto; }
+.hu-name { color: #fff; font-size: 0.86rem; font-weight: 700; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hu-sub { color: rgba(255, 255, 255, 0.7); font-size: 0.7rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.hero-upcoming-more { color: var(--gold); font-size: 0.76rem; font-weight: 700; text-align: center; padding: 2px 0 0; }
+.hero-upcoming-empty { color: rgba(255, 255, 255, 0.75); font-size: 0.85rem; padding: 6px 0; }
+.hero-upcoming-link {
+  margin-top: 12px;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-upcoming-link:hover { text-decoration: underline; }
+[dir="rtl"] .hero-upcoming-link span[aria-hidden] { display: inline-block; transform: scaleX(-1); }
+@media (max-width: 640px) {
+  .hero-banner { grid-template-columns: 1fr; padding: 16px; border-radius: 20px; gap: 16px; }
+  .hero-photo-card { padding: 26px 20px 30px; min-height: 0; align-items: flex-start; }
+  /* Phone: stack welcome, stats, upcoming events, then the WhatsApp card. */
+  .hero-main-col, .hero-side-col { display: contents; }
+  .hero-photo-card { order: 1; }
+  .hero-stats-pill { order: 2; }
+  .hero-upcoming-card { order: 3; }
+  .hero-wa-card { order: 4; }
+  /* The pill no longer needs the old absolute-vs-static stacking-order
+     workaround this media query used to carry - now that it's a normal
+     flex child of .hero-side-col (stacked below the photo card, above the
+     Upcoming Events card) rather than a sibling of .hero-photo-card, there
+     is no competing static sibling for it to paint behind. */
+  .hero-side-col { padding-top: 0; }
+  .hero-stats-pill { position: static; margin: 0 0 4px; justify-content: center; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); }
+  .hero-cta-btn { flex: 1; text-align: center; }
+}
+/* Same bold condensed display face as the hero headline (see hero-banner
+   below), carried into every landing-page section title so the page reads
+   as one system rather than a hero mockup bolted onto an otherwise
+   untouched page. Falls back gracefully for Arabic (Anton has no Arabic
+   glyphs, so RTL section titles render in the normal body font instead -
+   see the note on .hero-banner h2). */
+.section-title {
+  font-family: "Anton", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 1.4rem; color: var(--red-dark); margin: 0 0 4px;
+  display: flex; align-items: center; gap: 10px;
+}
+.section-title::before {
+  content: ""; display: inline-block; width: 6px; height: 1em;
+  background: var(--gold); border-radius: 3px;
+}
+.section-sub { color: var(--muted); font-size: 0.85rem; margin: 0 0 14px; }
+
+/* --------------------------------------------------------- event cards --- */
+.event-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+  margin-bottom: 30px;
+}
+.event-grid.featured,
+#events-grid, #reg-events-grid, #annual-grid, #landing-annual-grid {
+  /* wider cards than the regular grid so a banner cover is big enough to read:
+     2 per row on a laptop, 3 on a wide screen, 1 on a phone. Up to 10 events
+     fit here, so each card keeps its own height (no stretched white gaps under
+     a short banner card). */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
+  align-items: stretch; /* every card in a row takes the tallest card's height */
+  grid-auto-rows: 1fr; /* ...and every row is as tall as the tallest, so all cards match */
+  margin-bottom: 10px;
+}
+#events-grid, #reg-events-grid, #annual-grid, #landing-annual-grid { margin-bottom: 30px; }
+/* A lone featured event keeps a sensible card width instead of stretching across the page. */
+.event-grid.featured:has(> :only-child),
+#events-grid:has(> :only-child), #reg-events-grid:has(> :only-child), #annual-grid:has(> :only-child), #landing-annual-grid:has(> :only-child) { grid-template-columns: minmax(0, 560px); }
+.event-grid.featured .event-card {
+  border-color: var(--gold);
+  box-shadow: 0 3px 12px rgba(201, 162, 39, 0.25);
+}
+/* Every event card cover - banner, ordinary photo or the "no photo" placeholder -
+   uses the same 4.5:1 frame (the platform's banner format, also when saved with
+   extra white padding), so all cards are the same size. The full picture is
+   still shown in the event's details window. */
+.event-card .photo,
+.event-card .photo.has-img,
+.event-grid.featured .event-card .photo,
+.event-grid.featured .event-card .photo.has-img {
+  aspect-ratio: 4.5 / 1; display: flex; position: relative; overflow: hidden; background: #5b0010; color: rgba(255, 255, 255, 0.75);
+  align-items: center; justify-content: center; font-size: 0.8rem;
+}
+.event-card .photo.has-img { display: block; }
+/* Thin gold frame: the cover sits inset in the card inside a 1.5px gold border
+   (plus a faint outer ring), like a framed picture. */
+.event-card.event-card .photo {
+  width: auto;
+  margin: 10px 10px 0;
+  border: 1.5px solid var(--gold);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(201, 162, 39, 0.45);
+}
+.event-card .photo.has-img img {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
+}
+.featured-tag {
+  display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
+  background: var(--gold); color: #fff; padding: 3px 9px; border-radius: 20px; margin-bottom: 8px;
+}
+.event-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.event-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(139, 0, 0, 0.12); }
+.event-card .photo {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  /* "contain" rather than "cover": these are candid event photos of people,
+     and any crop - however carefully anchored - can still cut someone off
+     depending on the photo's own shape. "contain" never crops: the whole
+     photo always stays visible, scaled to fit inside the frame, with any
+     leftover space (when the photo's aspect ratio doesn't match the
+     frame's) filled by this same placeholder gradient showing through as
+     letterboxing rather than cropping anything away. Same reasoning
+     applied to every other photo-of-people frame below (gallery, news,
+     modal hero/recap strip) - just not the Spotlight avatar, which stays
+     on "cover": it's a small circular headshot frame where letterboxing
+     would leave odd gaps of background inside the circle instead of a
+     clean, filled portrait. */
+  background: linear-gradient(135deg, #f1ece2, #e7e0d2) center / contain no-repeat;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.event-card .body { padding: 14px 16px; flex: 1; display: flex; flex-direction: column; }
+.event-card h3 { margin: 0 0 6px; font-size: 1rem; color: var(--red-dark); cursor: pointer; }
+.event-card .meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 8px; }
+.event-card .snippet { font-size: 0.85rem; color: var(--text); flex: 1; margin-bottom: 10px; }
+.event-card .actions { display: flex; gap: 8px; margin-top: auto; }
+.event-card .actions button { flex: 1; margin-top: 0; padding: 9px 10px; font-size: 0.85rem; }
+
+/* -------------------------------------------------------------- modal --- */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(20, 15, 10, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; z-index: 100;
+}
+.modal-box {
+  background: var(--card); border-radius: 12px; max-width: 640px; width: 100%;
+  max-height: 88vh; overflow-y: auto; position: relative; padding: 22px;
+}
+.modal-close {
+  position: absolute; top: 10px; inset-inline-end: 12px;
+  background: none; border: none; font-size: 1.6rem; line-height: 1; cursor: pointer;
+  color: var(--muted); padding: 4px 8px;
+}
+.modal-close:hover { color: var(--red); }
+.modal-box .photo-hero {
+  width: 100%; max-height: 280px; object-fit: contain; object-position: center; border-radius: 10px; margin-bottom: 14px;
+}
+.modal-box h2 { margin-top: 0; }
+.modal-box .desc { font-size: 0.92rem; line-height: 1.6; white-space: pre-wrap; }
+.photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 12px; }
+.photo-gallery img { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; object-position: center; border-radius: 6px; border: 1px solid var(--border); }
+.event-badge {
+  display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 20px;
+  background: var(--gold); color: #fff; margin-bottom: 8px;
+}
+.event-badge.past { background: var(--gray); }
+
+/* ---------------------------------------------------------- attendees --- */
+.attendee-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 4px; border-bottom: 1px solid var(--border);
+}
+.attendee-row:last-child { border-bottom: none; }
+.attendee-row input[type="checkbox"] { width: auto; accent-color: var(--red); }
+.attendee-row label { margin: 0; font-size: 0.92rem; color: var(--text); cursor: pointer; }
+.hint-note { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+.hint-note a { color: var(--red); text-decoration: underline; }
+.hint-note a:hover { color: var(--red-dark); }
+
+/* Which event the Register form is currently submitting for - picked from
+   the card grid above (#reg-events-grid), not the hidden <select> that used
+   to be a visible dropdown here. See startRegisterFlow()/
+   updateRegSelectedEventLabel() in app.js. */
+.reg-selected-event { font-size: 0.95rem; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
+.reg-selected-event.empty { font-weight: 400; color: var(--muted); font-style: italic; }
+
+/* Landing page section list: mouse drag-to-reorder (see renderLandingSectionsAdminList in app.js). */
+.landing-section-row { cursor: grab; transition: opacity 0.15s ease, border-color 0.15s ease; }
+.landing-section-row:active { cursor: grabbing; }
+.landing-section-row.dragging { opacity: 0.4; }
+.landing-section-row.drag-over { border-top: 2px solid var(--red); }
+.landing-drag-handle { color: var(--muted); font-size: 0.95rem; line-height: 1; padding-inline-end: 2px; user-select: none; }
+
+/* -------------------------------------------------------------- qr list --- */
+.qr-entry {
+  border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+  margin-bottom: 14px; text-align: center; background: #fffdf8;
+}
+.qr-entry:last-child { margin-bottom: 0; }
+.qr-entry h4 { margin: 0 0 6px; color: var(--red-dark); }
+.qr-entry img { max-width: 220px; width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 8px; background: #fff; }
+.qr-entry .note { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+.qr-entry .note.err { color: #a12626; }
+
+/* --------------------------------------------------------- family list --- */
+.family-item, .my-reg-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 8px; background: #fffdf8; flex-wrap: wrap;
+}
+.family-item .name { font-weight: 600; }
+.family-item .name .fam-rel-badge { font-weight: 400; color: var(--muted); font-size: 0.85em; }
+.family-item .fam-rel-select,
+.family-item .fam-rel-other-input,
+.family-item .fam-phone-input,
+.family-item .fam-email-input { max-width: 140px; margin: 0; padding: 6px 8px; font-size: 0.8rem; }
+.family-item .fam-rel-edit { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 180px; flex-wrap: wrap; }
+.my-reg-item { flex-wrap: wrap; }
+.my-reg-item .info { flex: 1; min-width: 160px; }
+.my-reg-item .info .name { font-weight: 600; }
+.my-reg-item .info .meta { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+.checkin-badge {
+  display: inline-block; font-size: 0.72rem; padding: 3px 9px; border-radius: 20px;
+  background: #e6f4ea; color: var(--green); border: 1px solid #b7e0c3; margin-top: 4px;
+}
+.checkin-badge.pending { background: #fdf3e0; color: var(--amber); border-color: #f0dba0; }
+
+/* -------------------------------------------------------- support chat --- */
+.chat-thread {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 360px; overflow-y: auto; padding: 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: #fafaf8;
+  margin-bottom: 12px;
+}
+.chat-empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 20px 0; }
+.chat-bubble {
+  max-width: 78%; padding: 8px 12px; border-radius: 12px; font-size: 0.88rem; line-height: 1.4;
+}
+.chat-bubble .meta { font-size: 0.7rem; opacity: 0.7; margin-top: 3px; }
+.chat-bubble.mine {
+  align-self: flex-end; background: var(--red); color: #fff; border-bottom-right-radius: 3px;
+}
+html[dir="rtl"] .chat-bubble.mine { border-bottom-right-radius: 12px; border-bottom-left-radius: 3px; }
+.chat-bubble.theirs {
+  align-self: flex-start; background: #fff; border: 1px solid var(--border); border-bottom-left-radius: 3px;
+}
+html[dir="rtl"] .chat-bubble.theirs { border-bottom-left-radius: 12px; border-bottom-right-radius: 3px; }
+.chat-bubble.theirs .meta { color: var(--muted); }
+.chat-compose { display: flex; gap: 8px; align-items: flex-end; }
+.chat-compose textarea { flex: 1; resize: none; }
+.chat-compose button { margin-top: 0; white-space: nowrap; }
+.chat-thread-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 8px; background: #fffdf8; cursor: pointer;
+}
+.chat-thread-item:hover { border-color: var(--gold); }
+.chat-thread-item.active { border-color: var(--red); background: #fff5f5; }
+.chat-thread-item .name { font-weight: 600; }
+.chat-thread-item .snippet { font-size: 0.78rem; color: var(--muted); margin-top: 2px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-thread-item .unread-dot {
+  min-width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%;
+  background: var(--red); color: #fff; font-size: 0.72rem; font-weight: 700; flex-shrink: 0;
+}
+
+/* ------------------------------------------------------- committee news --- */
+.news-item {
+  display: flex; gap: 14px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: box-shadow 0.15s ease;
+}
+.news-item:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
+.news-item .photo {
+  width: 110px; height: 110px; flex-shrink: 0; border-radius: 8px; object-fit: contain; object-position: center;
+  background: linear-gradient(135deg, #f1ece2, #e7e0d2);
+}
+.news-item .body { flex: 1; min-width: 0; }
+.news-item h3 { margin: 0 0 4px; font-size: 0.98rem; color: var(--red-dark); }
+.news-item .date { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; }
+.news-item .text { font-size: 0.88rem; color: var(--text); white-space: pre-wrap; }
+@media (max-width: 520px) { .news-item { flex-direction: column; } .news-item .photo { width: 100%; height: 160px; } }
+
+/* --------------------------------------------------- community spotlight --- */
+.spotlight-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
+}
+.spotlight-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 18px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.spotlight-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(201, 162, 39, 0.25); }
+.spotlight-card .avatar {
+  width: 84px; height: 84px; border-radius: 50%; margin: 0 auto 12px; object-fit: cover; object-position: center;
+  background: linear-gradient(135deg, var(--gold), #e8c96a); display: flex; align-items: center;
+  justify-content: center; color: #fff; font-size: 1.6rem; font-weight: 700; border: 3px solid #fff;
+  box-shadow: 0 0 0 2px var(--gold);
+}
+.spotlight-card .name { font-weight: 700; color: var(--red-dark); margin-bottom: 4px; }
+.spotlight-card .blurb { font-size: 0.85rem; color: var(--muted); }
+
+/* ------------------------------------------------------------ committee --- */
+/* Mirrors the club's own printed committee-member ID card design (red header
+   with the Al Ahly crest, a gold wave into a cream body, the photo straddling
+   the two) rather than the site's generic admin-customizable --red/--gold
+   theme vars - these colors are fixed to match that card exactly regardless
+   of whatever accent color the admin has picked for the rest of the site. */
+.committee-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; margin-bottom: 28px;
+}
+.committee-card {
+  position: relative; border-radius: 18px; overflow: hidden; background: #faf8f3;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding-bottom: 20px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.committee-card:hover { transform: translateY(-3px); box-shadow: 0 10px 22px rgba(205, 41, 41, 0.22); }
+.committee-card-header {
+  /* Crest stays pinned to the left, same as the printed card, regardless of
+     the site's current language/direction - it's a fixed brand mark, not
+     text that should mirror for RTL. */
+  background: #cd2929; padding: 14px 14px 34px; position: relative; text-align: left;
+}
+.committee-crest { width: 32px; height: auto; display: block; }
+/* The gold wave dividing the red header from the cream body below - a small
+   inline SVG (wavy top edge, filled down to a flat bottom) stretched across
+   the header's full width via background-size, so it never needs per-card
+   markup or a shared <defs> element. */
+.committee-card-header::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 16px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 20' preserveAspectRatio='none'%3E%3Cpath d='M0 10 Q 25 20 50 10 T 100 10 T 150 10 T 200 10 L200 20 L0 20 Z' fill='%23dbb100'/%3E%3C/svg%3E");
+  background-size: 100% 100%; background-repeat: no-repeat;
+}
+/* A second, thinner gold wave near the card's bottom edge, echoing the
+   printed card's own double wave footer. */
+.committee-card::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 8px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 20' preserveAspectRatio='none'%3E%3Cpath d='M0 10 Q 25 0 50 10 T 100 10 T 150 10 T 200 10 L200 20 L0 20 Z' fill='%23dbb100' fill-opacity='0.55'/%3E%3C/svg%3E");
+  background-size: 100% 100%; background-repeat: no-repeat;
+}
+.committee-photo-wrap { text-align: center; margin-top: -46px; position: relative; z-index: 2; }
+.committee-photo, .committee-photo-placeholder {
+  width: 84px; height: 84px; border-radius: 50%; margin: 0 auto; object-fit: cover; object-position: center;
+  border: 4px solid #fff; box-shadow: 0 0 0 3px #dbb100; background: #ece7dd;
+}
+.committee-photo-placeholder {
+  background: linear-gradient(135deg, #cd2929, #a11f1f);
+}
+.committee-name { margin-top: 12px; padding: 0 10px; font-weight: 800; color: #1a1a1a; text-align: center; }
+.committee-title { margin-top: 2px; padding: 0 10px; font-size: 0.85rem; font-weight: 700; color: #4a4a4a; text-align: center; }
+
+/* ------------------------------------------------------------ gallery --- */
+.gallery-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
+}
+.gallery-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.gallery-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.12); }
+.gallery-card .photo { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; object-position: center; display: block; }
+.gallery-card .caption { padding: 10px 12px; font-size: 0.82rem; color: var(--muted); }
+
+/* ----------------------------------------------------------- sponsors --- */
+/* A rounded panel around the logo strip (the strip itself has no wrapper
+   card in the markup) so it reads as one more section in the same visual
+   system as the rest of the landing page, not a bare row of images. */
+.sponsor-strip {
+  display: flex; flex-wrap: wrap; gap: 26px; align-items: center;
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 22px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.sponsor-item { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; }
+.sponsor-item img { max-height: 60px; max-width: 150px; object-fit: contain; object-position: center; }
+.sponsor-item .name { font-size: 0.78rem; color: var(--muted); text-align: center; }
+
+/* ------------------------------------------------------- top earners --- */
+.top-earner-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+  border-bottom: 1px solid var(--border); font-size: 0.9rem;
+}
+.top-earner-row:last-child { border-bottom: none; }
+.top-earner-row .rank {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--gold); color: #fff;
+  font-size: 0.75rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.top-earner-row .name { flex: 1; font-weight: 600; }
+.top-earner-row .pts { color: var(--red); font-weight: 700; }
+
+/* ------------------------------------------------- capacity / waitlist --- */
+.checkbox-row { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; font-size: 0.85rem; }
+.checkbox-row input { margin-top: 3px; width: auto; }
+
+.capacity-badge {
+  display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 3px 9px;
+  border-radius: 20px; margin-left: 6px; vertical-align: middle;
+}
+.capacity-badge.ok { background: #eef6ee; color: #2f7a3d; }
+.capacity-badge.full { background: #fdeaea; color: var(--red); }
+.capacity-badge.waitlist { background: #fff4e0; color: #a06a00; }
+[dir="rtl"] .capacity-badge { margin-left: 0; margin-right: 6px; }
+
+/* ---------------------------------------- parent events / sub-activities -- */
+.event-card-parent { border-top: 3px solid var(--gold); }
+.activities-list {
+  margin: 4px 0 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.activities-title { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
+.activity-row {
+  display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap;
+  padding: 6px 0; font-size: 0.85rem;
+}
+.activity-row + .activity-row { border-top: 1px dashed var(--border); }
+/* The name always gets a full line when badges (birth years, team counts,
+   capacity) and the Register button don't fit beside it, so a narrow card
+   never squeezes the title into a one-letter column. */
+.activity-row .activity-name { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.activity-row > button, .activity-row > .reg-soon { margin-inline-start: auto; }
+.activity-row .activity-time { font-weight: 400; color: var(--muted); font-size: 0.78rem; }
+.activity-row .capacity-badge { margin: 0; }
+button.secondary.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
+button.danger.small { padding: 5px 10px; font-size: 0.75rem; margin-top: 0; }
+
+/* -------------------------------------------------------------- tournament -- */
+/* Hero summary strip + delete button */
+.tourn-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.tourn-summary.tourn-hero {
+  background: linear-gradient(120deg, #fff9ec 0%, #fff 60%);
+  border: 1px solid var(--gold); border-radius: 12px; padding: 12px 16px;
+  box-shadow: 0 2px 10px rgba(201, 162, 39, 0.12);
+}
+.tourn-summary-badge {
+  background: #fff9ec; border: 1px solid var(--gold); color: var(--red-dark);
+  font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+}
+.tourn-live-link {
+  margin-inline-start: 8px; text-decoration: none; display: inline-flex; align-items: center;
+  gap: 5px; padding: 5px 12px; border-radius: 20px; transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.tourn-live-link:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(139, 0, 0, 0.15); }
+.tourn-live-link::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red);
+  box-shadow: 0 0 0 rgba(139, 0, 0, 0.5); animation: tourn-pulse 1.8s infinite;
+}
+@keyframes tourn-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(139, 0, 0, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(139, 0, 0, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 0, 0, 0); }
+}
+
+/* Progress stepper - the operational-flow at-a-glance view */
+.tourn-stepper {
+  display: flex; align-items: flex-start; margin-bottom: 20px; padding: 4px 2px;
+  overflow-x: auto;
+}
+.tourn-step { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 64px; flex-shrink: 0; }
+.tourn-step-dot {
+  width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 0.8rem; font-weight: 700; border: 2px solid var(--border); background: #fff; color: var(--muted);
+  transition: all 0.2s ease;
+}
+.tourn-step.done .tourn-step-dot { background: var(--green); border-color: var(--green); color: #fff; }
+.tourn-step.active .tourn-step-dot {
+  background: linear-gradient(135deg, var(--red), var(--red-dark)); border-color: var(--gold); color: #fff;
+  box-shadow: 0 0 0 4px rgba(201, 162, 39, 0.25); transform: scale(1.08);
+}
+.tourn-step-label { font-size: 0.7rem; color: var(--muted); text-align: center; white-space: nowrap; }
+.tourn-step.active .tourn-step-label { color: var(--red-dark); font-weight: 700; }
+.tourn-step.done .tourn-step-label { color: var(--green); }
+.tourn-step-line { flex: 1; height: 2px; background: var(--border); margin: 15px 4px 0; min-width: 16px; }
+
+/* Section cards - each stage of the flow gets its own card with a
+   distinctly-colored gradient header so the page reads at a glance, without
+   any of it depending on new state (purely presentational wrapper). */
+.tourn-card {
+  background: var(--card); border-radius: 14px; overflow: hidden; margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 20px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border); transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.tourn-card:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 12px 28px rgba(0, 0, 0, 0.08); }
+.tourn-card-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 18px; color: #fff;
+}
+.tourn-card-head h4 { margin: 0; font-size: 0.95rem; font-weight: 700; }
+.tourn-card-icon {
+  width: 30px; height: 30px; border-radius: 9px; background: rgba(255, 255, 255, 0.22);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.tourn-card-icon svg { width: 18px; height: 18px; }
+.tourn-card-count {
+  margin-inline-start: 6px; background: rgba(255, 255, 255, 0.25); padding: 1px 9px;
+  border-radius: 20px; font-size: 0.72rem; font-weight: 600;
+}
+.tourn-card-body { padding: 16px 18px 18px; }
+.tourn-card-body .hint-note:first-child { margin-top: 0; }
+
+.tourn-card-setup .tourn-card-head { background: linear-gradient(120deg, #2b6ea3, #1c4c73); }
+.tourn-card-teams .tourn-card-head { background: linear-gradient(120deg, #7d4fb0, #55307f); }
+.tourn-card-attendance .tourn-card-head { background: linear-gradient(120deg, #d97b1f, #a85a10); }
+.tourn-card-live .tourn-card-head { background: linear-gradient(120deg, var(--red), var(--red-dark)); }
+.tourn-card-standings .tourn-card-head { background: linear-gradient(120deg, var(--gold), #a8811b); }
+
+.tourn-card button.primary, .tourn-card button.secondary, .tourn-card button.danger {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.tourn-card button.primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(139, 0, 0, 0.25); }
+.tourn-card button.secondary:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1); }
+@media (max-width: 640px) {
+  .tourn-card-head { padding: 10px 14px; }
+  .tourn-card-body { padding: 12px 14px 14px; }
+  .tourn-step-label { display: none; }
+  .tourn-step { min-width: 34px; }
+}
+.tourn-seed-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tourn-seed-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); background: #fff;
+}
+.tourn-seed-row:last-child { border-bottom: none; }
+.tourn-seed-num { font-weight: 700; color: var(--gold); min-width: 22px; }
+.tourn-seed-label { flex: 1; font-size: 0.9rem; }
+.tourn-seed-actions { display: flex; gap: 4px; }
+.tourn-seed-actions button { padding: 3px 9px; font-size: 0.75rem; }
+
+.tourn-groups-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.tourn-group { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: #fff; }
+.tourn-group h4 { margin: 0 0 8px; font-size: 0.88rem; color: var(--red-dark); }
+.tourn-group table { width: 100%; font-size: 0.82rem; margin-bottom: 10px; }
+.tourn-group th, .tourn-group td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+[dir="rtl"] .tourn-group th, [dir="rtl"] .tourn-group td { text-align: right; }
+.tourn-matches { display: flex; flex-direction: column; gap: 6px; }
+.tourn-match {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: 0.82rem; padding: 6px 0; border-top: 1px dashed var(--border); flex-wrap: wrap;
+}
+.tourn-match-actions { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.tourn-match-actions button { padding: 3px 8px; font-size: 0.72rem; }
+.tourn-match-result { color: var(--red); font-weight: 600; }
+.tourn-match.decided { color: var(--muted); }
+.tourn-match-time { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
+.tourn-table-scroll { overflow-x: auto; }
+
+/* Team mode: a small numbered "1. Alice · 2. Bob" line under a team's name,
+   wherever that name is shown on its own - seeding rows, standings cells,
+   bracket slots, match lines, live/big-screen displays. Individual-mode
+   entrants never get one (teamRosterHtml renders nothing for them). */
+.tourn-team-roster { font-size: 0.72rem; color: var(--muted); font-weight: 400; margin-top: 2px; line-height: 1.4; }
+.tourn-bracket-slot .tourn-team-roster, .tourn-seed-label .tourn-team-roster { font-size: 0.68rem; }
+.tourn-my-match-opp-roster { display: block; font-size: 0.68rem; }
+.tourn-match-teams { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tourn-match-side { display: inline-block; }
+.tourn-vs { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; }
+
+/* A member's still-valid entry QR shown next to their name on a roster row
+   (Gate Scanner's manual check-in list, the per-event admin hub's
+   attendance list, and the Member directory's registration history) - lets
+   staff/admin resend a code to someone who missed it at the gate. Only
+   rendered when the backend decided the QR is still worth showing (not
+   checked in, not waitlisted, event not over yet). */
+.roster-qr { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.roster-qr-thumb { width: 56px; height: 56px; border: 1px solid var(--border); border-radius: 6px; background: #fff; padding: 2px; }
+.roster-qr-download {
+  display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red);
+  padding: 4px 8px; border-radius: 6px; font-size: 0.68rem; text-decoration: none; white-space: nowrap;
+}
+.roster-qr-download:hover { background: #fdeaea; }
+
+.tourn-score-entry { display: flex; align-items: center; gap: 4px; }
+.tourn-score-input { width: 44px; padding: 3px 4px; font-size: 0.78rem; text-align: center; }
+.tourn-ko-note { width: 100%; padding: 4px 6px; font-size: 0.72rem; margin: 4px 0; box-sizing: border-box; }
+
+.tourn-bracket { display: flex; gap: 22px; overflow-x: auto; padding-bottom: 8px; }
+.tourn-bracket-round { position: relative; display: flex; flex-direction: column; justify-content: space-around; gap: 16px; min-width: 190px; }
+.tourn-bracket-round h4 { font-size: 0.78rem; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; text-align: center; }
+.tourn-bracket-match {
+  border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden;
+}
+/* A connecting rail down the middle of the gap between each pair of round
+   columns, so the bracket reads as one flowing sequence of stages instead
+   of disconnected lists side by side. Deliberately NOT per-match stub
+   lines (which would need overflow:visible on .tourn-bracket-match and
+   break its rounded-corner clipping of the winner-highlighted slot
+   background) - a simple full-height rail is zero-risk and reads just as
+   clearly as "round 1 flows into round 2" at this card size. inset-inline-*
+   so it's on the correct side in the Arabic/RTL layout automatically. */
+.tourn-bracket-round:not(:first-child)::before {
+  content: ""; position: absolute; top: 0; bottom: 0; inset-inline-start: -12px;
+  width: 1px; background: var(--border);
+}
+/* The Final gets a small gold lift - the culmination of the bracket. */
+.tourn-bracket-round:last-child .tourn-bracket-match {
+  border-color: var(--gold); box-shadow: 0 1px 4px rgba(201, 162, 39, 0.18);
+}
+.tourn-bracket-time { padding: 4px 10px 0; font-size: 0.7rem; color: var(--muted); font-weight: 600; text-align: center; }
+.tourn-bracket-slot { padding: 7px 10px; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.tourn-bracket-slot:last-of-type { border-bottom: none; }
+.tourn-bracket-slot.winner { font-weight: 700; color: var(--red); background: #fff9ec; }
+.tourn-bracket-actions { border-top: 1px solid var(--border); padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+.tourn-bracket-actions .tourn-score-entry { justify-content: center; }
+.tourn-bracket-winner-btns { display: flex; gap: 4px; margin-top: 2px; }
+.tourn-bracket-winner-btns button {
+  flex: 1; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--red);
+  padding: 5px 4px; font-size: 0.72rem; cursor: pointer;
+}
+.tourn-bracket-winner-btns button:hover { background: #fdf3e3; }
+.tourn-bracket-result, .tourn-bracket-pending {
+  padding: 6px 10px; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border); text-align: center;
+}
+
+.tourn-attendance-team { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; background: #fff; }
+.tourn-attendance-team h5 { margin: 0 0 6px; font-size: 0.82rem; }
+.tourn-att-complete { color: #2e7d32; font-weight: 600; font-size: 0.72rem; }
+.tourn-attendance-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: 0.82rem; padding: 5px 0; border-top: 1px dashed var(--border); flex-wrap: wrap;
+}
+.tourn-attendance-team .tourn-attendance-row:first-of-type { border-top: none; }
+.tourn-attendance-actions { display: flex; gap: 4px; }
+.tourn-attendance-actions button { padding: 3px 8px; font-size: 0.7rem; border: 1px solid var(--border); background: #fff; border-radius: 999px; cursor: pointer; }
+.tourn-attendance-actions button.active { background: var(--red); color: #fff; border-color: var(--red); }
+.tourn-att-absent .tourn-attendance-name { color: var(--muted); text-decoration: line-through; }
+.tourn-att-status-badge { font-size: 0.7rem; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+
+.tourn-my-matches { margin: 4px 0 8px; font-size: 0.78rem; }
+.tourn-my-matches summary { cursor: pointer; color: var(--red); font-weight: 600; }
+.tourn-my-match {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 0; border-top: 1px dashed var(--border);
+}
+.tourn-my-match-stage { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.3px; }
+.tourn-my-match-opp { font-weight: 600; }
+.tourn-my-match-result { margin-inline-start: auto; }
+.tourn-my-match.win .tourn-my-match-result { color: #2e7d32; font-weight: 600; }
+.tourn-my-match.loss .tourn-my-match-result { color: var(--muted); }
+.tourn-my-match.draw .tourn-my-match-result { color: var(--gold, #b8860b); font-weight: 600; }
+.tourn-my-match.pending .tourn-my-match-result { color: var(--muted); font-style: italic; }
+
+.tourn-edit-score { margin-top: 6px; font-size: 0.75rem; }
+.tourn-edit-score summary { cursor: pointer; color: var(--muted); }
+.tourn-edit-score .tourn-score-entry, .tourn-edit-score .tourn-bracket-actions { margin-top: 6px; }
+
+.tourn-card-setup .grid-2 input { margin-top: 2px; }
+
+.tourn-setup-dashboard {
+  margin-top: 14px; padding: 12px 14px; background: #fafaf8;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.tourn-setup-dashboard h5 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tourn-setup-dashboard .hint-note { margin-top: 0; margin-bottom: 10px; }
+.tourn-setup-dashboard .stat-row { gap: 10px; }
+.tourn-setup-dashboard .stat { min-width: 90px; padding: 8px 10px; }
+.tourn-setup-dashboard .stat .n { font-size: 1.15rem; }
+.tourn-setup-ready {
+  display: inline-block; padding: 3px 10px; border-radius: 20px;
+  font-size: 0.72rem; font-weight: 600;
+}
+.tourn-setup-ready.ok { background: #d4edda; color: var(--green); }
+.tourn-setup-ready.pending { background: #fff3cd; color: var(--amber); }
+
+.lang-ar, .lang-en { display: block; }
+.lang-ar { direction: rtl; }
+.lang-en { color: var(--muted); font-size: 0.88em; margin-top: 2px; font-weight: 400; }
+h2 .lang-ar, h3 .lang-ar { font-weight: inherit; }
+
+.dashboard-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.dashboard-table th, .dashboard-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+}
+[dir="rtl"] .dashboard-table th, [dir="rtl"] .dashboard-table td { text-align: right; }
+.dashboard-table th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+.dashboard-table tbody tr:nth-child(even) { background: #fbfaf7; }
+.dashboard-table tbody tr:hover { background: #fffaf0; }
+.dashboard-table .num { font-weight: 700; color: var(--red); }
+.dashboard-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.dashboard-table-wrap .dashboard-table { border: none; }
+.dashboard-table-wrap .dashboard-table tbody tr:last-child td { border-bottom: none; }
+.dashboard-empty-note { color: var(--muted); font-size: 0.85rem; }
+
+/* Event dashboard "at a glance" strip - shared by Admin and Tournament
+   Manager (unlike #admin-stats, which is admin-full-only). The accent tile
+   (next upcoming event / countdown) gets a gold tint to stand out from the
+   plain count tiles beside it. */
+#admin-dashboard-glance .stat.stat-accent { border-color: var(--gold); background: #fffaf0; }
+#admin-dashboard-glance .stat.stat-accent .n { color: var(--amber); font-size: 1.1rem; }
+#admin-dashboard-glance .stat.stat-accent .l { font-weight: 600; }
+
+/* Tournament-status pill used in the dashboard table's Tournament column. */
+.tourn-status-pill {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border);
+  color: var(--gray); background: #f4f3f1; white-space: nowrap;
+}
+.tourn-status-pill.not-started { color: var(--gray); background: #f4f3f1; border-color: var(--border); }
+.tourn-status-pill.in-progress { color: var(--amber); background: #fff7e6; border-color: #f0dca8; }
+.tourn-status-pill.completed { color: var(--green); background: #eaf6ec; border-color: #bfe3c5; }
+.tourn-status-pill.casual { color: var(--red); background: #fdeaea; border-color: #f3c9c9; }
+
+/* WhatsApp confirmation status pill used in the attendance/check-in roster's
+   WhatsApp column (Gate Scanner and the per-event Admin hub). */
+.wa-status-pill {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.wa-status-pill.sent { color: var(--green); background: #eaf6ec; border-color: #bfe3c5; }
+.wa-status-pill.not-sent { color: var(--gray); background: #f4f3f1; border-color: var(--border); }
+
+.directory-list { margin: 4px 0 0; padding-left: 18px; font-size: 0.85rem; }
+[dir="rtl"] .directory-list { padding-left: 0; padding-right: 18px; }
+
+.waitlist-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
+  font-size: 0.85rem; background: #fffdf8;
+}
+
+/* --------------------------------------------------- admin content lists --- */
+.content-admin-item {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 8px; background: #fffdf8;
+}
+.content-admin-item .title { font-weight: 600; font-size: 0.88rem; }
+.content-admin-item .sub { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+/* ---- Swiss (chess) tournaments ------------------------------------- */
+.swiss-print-row { margin: 8px 0; gap: 8px; flex-wrap: wrap; }
+.swiss-print-row a { text-decoration: none; display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red); padding: 7px 14px; border-radius: 7px; font-size: 0.85rem; font-weight: 600; }
+.swiss-print-row a:hover { background: #fdf0f0; }
+.swiss-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.swiss-table th, .swiss-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: start; vertical-align: middle; }
+.swiss-table th { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); white-space: nowrap; }
+.swiss-table tr.decided td { background: rgba(201, 162, 39, 0.07); }
+.swiss-table tr.swiss-hit td { background: rgba(201, 162, 39, 0.25); }
+.swiss-table tr.swiss-prize-row td { font-weight: 600; background: rgba(201, 162, 39, 0.12); }
+.swiss-table tr.swiss-out td { opacity: 0.55; }
+.swiss-white { font-weight: 600; }
+.swiss-black { font-weight: 600; text-align: end; }
+html[dir="rtl"] .swiss-black { text-align: start; }
+.swiss-res-cell { white-space: nowrap; text-align: center; }
+.swiss-res-cell button.small, .swiss-att-cell button.small, .swiss-round-tab { padding: 4px 9px; font-size: 0.8rem; }
+.swiss-res-cell { display: table-cell; }
+.swiss-res.active, .swiss-round-tab.active, .swiss-att-cell button.active {
+  background: var(--red); color: #fff; border-color: var(--red);
+}
+.swiss-ff-select { font-size: 0.78rem; padding: 4px 6px; max-width: 130px; margin-inline-start: 4px; width: auto; }
+.swiss-ff-select.active { border-color: var(--red); color: var(--red); font-weight: 600; }
+.swiss-att-cell { white-space: nowrap; }
+.swiss-players-scroll { max-height: 460px; overflow: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.swiss-round-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.swiss-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+.swiss-draw-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.swiss-swap { margin-top: 12px; }
+.swiss-swap summary { cursor: pointer; font-size: 0.85rem; color: var(--muted); }
+.swiss-swap-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.swiss-swap-row select { width: auto; max-width: 260px; }
+.swiss-tag {
+  display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 99px;
+  background: var(--border); color: var(--text); vertical-align: middle; margin-inline-start: 4px;
+}
+.swiss-tag.women { background: #f6dce6; color: #8a1c4a; }
+.swiss-tag.junior { background: #dbe8f6; color: #1c4c73; }
+.swiss-tag.out { background: #e8e8e8; color: #555; }
+.swiss-tag.warn { background: #fff0cc; color: #8a5a00; }
+.swiss-prize-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.swiss-prize-col { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--card); }
+.swiss-prize-col h5 { margin: 0; padding: 8px 12px; background: linear-gradient(120deg, var(--red), var(--red-dark)); color: #fff; font-size: 0.9rem; }
+.swiss-prize-line { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 0.88rem; }
+.swiss-place { width: 22px; height: 22px; border-radius: 50%; background: var(--gold); color: #fff; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; flex: none; }
+.swiss-pname { flex: 1; font-weight: 600; }
+.swiss-pamt { color: var(--red); font-weight: 700; white-space: nowrap; }
+.reg-cat-wrap { display: inline-flex; flex-wrap: wrap; gap: 12px; margin-inline-start: 12px; }
+.reg-cat { display: inline-flex; align-items: center; gap: 5px; font-size: 0.82rem; color: var(--muted); cursor: pointer; }
+.reg-cat input { width: auto; margin: 0; }
+.my-reg-cats { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.82rem; margin: -4px 0 10px; padding: 6px 12px; background: rgba(201, 162, 39, 0.1); border-radius: 8px; }
+.swiss-info-details { margin: 12px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.swiss-info-details summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+
+/* ---- Admin > Reports tab -------------------------------------------- */
+.reports-event { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
+.reports-event-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-bottom: 8px; }
+.reports-group { margin-top: 8px; }
+.reports-group-title { display: block; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 6px; }
+.reports-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reports-rounds { margin-top: 8px; }
+.reports-btns a { text-decoration: none; display: inline-block; background: #fff; border: 1px solid var(--red); color: var(--red); padding: 7px 14px; border-radius: 7px; font-size: 0.85rem; font-weight: 600; }
+.reports-btns a:hover { background: #fdf0f0; }
+.reports-rounds a { padding: 6px 12px; min-width: 36px; text-align: center; }
+
+/* Non-blocking "age group missing" reminder shown to members */
+.age-reminder {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 10px 14px; border-radius: 10px;
+  background: rgba(212, 175, 55, 0.14); border: 1px solid var(--gold); font-size: 0.9rem;
+}
+.age-reminder.hidden { display: none; }
+.age-reminder button { margin: 0; padding: 6px 14px; font-size: 0.8rem; }
+.fam-age-missing, .fam-rel-badge.fam-age-missing { color: var(--red); font-weight: 600; }
+.fam-age-select { max-width: 220px; }
+
+/* ---- Roster tables (Gate Scanner manual check-in + Event hub) ----
+   Sortable headers, vertically centred cells, and equal-width coloured
+   action buttons: green Check in, blue Download QR, teal WhatsApp, red Cancel. */
+.roster-table td { vertical-align: middle; }
+.roster-table th button.roster-sort {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  color: var(--muted); font-weight: 700; font-size: 0.75rem; text-transform: uppercase; white-space: nowrap;
+}
+.roster-table th button.roster-sort:hover, .roster-table th button.roster-sort.active { color: var(--red); }
+.roster-table th button.roster-sort:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.roster-sort-arrow { font-size: 0.7rem; opacity: 0.7; }
+.roster-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 112px; }
+.roster-actions .roster-date-note { color: var(--muted); font-size: 0.68rem; text-align: center; }
+.roster-table button.roster-btn {
+  margin: 0; padding: 7px 12px; border-radius: 7px; border: 1px solid transparent;
+  font-size: 0.78rem; font-weight: 700; cursor: pointer; text-align: center; line-height: 1.2;
+  transition: filter 0.15s, transform 0.15s;
+}
+.roster-table button.roster-btn:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+.roster-table button.roster-btn.checkin { background: #1e8e3e; border-color: #187533; color: #fff; }
+.roster-table button.roster-btn.checkin:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; opacity: 1; cursor: not-allowed; }
+.roster-table button.roster-btn.wa { background: #128c7e; border-color: #0e7266; color: #fff; margin-top: 6px; width: 100%; }
+.roster-table button.roster-btn.cancel { background: #fff; border-color: #c0392b; color: #c0392b; }
+.roster-table button.roster-btn.cancel:hover:not(:disabled) { background: #fdeaea; }
+.roster-table .roster-qr { width: 100%; min-width: 96px; }
+.roster-table a.roster-qr-download {
+  display: block; width: 100%; box-sizing: border-box; text-align: center; text-decoration: none;
+  padding: 6px 10px; border-radius: 7px; background: #1a73e8; border: 1px solid #155fc0; color: #fff;
+  font-size: 0.75rem; font-weight: 700;
+}
+.roster-table a.roster-qr-download:hover { background: #155fc0; }
+.roster-table td:last-child { min-width: 190px; }
+
+/* WhatsApp column: one block per message type (confirmation / reminder / event-day) */
+.roster-table td.wa-cell { min-width: 230px; }
+.wa-row { padding: 6px 0; border-bottom: 1px dashed var(--border); display: flex; flex-direction: column; gap: 4px; }
+.wa-row:last-child { border-bottom: none; }
+.wa-row-head { font-size: 0.75rem; color: var(--ink, #222); }
+.wa-hint { color: var(--muted); font-size: 0.68rem; line-height: 1.3; }
+.roster-table button.roster-btn.wa { margin-top: 0; }
+.roster-table button.roster-btn.wa.reminder { background: #d98200; border-color: #b36b00; }
+.roster-table button.roster-btn.wa.dayof { background: #6f42c1; border-color: #5a32a3; }
+.roster-table button.roster-btn.wa:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; opacity: 1; cursor: not-allowed; }
+
+.wa-bulk-bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.wa-bulk-bar button.roster-btn, #wa-bulk-open { font-size: 0.85rem; font-weight: 700; border-radius: 8px; padding: 9px 14px; border: 1px solid; cursor: pointer; width: auto; margin: 0; background: #128c7e; border-color: #0e7266; color: #fff; }
+.wa-bulk-bar button.roster-btn.reminder, #wa-bulk-open.reminder { background: #d98200; border-color: #b36b00; }
+.wa-bulk-bar button.roster-btn.dayof, #wa-bulk-open.dayof { background: #6f42c1; border-color: #5a32a3; }
+.wa-bulk-bar button.roster-btn:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; cursor: not-allowed; }
+
+.chat-bubble .edited-tag { font-style: italic; margin-inline-start: 4px; }
+.chat-bubble .chat-edit-link { background: none; border: 0; padding: 0; margin: 0 0 0 8px; color: inherit; opacity: 0.85; text-decoration: underline; font-size: 0.7rem; cursor: pointer; width: auto; }
+html[dir="rtl"] .chat-bubble .chat-edit-link { margin: 0 8px 0 0; }
+.chat-edit-box textarea { width: 100%; min-height: 60px; }
+.chat-edit-box .chat-edit-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.inq-reply { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: #fff; }
+.inq-reply .meta { font-size: 0.75rem; color: var(--muted); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.inq-reply .text { white-space: pre-wrap; }
+.inq-reply .ch { font-size: 0.68rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #e8f4f1; color: #0e7266; }
+.inq-reply .ch.email { background: #e8eefb; color: #1a4aa0; }
+.inq-reply .ch.note { background: #eee; color: #555; }
+.inq-reply .inq-reply-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.inq-reply .inq-reply-actions button, .inquiry-reply-btn { margin: 0; width: auto; }
+#inquiry-reply-wa-btn, .inq-reply button.roster-btn.wa { background: #128c7e; border: 1px solid #0e7266; color: #fff; border-radius: 8px; font-weight: 700; padding: 9px 14px; cursor: pointer; }
+
+/* ---- Compact roster (100+ members): one short row each, filters, sticky header ---- */
+.roster-toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin: 0 0 8px; }
+.roster-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.roster-filter { margin: 0; width: auto; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: #fff; color: var(--ink, #222); font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+.roster-filter b { margin-inline-start: 4px; color: var(--muted); }
+.roster-filter.active { background: var(--red); border-color: var(--red); color: #fff; }
+.roster-filter.active b { color: #fff; }
+.roster-toolbar .wa-bulk-bar { margin: 0; }
+.roster-date-banner { margin: 0 0 6px; font-size: 0.8rem; color: #8a5a00; background: #fff6e0; border: 1px solid #f0d9a0; border-radius: 8px; padding: 5px 10px; }
+.roster-qr-note { margin: 0 0 6px; }
+.roster-scroll { max-height: 72vh; overflow: auto; }
+.roster-table thead th { position: sticky; top: 0; z-index: 2; background: #faf8f3; box-shadow: 0 1px 0 var(--border); }
+.roster-table td { padding-top: 6px; padding-bottom: 6px; }
+.roster-table .roster-actions { flex-direction: row; flex-wrap: nowrap; min-width: 0; gap: 6px; }
+.roster-table td:last-child { min-width: 0; }
+.roster-table td.wa-cell { min-width: 0; }
+.roster-table button.roster-btn { white-space: nowrap; padding: 5px 10px; }
+.roster-table .roster-qr.compact { flex-direction: row; gap: 6px; min-width: 0; width: auto; }
+.roster-table .roster-qr.compact .roster-qr-thumb { width: 38px; height: 38px; padding: 1px; }
+.roster-table .roster-qr.compact a.roster-qr-download { width: auto; display: inline-block; padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; }
+.wa-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.roster-table button.roster-btn.wa.wa-chip { width: auto; margin: 0; padding: 5px 9px; font-size: 0.74rem; }
+.roster-table button.roster-btn.wa.wa-chip.sent { background: #fff; color: #0e7266; border-color: #0e7266; }
+.roster-table button.roster-btn.wa.wa-chip.reminder.sent { color: #b36b00; border-color: #b36b00; }
+.roster-table button.roster-btn.wa.wa-chip.dayof.sent { color: #5a32a3; border-color: #5a32a3; }
+.roster-table button.roster-btn.wa.wa-chip:disabled { background: #eceeec; color: #8b918b; border-color: #d4d8d4; }
+.roster-table button.roster-btn.wa.wa-chip.sent:disabled { background: #fff; }
+.inquiry-reply-btn { white-space: nowrap; }
+#inquiry-reply-wa-btn { font-size: 0.95rem; }
+
+.ev-managers-block { margin: 8px 0; }
+.ev-managers-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0; }
+.ev-managers-list label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
+.ev-managers-list input { width: auto; margin: 0; }
+
+/* "Watch how" help videos (Member Profile) */
+.howto-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 12px; }
+@media (max-width: 640px) { .howto-grid { grid-template-columns: 1fr; } }
+.howto-item { margin: 0; }
+.howto-item video { width: 100%; display: block; border-radius: 10px; background: #1b0707; aspect-ratio: 1280 / 900; }
+.howto-item figcaption { margin-top: 8px; font-weight: 600; font-size: 0.92rem; text-align: center; }
+.howto-item.howto-flash video { outline: 3px solid var(--gold, #c9a227); outline-offset: 3px; }
+
+.roster-table button.roster-btn.undo { background: #fff; border-color: #b36b00; color: #8a5200; }
+.roster-table button.roster-btn.undo:hover:not(:disabled) { background: #fff4e0; }
+
+/* Age group report builder (Admin > Reports) */
+.agerep-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; }
+.agerep-events { max-height:220px; overflow:auto; border:1px solid var(--border,#e4dfd8); border-radius:8px; padding:6px 10px; background:#fff; margin-bottom:12px; }
+.agerep-events label.agerep-chk { display:flex; gap:8px; align-items:baseline; margin:0; padding:4px 0; font-weight:400; }
+.agerep-ages { display:flex; flex-wrap:wrap; gap:6px 18px; margin:4px 0 12px; }
+.agerep-ages label.agerep-chk { display:flex; gap:6px; align-items:center; margin:0; font-weight:400; }
+.agerep-chk input { width:auto; margin:0; }
+.agerep-open { display:inline-block; background:var(--primary,#8B0000); color:#fff; padding:9px 18px; border-radius:8px; font-weight:700; text-decoration:none; }
+.agerep-open.disabled { opacity:0.45; pointer-events:none; }
+
+/* ---- Member directory: filters, selection, badges, points editor ---- */
+.dir-toolbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: 10px 0; }
+.dir-toolbar input, .dir-toolbar select { margin: 0; width: 100%; }
+.dir-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.dir-actions button { margin-top: 0; }
+.dir-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.dir-badge { display: inline-block; margin-inline-start: 6px; padding: 1px 7px; border-radius: 10px; font-size: 0.68rem; font-weight: 600; white-space: nowrap; vertical-align: middle; }
+.dir-badge.archived { background: #6b7280; color: #fff; }
+.dir-badge.nologin { background: #fff4d6; color: #7a5600; border: 1px solid #f0d58a; }
+.dir-badge.temp { background: #e3efff; color: #1d4f91; border: 1px solid #b6d1f5; }
+tr.dir-archived td { opacity: 0.6; }
+.dir-sel { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.dir-points-editor b.pos { color: #1b7f3b; }
+.dir-points-editor b.neg { color: #b42318; }
+#dir-action-msg { white-space: pre-line; }
+.dir-actions button.roster-btn.wa, .dir-send-one, #creds-open { font-size: 0.85rem; font-weight: 700; border-radius: 8px; padding: 8px 14px; border: 1px solid #0e7266; cursor: pointer; width: auto; margin: 0; background: #128c7e; color: #fff; }
+.dir-actions button.roster-btn.wa:disabled, #creds-open:disabled { background: #d9ddd9; border-color: #c4c9c4; color: #7a807a; cursor: not-allowed; }
+.dir-points-editor { max-width: 720px; }
+.dir-points-editor select.dir-pts-mode { max-width: none !important; width: auto; }
+.dir-points-editor .dir-pts-save { margin-top: 0; }
+
+/* WhatsApp community card inside the landing hero (under Upcoming Events). */
+.hero-wa-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 14px 18px;
+}
+.hero-wa-qr-link { flex: 0 0 auto; display: block; width: 130px; height: 130px; background: #fff; border-radius: 12px; padding: 0; line-height: 0; overflow: hidden; }
+/* The uploaded image is a QR with a caption and lots of white margin; scaling
+   it up inside the same box makes the code itself much larger to scan. */
+.hero-wa-qr { width: 130px; height: 130px; object-fit: contain; display: block; transform: scale(1.4); transform-origin: 50% 54%; }
+.hero-wa-text { min-width: 0; flex: 1 1 auto; align-self: stretch; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center; }
+.hero-wa-card .hero-wa-title { margin: 0; color: #fff; font-size: 0.98rem; font-weight: 700; line-height: 1.25; }
+.hero-wa-card .hero-wa-sub { margin: 0; color: rgba(255, 255, 255, 0.78); font-size: 0.78rem; line-height: 1.4; }
+.hero-wa-btn { display: inline-block; background: #25d366; color: #0b3d1d; font-weight: 800; font-size: 0.8rem; padding: 8px 14px; border-radius: 999px; text-decoration: none; }
+.hero-wa-btn:hover { filter: brightness(1.06); }
+@media (max-width: 640px) {
+  .hero-wa-qr-link, .hero-wa-qr { width: 112px; height: 112px; }
+}
+
+.howto-langs { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
+.howto-lang { padding: 4px 14px; font-size: 0.82rem; background: #fff; color: var(--maroon, #7a0e0e); border: 1px solid var(--maroon, #7a0e0e); border-radius: 999px; cursor: pointer; }
+.howto-lang.active { background: var(--maroon, #7a0e0e); color: #fff; }
+
+/* Full event: tell members the waiting list is open. */
+.event-full-note { margin: 8px 0 16px; padding: 8px 12px; border-radius: 10px; background: #fff4e0; border: 1px solid #f0c987; color: #7a4a00; font-size: 0.86rem; line-height: 1.45; }
+
+/* Admin custom report builder */
+.rb-saved-bar { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; margin-top: 6px; }
+/* Report name: the first thing in the builder, written once and used as the report's title everywhere */
+.rb-title-box { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border); border-inline-start: 4px solid var(--gold); border-radius: 8px; background: #fffdf7; }
+.rb-title-box label { font-weight: 700; }
+.rb-title-box input { width: 100%; max-width: none; font-size: 1.05rem; font-weight: 600; margin-top: 4px; }
+.rb-title-box .hint-note { margin: 6px 0 0; }
+.rb-result-title { margin: 14px 0 4px; font-size: 1.15rem; color: var(--red-dark); border-bottom: 2px solid var(--gold); padding-bottom: 6px; }
+.rb-saved-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rb-section { margin-top: 16px; }
+.rb-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
+.rb-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 16px; margin-top: 6px; }
+.rb-f { min-width: 0; }
+.rb-f input, .rb-f select { width: 100%; max-width: none; }
+.rb-fl { display: block; font-size: 0.82rem; font-weight: 700; color: var(--muted, #6b6b6b); margin-bottom: 4px; }
+.rb-pair { display: flex; gap: 8px; }
+.rb-pair > * { flex: 1 1 0; min-width: 0; }
+.rb-events-wrap { margin-top: 12px; }
+.rb-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.rb-result { margin-top: 14px; }
+.rb-count { margin: 0 0 4px; }
+.rb-table-wrap { overflow-x: auto; margin: 10px 0; border: 1px solid #e4dfd8; border-radius: 10px; max-height: 70vh; }
+.rb-table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+.rb-table th { position: sticky; top: 0; background: #2a0b0b; color: #f0d98a; text-align: start; padding: 8px 10px; white-space: nowrap; }
+.rb-table td { padding: 7px 10px; border-top: 1px solid #eee8de; white-space: nowrap; }
+.rb-table tbody tr:nth-child(even) td { background: #faf7f2; }
+.rb-table tr.rb-total td { background: #fff3cf !important; font-weight: 800; }
+@media (max-width: 700px) { .rb-saved-bar { grid-template-columns: 1fr; } }
+.rb-f input[type="checkbox"], .rb-f input[type="radio"], .rb-card input[type="checkbox"], #rb-card input[type="checkbox"], #rb-card input[type="radio"] { width: auto; flex: none; margin: 0; }
+#rb-card .agerep-chk { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Birthday cards */
+.bd-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; margin-top: 12px; }
+.bd-preview-col { position: sticky; top: 12px; text-align: center; }
+.featured-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
+/* Birthday greeting sits BELOW the featured events (events side by side above it). */
+.featured-row > #featured-events-section { min-width: 0; }
+.bd-panel { min-width: 0; max-width: 640px; margin-bottom: 10px; }
+@media (max-width: 1000px) { .bd-panel { max-width: none; } }
+.bd-wish { margin: 0 0 8px; font-weight: 700; color: var(--maroon, #8b0000); line-height: 1.6; font-size: 0.95rem; }
+.bd-preview-col .bd-stage { max-width: 300px; margin: 0 auto; }
+.bd-stage { position: relative; width: 100%; aspect-ratio: 16 / 11; container-type: inline-size; border-radius: 14px; overflow: hidden; background: radial-gradient(ellipse at 50% 100%, #5a0014 0%, #2a0008 80%); border: 2px solid var(--gold); box-shadow: 0 3px 12px rgba(201, 162, 39, 0.3); }
+/* The video keeps its own 16:9 shape at the top; the name sits in the band below it, so it never covers the neon "Happy Birthday" lettering. */
+.bd-stage video { position: absolute; inset: 0 0 auto 0; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; -webkit-mask-image: linear-gradient(to bottom, #000 90%, transparent); mask-image: linear-gradient(to bottom, #000 90%, transparent); }
+.bd-name-overlay { position: absolute; inset-inline: 0; bottom: 0; height: 20%; display: flex; align-items: center; justify-content: center; padding: 0 10px; pointer-events: none; transition: opacity 0.4s; }
+.bd-name-overlay.fade { opacity: 0; }
+.bd-name-overlay span { display: block; max-width: 100%; font-family: "Cairo", "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif; font-weight: 800; font-size: clamp(1.1rem, 7.2cqi, 2rem); line-height: 1.4; letter-spacing: 0; color: #fff; text-align: center; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 14px rgba(255, 200, 90, 0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-count { position: absolute; top: 8px; inset-inline-start: 8px; background: rgba(60, 0, 10, 0.7); color: #ffe9a8; font-family: "Cairo", "Segoe UI", Tahoma, Arial, sans-serif; font-size: 0.78rem; font-weight: 800; padding: 2px 10px; border-radius: 12px; }
+.bd-sound { position: absolute; top: 8px; inset-inline-end: 8px; margin: 0; padding: 3px 11px; font-size: 0.72rem; font-weight: 700; border-radius: 14px; border: 0; background: rgba(60, 0, 10, 0.6); color: #fff; cursor: pointer; }
+.bd-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--maroon, #8b0000); cursor: pointer; text-align: start; }
+.bd-name:hover { text-decoration: underline; }
+.bd-today { display: inline-block; background: #ffd23f; color: #6b0010; font-weight: 800; border-radius: 999px; padding: 1px 10px; font-size: 0.78rem; }
+.bd-sent { color: #1d6b34; font-weight: 700; font-size: 0.8rem; }
+.rb-table tr.bd-row-today td { background: #fff7d6 !important; }
+.rb-table tr.bd-row-active td { box-shadow: inset 0 -2px 0 #c9a227; }
+.rb-table td.num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+#bd-card input[type="checkbox"] { width: auto; }
+@media (max-width: 860px) { .bd-layout { grid-template-columns: 1fr; } .bd-preview-col { position: static; order: -1; } }
+.bd-list .rb-table th, .bd-list .rb-table td { padding: 6px 7px; }
+.bd-list .rb-table td:last-child { padding-inline-end: 10px; }
+.hero-wa-qr.fitted { transform: none; object-fit: contain; }
+.hero-wa-qr-link { box-shadow: 0 0 0 3px #d4a82a, 0 6px 18px rgba(0, 0, 0, 0.35); }
+
+.howto-err { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: #fdeaea; border: 1px solid #f0b4b4; color: var(--red); font-size: 0.85rem; text-align: center; }
+
+/* member -> committee WhatsApp */
+.committee-wa { display: inline-block; text-decoration: none; }
+.myreg-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+
+
+/* ------------------------------------------ clickable dashboard cards --- */
+button.stat { font: inherit; color: inherit; margin: 0; display: block; cursor: pointer; text-align: center; }
+.stat .n, .stat .l, .stat .more { display: block; }
+.stat-click { transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease; }
+.stat-click:hover, .stat-click:focus-visible { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); border-color: var(--gold); outline: none; }
+.stat-click:focus-visible { box-shadow: 0 0 0 3px rgba(200, 162, 74, 0.45); }
+.stat-click:disabled { opacity: 0.6; cursor: progress; }
+.stat .more { margin-top: 4px; font-size: 0.7rem; font-weight: 700; color: var(--gold-dark, #8a6a1f); }
+.stat .more::after { content: " \203A"; }
+[dir="rtl"] .stat .more::after { content: " \2039"; }
+.detail-box { max-width: 980px; }
+.detail-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.detail-tools input { flex: 1; min-width: 180px; max-width: 360px; }
+.detail-table-wrap { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.detail-table th { position: sticky; top: 0; background: #faf7ef; z-index: 1; }
+.detail-table td { vertical-align: middle; }
+.detail-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.detail-foot .secondary { margin-top: 0; }
+@media (max-width: 700px) { .rb-saved-bar { grid-template-columns: 1fr; } .detail-box { padding: 16px; } }
+
+/* Registration "opens soon": replaces the Register button while an event is announced but not open. */
+.reg-soon { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 10px 16px; border-radius: 10px; border: 1px dashed var(--gold); background: #fff8e1; color: #7a5a00; font-weight: 700; font-size: 0.9rem; text-align: center; line-height: 1.3; }
+.reg-soon small { font-weight: 600; font-size: 0.75rem; color: #8a6a10; }
+.reg-soon.small { padding: 4px 10px; font-size: 0.78rem; border-radius: 8px; }
+.event-card .actions .reg-soon { flex: 1 1 140px; }
+.reg-soon-box { display: flex; flex-direction: column; gap: 8px; align-items: stretch; margin-top: 8px; }
+.reg-soon-box .reg-soon { width: 100%; }
+.reg-soon-box p { margin: 0; color: var(--muted); font-size: 0.85rem; text-align: center; }
+.tourn-status-pill.reg-pill-soon { background: #fff8e1; color: #7a5a00; border: 1px solid var(--gold); margin-top: 4px; }
+
+/* ---- League season: team registration, eligibility, season scheduler ---- */
+.reg-team-box { border: 1px solid var(--border, #e2ddd2); border-radius: 12px; padding: 14px 16px; margin: 14px 0; background: rgba(201, 162, 39, 0.07); }
+.reg-team-box .reg-team-title { margin: 0 0 6px; font-size: 1.05rem; }
+.reg-team-box select, .reg-team-box input[type="text"] { width: 100%; margin: 6px 0 12px; }
+.att-elig-note { margin-inline-start: 6px; font-size: 0.72rem; }
+.born-badge { white-space: nowrap; }
+.team-admin-row { border: 1px solid var(--border, #e2ddd2); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.team-admin-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.team-admin-players { margin: 0 0 8px; padding-inline-start: 22px; font-size: 0.9rem; }
+.team-admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.season-day { border: 1px dashed var(--border, #e2ddd2); border-radius: 10px; padding: 8px 10px; margin: 8px 0; align-items: end; }
+.tourn-bracket-title { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--red, #8b0000); margin-bottom: 4px; }
+
+/* Final / 3rd-place cards: keep the title off the card's border. */
+.tourn-bracket-title { padding: 6px 8px 0; margin-bottom: 0; }
+.tourn-season-link { color: var(--red, #8b0000); font-weight: 700; text-decoration: none; }
+.tourn-season-link:hover { text-decoration: underline; }
+a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; border: 1px solid var(--red); background: #fff; }
+
+/* Admin > Tournaments tab: list of every tournament */
+.admin-tourn-list { display: flex; flex-direction: column; gap: 8px; }
+.admin-tourn-row {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr) auto; gap: 8px 14px; align-items: center;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff;
+}
+.admin-tourn-row.active { border-color: var(--gold); background: #fff9ec; }
+.admin-tourn-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.admin-tourn-name .meta { font-size: 0.78rem; color: var(--muted); }
+.admin-tourn-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 640px) {
+  .admin-tourn-row { grid-template-columns: 1fr auto; }
+  .admin-tourn-badges { grid-column: 1 / -1; grid-row: 2; }
+}
+.admin-tourn-name .lang-ar, .admin-tourn-name .lang-en { text-align: start; }
+
+/* Scorers & awards */
+.awards-sub { margin: 14px 0 6px; font-size: 0.85rem; color: var(--red-dark, #5c0000); }
+.awards-list { display: flex; flex-direction: column; gap: 6px; }
+.award-line { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.award-title { font-weight: 700; }
+.award-val.award-none { color: var(--muted); font-style: italic; }
+.awards-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.scorer-form { margin: 10px 0; }
+.scorer-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.scorer-side h5 { margin: 0 0 6px; }
+.scorer-score { color: var(--muted); font-weight: 400; margin-inline-start: 6px; }
+.scorer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.scorer-row input { width: 70px; margin: 0; padding: 4px 6px; }
+.gender-badge { background: #fbe9ef; color: #8b1a3d; }
