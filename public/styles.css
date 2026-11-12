@@ -428,14 +428,18 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   grid-template-columns: 1.7fr 1fr;
   gap: 22px;
 }
+/* Left column: the welcome block on top, the WhatsApp community card under it,
+   so the right column has the full height for the upcoming-events list. */
+.hero-main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .hero-photo-card {
   position: relative;
   border-radius: 18px;
   overflow: hidden;
-  min-height: 320px;
-  padding: 34px 32px;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 30px 32px 32px;
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   background: linear-gradient(135deg, var(--red) 0%, var(--red-dark) 55%, #3a0000 100%) center / cover no-repeat;
 }
 /* Sits behind .hero-photo-overlay in DOM order (so the same club-color tint
@@ -618,6 +622,12 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 @media (max-width: 640px) {
   .hero-banner { grid-template-columns: 1fr; padding: 16px; border-radius: 20px; gap: 16px; }
   .hero-photo-card { padding: 26px 20px 30px; min-height: 0; align-items: flex-start; }
+  /* Phone: stack welcome, stats, upcoming events, then the WhatsApp card. */
+  .hero-main-col, .hero-side-col { display: contents; }
+  .hero-photo-card { order: 1; }
+  .hero-stats-pill { order: 2; }
+  .hero-upcoming-card { order: 3; }
+  .hero-wa-card { order: 4; }
   /* The pill no longer needs the old absolute-vs-static stacking-order
      workaround this media query used to carry - now that it's a normal
      flex child of .hero-side-col (stacked below the photo card, above the

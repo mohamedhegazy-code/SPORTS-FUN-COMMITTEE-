@@ -2206,7 +2206,7 @@ function shortDateBadge(dateStr) {
 // soonest-first upcoming events renderFeaturedEvents() shows in full-size
 // cards below the hero (same data/filter, no extra request), styled as a
 // quick-glance list with a date badge instead of a full event card.
-const HERO_UPCOMING_MAX = 4;
+const HERO_UPCOMING_MAX = 6;
 function renderHeroUpcoming() {
   const list = document.getElementById("hero-upcoming-list");
   if (!list) return;

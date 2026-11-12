@@ -55,16 +55,28 @@
   <!-- ============================= EVENTS (landing page) ============================= -->
   <section id="view-events" class="view active">
     <div class="hero-banner" data-landing-section="hero">
-      <div class="hero-photo-card" id="hero-photo-card">
-        <video class="hero-video-bg hidden" id="hero-video-bg" muted loop playsinline preload="metadata"></video>
-        <div class="hero-photo-overlay"></div>
-        <div class="hero-photo-content">
-          <span class="hero-eyebrow" data-i18n="heroEyebrow">Al Ahly Club &middot; Recreational Sports Committee</span>
-          <h2 id="landing-hero-headline" data-i18n="heroWelcome">Welcome to Ahlawy</h2>
-          <p id="landing-hero-tagline" data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
-          <div class="hero-cta-row">
-            <button type="button" class="hero-cta-btn primary" id="hero-cta-register" data-i18n="heroCtaRegister">Register now</button>
-            <button type="button" class="hero-cta-btn secondary" id="hero-cta-events" data-i18n="heroCtaEvents">View all events</button>
+      <div class="hero-main-col">
+        <div class="hero-photo-card" id="hero-photo-card">
+          <video class="hero-video-bg hidden" id="hero-video-bg" muted loop playsinline preload="metadata"></video>
+          <div class="hero-photo-overlay"></div>
+          <div class="hero-photo-content">
+            <span class="hero-eyebrow" data-i18n="heroEyebrow">Al Ahly Club &middot; Recreational Sports Committee</span>
+            <h2 id="landing-hero-headline" data-i18n="heroWelcome">Welcome to Ahlawy</h2>
+            <p id="landing-hero-tagline" data-i18n="heroSub">Register for club sports activities, earn points, and stay connected with the community.</p>
+            <div class="hero-cta-row">
+              <button type="button" class="hero-cta-btn primary" id="hero-cta-register" data-i18n="heroCtaRegister">Register now</button>
+              <button type="button" class="hero-cta-btn secondary" id="hero-cta-events" data-i18n="heroCtaEvents">View all events</button>
+            </div>
+          </div>
+        </div>
+        <div class="hero-wa-card hidden" id="hero-wa-card">
+          <a id="hero-wa-qr-link" class="hero-wa-qr-link hidden" href="#" target="_blank" rel="noopener" aria-label="WhatsApp QR">
+            <img id="hero-wa-qr" class="hero-wa-qr" alt="" width="118" height="118" />
+          </a>
+          <div class="hero-wa-text">
+            <h3 class="hero-wa-title" id="hero-wa-title" data-i18n="whatsappCommunityTitle">Join our WhatsApp Community</h3>
+            <p class="hero-wa-sub" data-i18n="heroWaScan">Scan the QR code with your phone camera, or tap the button.</p>
+            <a id="hero-wa-link" class="hero-wa-btn hidden" href="#" target="_blank" rel="noopener" data-i18n="btnJoinWhatsapp">Open WhatsApp</a>
           </div>
         </div>
       </div>
@@ -76,16 +88,6 @@
           <button type="button" class="hero-upcoming-link" id="hero-upcoming-viewall">
             <span data-i18n="heroViewCalendar">View full calendar</span> <span aria-hidden="true">&rarr;</span>
           </button>
-        </div>
-        <div class="hero-wa-card hidden" id="hero-wa-card">
-          <a id="hero-wa-qr-link" class="hero-wa-qr-link hidden" href="#" target="_blank" rel="noopener" aria-label="WhatsApp QR">
-            <img id="hero-wa-qr" class="hero-wa-qr" alt="" width="118" height="118" />
-          </a>
-          <div class="hero-wa-text">
-            <h3 class="hero-wa-title" id="hero-wa-title" data-i18n="whatsappCommunityTitle">Join our WhatsApp Community</h3>
-            <p class="hero-wa-sub" data-i18n="heroWaScan">Scan the QR code with your phone camera, or tap the button.</p>
-            <a id="hero-wa-link" class="hero-wa-btn hidden" href="#" target="_blank" rel="noopener" data-i18n="btnJoinWhatsapp">Open WhatsApp</a>
-          </div>
         </div>
       </div>
     </div>
