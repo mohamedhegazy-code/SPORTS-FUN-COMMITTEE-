@@ -693,6 +693,15 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   align-items: center; justify-content: center; font-size: 0.8rem;
 }
 .event-card .photo.has-img { display: block; }
+/* Thin gold frame: the cover sits inset in the card inside a 1.5px gold border
+   (plus a faint outer ring), like a framed picture. */
+.event-card.event-card .photo {
+  width: auto;
+  margin: 10px 10px 0;
+  border: 1.5px solid var(--gold);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(201, 162, 39, 0.45);
+}
 .event-card .photo.has-img img {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
 }
