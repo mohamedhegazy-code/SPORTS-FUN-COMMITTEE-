@@ -1921,6 +1921,53 @@ function activityRowsHtml(children, isPast) {
     })
     .join("");
 }
+// Some uploaded banners are saved with plain white/near-white bands above and
+// below the artwork. Card covers use a fixed frame, so find those bands and zoom
+// onto the artwork instead of showing white strips inside the gold frame.
+function trimCoverPadding(img) {
+  try {
+    const w = 64;
+    const h = Math.max(8, Math.round((w * img.naturalHeight) / img.naturalWidth));
+    const cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const blank = (y) => {
+      let sum = 0, min = 255, max = 0;
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      return sum / w > 225 && max - min < 30;
+    };
+    let top = 0;
+    while (top < h && blank(top)) top++;
+    let bottom = 0;
+    while (bottom < h - top && blank(h - 1 - bottom)) bottom++;
+    const keep = 1 - (top + bottom) / h;
+    if ((top + bottom) / h < 0.06 || keep < 0.3) return;
+    img.style.height = (100 / keep).toFixed(2) + "%";
+    img.style.top = (-(top / h) * (100 / keep)).toFixed(2) + "%";
+    img.style.bottom = "auto";
+  } catch (e) {
+    /* cross-origin or unreadable image: leave it as is */
+  }
+}
+document.addEventListener(
+  "load",
+  (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.parentElement || !img.parentElement.classList.contains("has-img")) return;
+    if (!img.parentElement.closest(".event-card") || !img.naturalWidth) return;
+    trimCoverPadding(img);
+  },
+  true
+);
 function eventCardHtml(ev, isPast, featured) {
   const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
   const isParent = children.length > 0;

@@ -664,7 +664,8 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   gap: 18px;
   margin-bottom: 30px;
 }
-.event-grid.featured {
+.event-grid.featured,
+#events-grid, #reg-events-grid, #annual-grid, #landing-annual-grid {
   /* wider cards than the regular grid so a banner cover is big enough to read:
      2 per row on a laptop, 3 on a wide screen, 1 on a phone. Up to 10 events
      fit here, so each card keeps its own height (no stretched white gaps under
@@ -674,22 +675,23 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   grid-auto-rows: 1fr; /* ...and every row is as tall as the tallest, so all cards match */
   margin-bottom: 10px;
 }
+#events-grid, #reg-events-grid, #annual-grid, #landing-annual-grid { margin-bottom: 30px; }
 /* A lone featured event keeps a sensible card width instead of stretching across the page. */
-.event-grid.featured:has(> :only-child) { grid-template-columns: minmax(0, 560px); }
-#events-grid { grid-auto-rows: 1fr; }
+.event-grid.featured:has(> :only-child),
+#events-grid:has(> :only-child), #reg-events-grid:has(> :only-child), #annual-grid:has(> :only-child), #landing-annual-grid:has(> :only-child) { grid-template-columns: minmax(0, 560px); }
 .event-grid.featured .event-card {
   border-color: var(--gold);
   box-shadow: 0 3px 12px rgba(201, 162, 39, 0.25);
 }
 /* Every event card cover - banner, ordinary photo or the "no photo" placeholder -
-   uses the same 4.5:1 frame (the platform's banner format, also when saved with
-   extra white padding), so all cards are the same size. The full picture is
+   uses the same 3.2:1 frame (a little shorter than the 4.5:1 banner format, so the
+   banner is slightly trimmed at the sides), so all cards are the same size. The full picture is
    still shown in the event's details window. */
 .event-card .photo,
 .event-card .photo.has-img,
 .event-grid.featured .event-card .photo,
 .event-grid.featured .event-card .photo.has-img {
-  aspect-ratio: 4.5 / 1; display: flex; position: relative; overflow: hidden; background: #5b0010; color: rgba(255, 255, 255, 0.75);
+  aspect-ratio: 3.2 / 1; display: flex; position: relative; overflow: hidden; background: #5b0010; color: rgba(255, 255, 255, 0.75);
   align-items: center; justify-content: center; font-size: 0.8rem;
 }
 .event-card .photo.has-img { display: block; }
