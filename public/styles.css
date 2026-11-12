@@ -684,26 +684,18 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
   box-shadow: 0 3px 12px rgba(201, 162, 39, 0.25);
 }
 /* Every event card cover - banner, ordinary photo or the "no photo" placeholder -
-   uses the same 3.2:1 frame (a little shorter than the 4.5:1 banner format, so the
-   banner is slightly trimmed at the sides), so all cards are the same size. The full picture is
-   still shown in the event's details window. */
+   runs edge to edge across the top of the card in the same 4.5:1 frame (the
+   platform's banner format), so a banner shows whole (logo and edges included)
+   and all cards are the same size. The full picture is still shown in the
+   event's details window. */
 .event-card .photo,
 .event-card .photo.has-img,
 .event-grid.featured .event-card .photo,
 .event-grid.featured .event-card .photo.has-img {
-  aspect-ratio: 3.2 / 1; display: flex; position: relative; overflow: hidden; background: #5b0010; color: rgba(255, 255, 255, 0.75);
+  aspect-ratio: 4.5 / 1; display: flex; position: relative; overflow: hidden; background: #5b0010; color: rgba(255, 255, 255, 0.75);
   align-items: center; justify-content: center; font-size: 0.8rem;
 }
 .event-card .photo.has-img { display: block; }
-/* Thin gold frame: the cover sits inset in the card inside a 1.5px gold border
-   (plus a faint outer ring), like a framed picture. */
-.event-card.event-card .photo {
-  width: auto;
-  margin: 10px 10px 0;
-  border: 1.5px solid var(--gold);
-  border-radius: 10px;
-  box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(201, 162, 39, 0.45);
-}
 .event-card .photo.has-img img {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
 }
@@ -1683,7 +1675,7 @@ button.stat { font: inherit; color: inherit; margin: 0; display: block; cursor: 
 .reg-soon { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 10px 16px; border-radius: 10px; border: 1px dashed var(--gold); background: #fff8e1; color: #7a5a00; font-weight: 700; font-size: 0.9rem; text-align: center; line-height: 1.3; }
 .reg-soon small { font-weight: 600; font-size: 0.75rem; color: #8a6a10; }
 .reg-soon.small { padding: 4px 10px; font-size: 0.78rem; border-radius: 8px; }
-.event-card .actions .reg-soon { flex: 1 1 140px; }
+.event-card .actions .reg-soon { flex: 1 1 140px; padding: 9px 10px; font-size: 0.85rem; }
 .reg-soon-box { display: flex; flex-direction: column; gap: 8px; align-items: stretch; margin-top: 8px; }
 .reg-soon-box .reg-soon { width: 100%; }
 .reg-soon-box p { margin: 0; color: var(--muted); font-size: 0.85rem; text-align: center; }
