@@ -540,8 +540,8 @@ already looking at the landing page without them needing to reload the
 browser.
 
 **A friendlier landing page.** The Events tab now opens with a welcome
-banner, then five sections: **Coming up next** (the 2-3 soonest upcoming
-events, called out with a gold "coming up next" tag so they stand out),
+banner, then five sections: **Coming up next** (the 10 soonest upcoming
+events - the rest go under "More upcoming events" - called out with a gold "coming up next" tag so they stand out),
 **All upcoming events** (the full grid, same as before), **Committee News**
 (short announcements the admin posts — see below), **Community** (a quick
 stats strip — total members and events held — plus a top-5 point-earners
@@ -619,7 +619,7 @@ Tests: `loadtest/awards_e2e.js`.
 Admin-only field **Event code** on the Add / Edit event forms. Events that carry the **same code** can't both be joined by the same person - e.g. give "Amateurs Cup" and "Professionals Cup" the code `TENNIS CUP` and a player can register in only one of them.
 
 - The code is trimmed, upper-cased and capped at 30 characters; matching is case-insensitive. Leave it empty for no restriction.
-- Applies per person: a member and each family member are separate people (a parent can take one event and a child the other). A **waiting-list** place counts as registered.
+- Applies per person: a member and each family member are separate people (a parent can take one event and a child the other). Only a **confirmed** registration blocks the other event; a waiting-list place is not a place, so that person may still register in the other event and simply stays on the waiting list. Automatic promotion off a waiting list skips anyone already confirmed in another event with the same code (the next person is promoted instead), and the admin's manual *Promote* is refused with an explanation.
 - The second attempt is refused with a clear message (Arabic / English) naming the event already joined. Players never see the code; only admins get it in the API (`eventCode`), and it is stripped from every other response.
 - Admin **Invite** skips people already in another event with the same code and says why; **Merge events** treats them as conflicts.
 - To switch, the player cancels the first registration, then registers in the other.
@@ -627,7 +627,7 @@ Admin-only field **Event code** on the Add / Edit event forms. Events that carry
 - Tournament Managers can't set or see it (admin only), and an edit by a manager never changes an existing code.
 - Works independently of "Parent event" - the events stay as separate cards on the landing page.
 
-Tests: `loadtest/exclusive_code_e2e.js` (53 checks, fresh data folder).
+Tests: `loadtest/exclusive_code_e2e.js` (63 checks, fresh data folder).
 
 ## 1000-player tournament test
 
@@ -803,3 +803,7 @@ to disk, so restarting the server logs everyone out (they just log back in
 — nothing is lost). That's a deliberate simplicity trade-off for this
 prototype; a persistent session store is a small follow-up if it matters
 for your deployment.
+
+
+### Event card covers
+Every card cover uses the same frame: banners (4.5:1, including images saved with extra white padding) fill a 4.5:1 frame edge to edge; ordinary photos (aspect < 2) fill a 16:9 frame. Class `.photo-tall` is set by a load handler in `app.js`.
