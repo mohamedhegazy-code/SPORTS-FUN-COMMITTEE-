@@ -807,3 +807,6 @@ for your deployment.
 
 ### Event card covers
 Every card cover uses the same frame: banners (4.5:1, including images saved with extra white padding) fill a 4.5:1 frame edge to edge; ordinary photos (aspect < 2) fill a 16:9 frame. Class `.photo-tall` is set by a load handler in `app.js`.
+
+### Hero "Upcoming Events" card
+Fixed-height rows (date chip + single-line name in the visitor's language, weekday and start time underneath), at most 4, then a "+N more events" line, so the hero keeps the same size however many events exist (about 420px on desktop with 12 events).
