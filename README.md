@@ -806,7 +806,7 @@ for your deployment.
 
 
 ### Event card covers
-Every card cover uses the same frame: banners (4.5:1, including images saved with extra white padding) fill a 4.5:1 frame edge to edge; ordinary photos (aspect < 2) fill a 16:9 frame. Class `.photo-tall` is set by a load handler in `app.js`.
+All event cards are the same size: every cover (banner, ordinary photo or the "no photo" placeholder) uses one 4.5:1 frame with `object-fit: cover` (banners saved with white padding are trimmed to the banner), the grid uses `grid-auto-rows: 1fr`, and buttons sit at the bottom of each card. The per-card "Coming up next" tag was removed (the section title says it). The full picture is shown in the event's details window.
 
 ### Hero "Upcoming Events" card
 Fixed-height rows (date chip + single-line name in the visitor's language, weekday and start time underneath), at most 4, then a "+N more events" line, so the hero keeps the same size however many events exist (about 420px on desktop with 12 events).
