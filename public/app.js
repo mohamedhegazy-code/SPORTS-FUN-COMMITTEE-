@@ -208,7 +208,7 @@ function sortEventsForChooser(events) {
     const aUp = isUpcoming(a);
     const bUp = isUpcoming(b);
     if (aUp !== bUp) return aUp ? -1 : 1;
-    return aUp ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date);
+    return aUp ? compareEventsBySoonest(a, b) : b.date.localeCompare(a.date);
   });
 }
 // Full weekday name for a "YYYY-MM-DD" date string, in the current
@@ -1921,11 +1921,23 @@ function activityRowsHtml(children, isPast) {
     })
     .join("");
 }
+// Frame choice for card covers: wide banners get the 4.5:1 frame, anything
+// closer to a normal photo gets 16:9 (see .photo.has-img in styles.css).
+document.addEventListener(
+  "load",
+  (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.parentElement || !img.parentElement.classList.contains("has-img")) return;
+    if (!img.parentElement.closest(".event-card")) return;
+    if (img.naturalWidth && img.naturalWidth / img.naturalHeight < 2) img.parentElement.classList.add("photo-tall");
+  },
+  true
+);
 function eventCardHtml(ev, isPast, featured) {
   const children = EVENTS_DATA.filter((e) => e.parentEventId === ev.id);
   const isParent = children.length > 0;
   const photo = isPast && ev.recap && ev.recap.photos && ev.recap.photos.length ? ev.recap.photos[0] : ev.coverPhoto;
-  // The cover is a real <img> (not a CSS background) so the frame takes the
+  // The cover is a real <img> (not a CSS background); the frame is uniform:
   // picture's own proportions: a wide banner with text on it shows full-width
   // and readable instead of a small strip inside a fixed 16:10 box.
   return `
@@ -1976,16 +1988,25 @@ function wireEventCardButtons(grid, events, isPast) {
     });
   });
 }
-const FEATURED_EVENTS_COUNT = 3;
+// How many of the soonest upcoming events sit in "Coming up next" at the top of
+// the landing page; any beyond this go in "More upcoming events" below.
+const FEATURED_EVENTS_COUNT = 10;
+// Nearest date first; events on the same day order by start time (no time = first),
+// then by name so the order is stable.
+function compareEventsBySoonest(a, b) {
+  return (
+    a.date.localeCompare(b.date) ||
+    (a.startTime || "").localeCompare(b.startTime || "") ||
+    String(a.nameEn || "").localeCompare(String(b.nameEn || ""))
+  );
+}
 function renderEventsGrid() {
   const grid = document.getElementById("events-grid");
   const empty = document.getElementById("events-empty");
   if (!grid) return;
   // Sub-activities never get their own top-level card - they render nested
   // inside their parent event day's card instead.
-  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
-    a.date.localeCompare(b.date)
-  );
+  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort(compareEventsBySoonest);
   // The soonest FEATURED_EVENTS_COUNT already appear in "Coming up next"
   // above, so this section lists only the rest instead of repeating them.
   const rest = upcoming.slice(FEATURED_EVENTS_COUNT);
@@ -2006,9 +2027,7 @@ function renderRegisterEventsGrid() {
   const grid = document.getElementById("reg-events-grid");
   const empty = document.getElementById("reg-events-empty");
   if (!grid) return;
-  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
-    a.date.localeCompare(b.date)
-  );
+  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort(compareEventsBySoonest);
   empty.classList.toggle("hidden", upcoming.length > 0);
   grid.innerHTML = upcoming.map((ev) => eventCardHtml(ev, false)).join("");
   wireEventCardButtons(grid, upcoming, false);
@@ -2044,19 +2063,19 @@ function renderLandingAnnualPreview() {
   grid.innerHTML = preview.map((ev) => eventCardHtml(ev, true)).join("");
   wireEventCardButtons(grid, preview, true);
 }
-// The 3 soonest upcoming events, featured prominently at the top of the
+// The soonest FEATURED_EVENTS_COUNT upcoming events, featured prominently at the top of the
 // landing page ("coming up next") - a subset of the same data as the full
 // grid below, not a separate data source.
 function renderFeaturedEvents() {
   const section = document.getElementById("featured-events-section");
   const grid = document.getElementById("featured-events-grid");
   if (!section || !grid) return;
-  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort((a, b) =>
-    a.date.localeCompare(b.date)
-  );
+  const upcoming = EVENTS_DATA.filter((ev) => isUpcoming(ev) && !ev.parentEventId).sort(compareEventsBySoonest);
   const featured = upcoming.slice(0, FEATURED_EVENTS_COUNT);
   section.classList.toggle("hidden", featured.length === 0);
-  grid.innerHTML = featured.map((ev) => eventCardHtml(ev, false, true)).join("");
+  // The gold "coming up next" tag marks only the 3 soonest; with up to 10 cards
+  // the section title already says it.
+  grid.innerHTML = featured.map((ev, i) => eventCardHtml(ev, false, i < 3)).join("");
   wireEventCardButtons(grid, featured, false);
 }
 
@@ -2204,7 +2223,7 @@ function renderHeroUpcoming() {
   if (!list) return;
   const upcoming = (EVENTS_DATA || [])
     .filter((ev) => isUpcoming(ev) && !ev.parentEventId)
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .sort(compareEventsBySoonest)
     .slice(0, 4);
   if (!upcoming.length) {
     list.innerHTML = `<div class="hero-upcoming-empty">${escapeAttr(t("heroUpcomingEmpty"))}</div>`;
