@@ -1730,3 +1730,29 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .scorer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; }
 .scorer-row input { width: 70px; margin: 0; padding: 4px 6px; }
 .gender-badge { background: #fbe9ef; color: #8b1a3d; }
+
+/* ------------------------------------------- registration confirmation window --- */
+.reg-modal-box { max-width: 520px; }
+.reg-modal-box .card { box-shadow: none; border: none; padding: 0; margin: 0; background: transparent; }
+.reg-modal-box .card::before { display: none; }
+.reg-modal-box .card h2 { padding-inline-end: 34px; }
+.reg-event-summary {
+  margin: 10px 0 14px; padding: 12px 14px; border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--gold); border-radius: 10px; background: var(--bg, transparent);
+}
+.reg-sum-photo { width: 100%; max-height: 150px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; display: block; }
+.reg-sum-name { font-size: 1.1rem; font-weight: 700; color: var(--red-dark); margin-bottom: 8px; }
+.reg-sum-name .lang-en { display: block; font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+.reg-sum-rows { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 0.9rem; }
+.reg-sum-rows dt { color: var(--muted); }
+.reg-sum-rows dd { margin: 0; font-weight: 600; color: var(--text); }
+.reg-sum-inline .lang-en { display: none; }
+.reg-sum-full { margin: 10px 0 0; font-size: 0.82rem; color: var(--red-dark); }
+.reg-modal-actions {
+  display: flex; gap: 10px; margin-top: 14px; position: sticky; bottom: -22px;
+  padding: 12px 0 4px; background: var(--card);
+}
+.reg-modal-actions button { margin-top: 0; }
+.reg-modal-actions .primary { flex: 2; }
+.reg-modal-actions .secondary { flex: 1; }
+.reg-modal-box #reg-capacity-note { display: none; }

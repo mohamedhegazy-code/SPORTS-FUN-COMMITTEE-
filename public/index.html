@@ -308,50 +308,6 @@
       <div class="event-grid" id="reg-events-grid"></div>
     </div>
 
-    <!-- Signed-in: pick an event -->
-    <div id="reg-form" class="card hidden">
-      <h2 data-i18n="regTitle">Register for an event</h2>
-      <p data-i18n="regIntro" style="color:var(--muted);font-size:0.88rem;">Every participation earns at least 100 points, plus 10 for early registration. Points are awarded when your QR code is scanned at the event, not at sign-up — so register, then show up!</p>
-      <!-- Which event this form submits for is picked from the card grid
-           above (see #reg-events-grid), not a dropdown - this <select> stays
-           in the DOM only as the existing selection/submit logic's source of
-           truth, never shown to the member. -->
-      <select id="reg-event" class="hidden" aria-hidden="true" tabindex="-1"></select>
-      <p id="reg-selected-event-label" class="reg-selected-event"></p>
-      <p class="hint-note hidden" id="reg-capacity-note"></p>
-
-      <label data-i18n="whoAttending">Who's attending?</label>
-      <div id="reg-attendees-list"></div>
-      <div id="reg-team-box" class="reg-team-box hidden"></div>
-      <p class="hint-note" data-i18n="manageFamilyHint">Want to register a family member? Add them under Member Profile → My Family, then come back here.</p>
-      <p class="hint-note"><a href="#" class="howto-link" data-howto="register-family" data-i18n="howToLinkRegisterFamily">▶ Watch how to register family members for an event</a></p>
-
-      <button class="primary" id="reg-submit" data-i18n="btnRegister">Submit registration</button>
-      <div class="msg" id="reg-msg"></div>
-    </div>
-
-    <div class="card hidden" id="reg-waitlist-card">
-      <h2 data-i18n="waitlistPromptTitle">This event is full</h2>
-      <p id="reg-waitlist-message-en"></p>
-      <p id="reg-waitlist-message-ar" dir="rtl" lang="ar" style="color:var(--muted);"></p>
-      <label class="checkbox-row">
-        <input type="checkbox" id="reg-waitlist-confirm-check" />
-        <span data-i18n="waitlistConfirmCheckbox">I understand a waiting-list spot is not a guaranteed place at the event</span>
-      </label>
-      <div style="display:flex;gap:10px;margin-top:10px;">
-        <button class="primary" id="reg-waitlist-confirm" data-i18n="btnJoinWaitlist">Join the waiting list</button>
-        <button class="secondary" id="reg-waitlist-cancel" data-i18n="btnCancel">Cancel</button>
-      </div>
-      <div class="msg" id="reg-waitlist-msg"></div>
-    </div>
-
-    <div class="card hidden" id="reg-qr-card">
-      <h2 data-i18n="qrTitle">Your entry QR code(s)</h2>
-      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="qrIntro">Show this at the event entrance to check in. Points are awarded the moment it's scanned — take a screenshot so you have it even offline. You can also come back and view it any time from Member Profile → My Registrations, until the event is over.</p>
-      <p class="hint-note"><a href="#" class="howto-link" data-howto="qr-entry" data-i18n="howToLinkQrEntry">▶ Watch how to use your entry QR code at the gate</a></p>
-      <p class="hint-note"><a id="reg-wa-committee" class="roster-btn wa committee-wa hidden" href="#" target="_blank" rel="noopener" data-i18n="btnMessageCommitteeWa">Message the committee on WhatsApp</a></p>
-      <div id="reg-qr-list"></div>
-    </div>
   </section>
 
   <!-- ============================= MY POINTS ============================= -->
@@ -1812,6 +1768,63 @@
   </section>
 
 </main>
+
+<!-- Registration confirmation window: opened by any event card's Register button
+     (see openRegModal() in app.js). Holds the form, the waiting-list prompt and the
+     QR result as three stages of one window. -->
+<div class="modal-overlay hidden" id="reg-modal">
+  <div class="modal-box reg-modal-box" role="dialog" aria-modal="true">
+    <button class="modal-close" id="reg-modal-close" aria-label="Close">&times;</button>
+    <div id="reg-form" class="card">
+      <h2 data-i18n="regConfirmTitle">Confirm your registration</h2>
+      <div id="reg-event-summary" class="reg-event-summary"></div>
+      <p data-i18n="regIntro" style="color:var(--muted);font-size:0.88rem;">Every participation earns at least 100 points, plus 10 for early registration. Points are awarded when your QR code is scanned at the event, not at sign-up — so register, then show up!</p>
+      <!-- Which event this form submits for is picked from the card grid
+           above (see #reg-events-grid), not a dropdown - this <select> stays
+           in the DOM only as the existing selection/submit logic's source of
+           truth, never shown to the member. -->
+      <select id="reg-event" class="hidden" aria-hidden="true" tabindex="-1"></select>
+      <p id="reg-selected-event-label" class="reg-selected-event hidden"></p>
+      <p class="hint-note hidden" id="reg-capacity-note"></p>
+
+      <label data-i18n="whoAttending">Who's attending?</label>
+      <div id="reg-attendees-list"></div>
+      <div id="reg-team-box" class="reg-team-box hidden"></div>
+      <p class="hint-note" data-i18n="manageFamilyHint">Want to register a family member? Add them under Member Profile → My Family, then come back here.</p>
+      <p class="hint-note"><a href="#" class="howto-link" data-howto="register-family" data-i18n="howToLinkRegisterFamily">▶ Watch how to register family members for an event</a></p>
+
+      <div class="reg-modal-actions">
+        <button class="primary" id="reg-submit" data-i18n="btnConfirmRegistration">Confirm registration</button>
+        <button class="secondary" id="reg-modal-cancel" data-i18n="btnCancel">Cancel</button>
+      </div>
+      <div class="msg" id="reg-msg"></div>
+    </div>
+
+    <div class="card hidden" id="reg-waitlist-card">
+      <h2 data-i18n="waitlistPromptTitle">This event is full</h2>
+      <p id="reg-waitlist-message-en"></p>
+      <p id="reg-waitlist-message-ar" dir="rtl" lang="ar" style="color:var(--muted);"></p>
+      <label class="checkbox-row">
+        <input type="checkbox" id="reg-waitlist-confirm-check" />
+        <span data-i18n="waitlistConfirmCheckbox">I understand a waiting-list spot is not a guaranteed place at the event</span>
+      </label>
+      <div style="display:flex;gap:10px;margin-top:10px;">
+        <button class="primary" id="reg-waitlist-confirm" data-i18n="btnJoinWaitlist">Join the waiting list</button>
+        <button class="secondary" id="reg-waitlist-cancel" data-i18n="btnCancel">Cancel</button>
+      </div>
+      <div class="msg" id="reg-waitlist-msg"></div>
+    </div>
+
+    <div class="card hidden" id="reg-qr-card">
+      <h2 data-i18n="qrTitle">Your entry QR code(s)</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="qrIntro">Show this at the event entrance to check in. Points are awarded the moment it's scanned — take a screenshot so you have it even offline. You can also come back and view it any time from Member Profile → My Registrations, until the event is over.</p>
+      <p class="hint-note"><a href="#" class="howto-link" data-howto="qr-entry" data-i18n="howToLinkQrEntry">▶ Watch how to use your entry QR code at the gate</a></p>
+      <p class="hint-note"><a id="reg-wa-committee" class="roster-btn wa committee-wa hidden" href="#" target="_blank" rel="noopener" data-i18n="btnMessageCommitteeWa">Message the committee on WhatsApp</a></p>
+      <div id="reg-qr-list"></div>
+      <button class="primary" id="reg-modal-done" data-i18n="btnDone">Done</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal-overlay hidden" id="event-modal">
   <div class="modal-box">

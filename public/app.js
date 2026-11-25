@@ -1353,11 +1353,11 @@ function updateUIForSession() {
 
   // Register tab
   document.getElementById("reg-auth").classList.toggle("hidden", isMember);
-  document.getElementById("reg-form").classList.toggle("hidden", !isMember);
   document.getElementById("reg-events-section").classList.toggle("hidden", !isMember);
-  if (!isMember) document.getElementById("reg-qr-card").classList.add("hidden");
+  if (!isMember) closeRegModal();
   if (isMember) {
-    renderAttendeesChecklist();
+    // Don't rebuild the tick-boxes under a member who is mid-way through the confirmation window.
+    if (document.getElementById("reg-modal").classList.contains("hidden")) renderAttendeesChecklist();
     renderRegisterEventsGrid();
     applyPendingEventSelection();
   }
@@ -1820,6 +1820,7 @@ function updateRegSelectedEventLabel() {
   }
   label.classList.remove("empty");
   label.textContent = `${t("regSelectedEventPrefix")} ${eventLabel(ev)} — ${ev.date}`;
+  updateRegEventSummary();
   lg("onRegEventChanged");
 }
 document.getElementById("reg-event").addEventListener("change", () => {
@@ -2430,11 +2431,16 @@ document.addEventListener("keydown", (e) => {
 
 // ------------------------------------------------------- register-from-card --
 let PENDING_EVENT_ID = null;
+// A member taps Register on any card -> the confirmation window opens right
+// there (no tab switch, no form at the bottom of a page). Someone who is not
+// signed in is sent to the Register tab to log in; the window opens by itself
+// right after they sign in (updateUIForSession -> applyPendingEventSelection).
 function startRegisterFlow(ev) {
   PENDING_EVENT_ID = ev.id;
-  switchTab("register");
   if (CURRENT_SESSION && CURRENT_SESSION.type === "member") {
     applyPendingEventSelection();
+  } else {
+    switchTab("register");
   }
 }
 function applyPendingEventSelection() {
@@ -2448,9 +2454,85 @@ function applyPendingEventSelection() {
     // the only path a click on an event card's Register button takes.
     updateRegCapacityNote();
     updateRegSelectedEventLabel();
+    PENDING_EVENT_ID = null;
+    openRegModal();
+    return;
   }
   PENDING_EVENT_ID = null;
 }
+
+// ---------------------------------------------- registration confirmation window --
+// One window, three stages: "form" (event name + date, who is attending,
+// Confirm), "waitlist" (the event is full - bilingual prompt) and "result"
+// (the QR code(s)). The elements keep their old ids because league.js and the
+// submit logic below read them directly.
+function setRegModalStage(stage) {
+  document.getElementById("reg-form").classList.toggle("hidden", stage !== "form");
+  document.getElementById("reg-waitlist-card").classList.toggle("hidden", stage !== "waitlist");
+  document.getElementById("reg-qr-card").classList.toggle("hidden", stage !== "result");
+}
+function updateRegEventSummary() {
+  const box = document.getElementById("reg-event-summary");
+  if (!box) return;
+  const sel = document.getElementById("reg-event");
+  const ev = EVENTS_DATA.find((e) => e.id === Number(sel.value));
+  if (!ev) {
+    box.innerHTML = "";
+    return;
+  }
+  const parent = ev.parentEventId ? EVENTS_DATA.find((e) => e.id === ev.parentEventId) : null;
+  const rows = [[t("regSumDate"), eventDateTimeLabel(ev)]];
+  if (parent) rows.unshift([t("regSumPartOf"), `<span class="reg-sum-inline">${eventNameHtml(parent)}</span>`, true]);
+  if (ev.sport) rows.push([t("regSumSport"), escapeAttr(ev.sport), true]);
+  if (!ev.teamRegistration && ev.maxCapacity != null) {
+    rows.push([
+      t("regSumSpots"),
+      isEventFull(ev) ? escapeAttr(t("badgeFull")) : `${fmt(ev.confirmedCount || 0)}/${fmt(ev.maxCapacity)} ${escapeAttr(t("regSpotsNote"))}`,
+      true,
+    ]);
+  }
+  box.innerHTML = `
+    ${ev.coverPhoto ? `<img class="reg-sum-photo" src="${escapeAttr(ev.coverPhoto)}" alt="" />` : ""}
+    <div class="reg-sum-name">${eventNameHtml(ev)}</div>
+    <dl class="reg-sum-rows">${rows
+      .map(([k, v, raw]) => `<dt>${escapeAttr(k)}</dt><dd>${raw ? v : escapeAttr(v)}</dd>`)
+      .join("")}</dl>
+    ${isEventFull(ev) ? `<p class="reg-sum-full">${escapeAttr(t("regEventFullNote"))}</p>` : ""}`;
+  const btn = document.getElementById("reg-submit");
+  if (btn) btn.textContent = t(isEventFull(ev) ? "btnJoinWaitlistCard" : "btnConfirmRegistration");
+}
+function openRegModal() {
+  const modal = document.getElementById("reg-modal");
+  setRegModalStage("form");
+  document.getElementById("reg-msg").classList.remove("show");
+  const teamBox = document.getElementById("reg-team-box");
+  if (teamBox) { teamBox.innerHTML = ""; teamBox.classList.add("hidden"); }
+  renderAttendeesChecklist(); // member ticked, family unticked, eligibility re-applied
+  updateRegCategoryVisibility();
+  updateRegEventSummary();
+  lg("onRegEventChanged");
+  modal.classList.remove("hidden");
+  const btn = document.getElementById("reg-submit");
+  if (btn) { btn.disabled = false; btn.focus(); }
+}
+function closeRegModal() {
+  const modal = document.getElementById("reg-modal");
+  if (modal) modal.classList.add("hidden");
+  PENDING_REG_SUBMISSION = null;
+}
+document.getElementById("reg-modal-close").addEventListener("click", closeRegModal);
+document.getElementById("reg-modal-cancel").addEventListener("click", closeRegModal);
+document.getElementById("reg-modal-done").addEventListener("click", closeRegModal);
+document.getElementById("reg-modal").addEventListener("click", (e) => {
+  if (e.target.id === "reg-modal") closeRegModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeRegModal();
+});
+// The "watch how" link inside the window jumps to the Member Profile videos.
+document.getElementById("reg-modal").addEventListener("click", (e) => {
+  if (e.target.closest && e.target.closest(".howto-link")) closeRegModal();
+});
 
 async function loadLadder() {
   LADDER_DATA = await api("/api/ladder");
@@ -2750,9 +2832,18 @@ function renderQrList(entries) {
 
 // Set while a batch is paused waiting on the member to confirm/decline the
 // waiting list, so the Confirm button knows what to resubmit.
-let PENDING_REG_SUBMISSION = null; // { eventId, attendees } | null
 
 document.getElementById("reg-submit").addEventListener("click", async () => {
+  const btn = document.getElementById("reg-submit");
+  if (btn.disabled) return;
+  btn.disabled = true; // no double-submit while the request is in flight
+  try {
+    await regSubmitClick();
+  } finally {
+    btn.disabled = false;
+  }
+});
+async function regSubmitClick() {
   const eventId = document.getElementById("reg-event").value;
   const msg = document.getElementById("reg-msg");
   if (!eventId) {
@@ -2783,7 +2874,7 @@ document.getElementById("reg-submit").addEventListener("click", async () => {
   const team = lg("teamChoice") || {};
   if (team.error) return showMsg(msg, team.error, false);
   await submitRegistrations(eventId, attendees, false, team);
-});
+}
 
 // Registers every attendee in the batch. If the event is full, the server
 // doesn't error - it comes back with needsWaitlistConfirmation instead, and
@@ -2828,15 +2919,14 @@ async function submitRegistrations(eventId, attendees, joinWaitlist, team) {
     document.getElementById("reg-waitlist-message-ar").textContent = waitlistPrompt.messageAr;
     document.getElementById("reg-waitlist-confirm-check").checked = false;
     document.getElementById("reg-waitlist-msg").classList.remove("show");
-    document.getElementById("reg-waitlist-card").classList.remove("hidden");
+    setRegModalStage("waitlist");
     msg.classList.remove("show");
     return;
   }
 
-  document.getElementById("reg-waitlist-card").classList.add("hidden");
   renderQrList(entries);
   msg.classList.remove("show");
-  document.getElementById("reg-qr-card").classList.remove("hidden");
+  setRegModalStage("result");
   loadMyRegistrations();
   loadEvents(); // refresh capacity badges/counts everywhere else on the page
   lg("onRegEventChanged");
@@ -2855,7 +2945,7 @@ document.getElementById("reg-waitlist-confirm").addEventListener("click", async 
 });
 document.getElementById("reg-waitlist-cancel").addEventListener("click", () => {
   PENDING_REG_SUBMISSION = null;
-  document.getElementById("reg-waitlist-card").classList.add("hidden");
+  setRegModalStage("form");
 });
 
 // ------------------------------------------------------------- my points --
@@ -3165,12 +3255,12 @@ function pruneStaleRegQrs(regs) {
     if (el.dataset.regId && !valid.has(el.dataset.regId)) el.remove();
   });
   // Nothing left to show: hide the whole card.
-  if (entries.length && !card.querySelector("#reg-qr-list .qr-entry")) card.classList.add("hidden");
+  if (entries.length && !card.querySelector("#reg-qr-list .qr-entry")) { card.classList.add("hidden"); closeRegModal(); }
 }
 async function refreshRegQrs() {
   if (!(CURRENT_SESSION && CURRENT_SESSION.type === "member")) return;
   const card = document.getElementById("reg-qr-card");
-  if (!card || card.classList.contains("hidden")) return;
+  if (!card || card.classList.contains("hidden") || document.getElementById("reg-modal").classList.contains("hidden")) return;
   try {
     pruneStaleRegQrs(await api("/api/me/registrations"));
   } catch (e) {
