@@ -82,7 +82,7 @@ async function ensurePool(n) {
 async function mkEvent(label, sport) {
   const f = new FormData();
   const name = `${label} #${++eventSeq}`;
-  f.set("nameEn", name); f.set("nameAr", name); f.set("sport", sport || "Chess"); f.set("date", "2026-12-15");
+  f.set("nameEn", name); f.set("nameAr", name); f.set("sport", sport || "Chess"); f.set("date", new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }));
   const r = await api("/api/events", { method: "POST", jar: admin, body: f, isForm: true });
   if (r.status !== 200 && r.status !== 201) throw new Error("event create failed " + JSON.stringify(r.json));
   return r.json.id;

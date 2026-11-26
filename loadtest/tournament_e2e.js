@@ -110,7 +110,7 @@ async function main() {
     form.set("nameEn", nameEn);
     form.set("nameAr", nameEn);
     form.set("sport", sport || "Chess");
-    form.set("date", "2026-12-15");
+    form.set("date", new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }));
     const res = await api("/api/events", { method: "POST", jar: admin, body: form, isForm: true });
     return res;
   }
