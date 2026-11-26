@@ -91,10 +91,17 @@ function psMatchHtml(it) {
     body = `<p class="ps-state bad">${escapeAttr(t("psDisputedMsg"))}</p>
       <p class="ps-score">${escapeAttr(psScoreText(it, rep))}</p>
       ${rep && rep.disputeNote ? `<p class="rn-hint">${escapeAttr(rep.disputeNote)}</p>` : ""}`;
+  } else if (it.state === "scheduled") {
+    body = `<p class="ps-state sched">${escapeAttr(t(it.time ? "psScheduledAt" : "psScheduled").replace("{time}", it.time || ""))}</p>`;
   } else {
-    body = `<p class="ps-state ok">${escapeAttr(t("psFinal"))}</p><p class="ps-score">${escapeAttr(psScoreText(it, it.result))}</p>`;
+    const res = it.result || {};
+    const w = it.kind === "sw" ? (res.result === "1-0" ? it.aLabel : res.result === "0-1" ? it.bLabel : "") : res.winnerId ? (res.winnerId === it.aId ? it.aLabel : it.bLabel) : "";
+    const iWon = w && w === psMine(it);
+    body = `<p class="ps-state ok">${escapeAttr(t("psFinal"))}</p><p class="ps-score">${escapeAttr(psScoreText(it, it.result))}</p>
+      <p class="rn-hint">${w ? `<strong>${escapeAttr(t(iWon ? "psYouWon" : "psWinnerIs").replace("{name}", w))}</strong>` : escapeAttr(t("matchDraw"))}</p>`;
   }
-  return `<div class="rn-card ps-card ps-${it.state}" data-ps-key="${escapeAttr(key)}">${head}${vs}${body}</div>`;
+  const link = `<a class="ps-link" href="/matches.html?event=${it.eventId}&lang=${currentLang}" target="_blank" rel="noopener">${escapeAttr(t("psViewTournament"))}</a>`;
+  return `<div class="rn-card ps-card ps-${it.state}" data-ps-key="${escapeAttr(key)}">${head}${vs}${body}${link}</div>`;
 }
 function psRenderMine() {
   const card = document.getElementById("mp-matches-card");
@@ -104,6 +111,8 @@ function psRenderMine() {
   const todo = PS.items.filter((x) => x.state === "to_confirm").length;
   if (badge) { badge.textContent = String(todo); badge.classList.toggle("hidden", !todo); }
   card.classList.toggle("hidden", !PS.items.length);
+  const intro = document.getElementById("mp-matches-intro");
+  if (intro) intro.textContent = t(PS.items.some((x) => x.scoring) ? "psMyMatchesIntroScoring" : "psMyMatchesIntro");
   if (!PS.items.length) { list.innerHTML = ""; return; }
   list.innerHTML = PS.items.map(psMatchHtml).join("");
 }

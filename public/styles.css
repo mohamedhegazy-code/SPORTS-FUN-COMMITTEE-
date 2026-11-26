@@ -1909,3 +1909,6 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .rn-tag.attn{background:#b8860b;color:#fff}
 .rn-card.has-report{border-color:#b8860b}
 @media (prefers-reduced-motion:reduce){.ps-toggle span{transition:none}}
+.ps-state.sched{color:#555;font-weight:600}
+.ps-link{align-self:flex-start;font-size:.85rem;color:var(--red);text-decoration:underline}
+.ps-card.ps-scheduled{background:#fafbfc}
