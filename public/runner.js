@@ -31,13 +31,13 @@ function rnAllMatches() {
     tn.groups.forEach((g, gi) => g.matches.forEach((m) => out.push({
       kind: "gr", id: m.id, a: m.a, b: m.b, aLabel: m.aLabel, bLabel: m.bLabel, time: m.time, court: m.court, date: m.date, round: m.round,
       stage: t("groupLabel") + " " + String.fromCharCode(65 + gi), decided: !!m.result, scoreA: m.result ? m.result.scoreA : null, scoreB: m.result ? m.result.scoreB : null,
-      winnerId: m.result ? m.result.winnerId : null, bye: false, ready: true, order: out.length,
+      winnerId: m.result ? m.result.winnerId : null, bye: false, ready: true, report: m.report || null, order: out.length,
     })));
   }
   if (tn.knockout) {
     tn.knockout.rounds.forEach((round, ri) => round.forEach((m) => out.push({
       kind: "ko", ri, id: m.id, a: m.a, b: m.b, aLabel: m.aLabel || t("tbd"), bLabel: m.bLabel || t("tbd"), time: m.time, court: m.court, date: m.date, place: m.place,
-      stage: rnStageLabel(tn, ri, m), decided: !!m.winnerId, scoreA: m.scoreA, scoreB: m.scoreB, winnerId: m.winnerId, note: m.note || "", bye: !!m.bye, ready: !!(m.a && m.b), order: out.length,
+      stage: rnStageLabel(tn, ri, m), decided: !!m.winnerId, scoreA: m.scoreA, scoreB: m.scoreB, winnerId: m.winnerId, note: m.note || "", bye: !!m.bye, ready: !!(m.a && m.b), report: m.report || null, order: out.length,
     })));
   }
   return out;
@@ -64,8 +64,11 @@ function rnWhen(m) {
 // ---- draft (what the person has typed/tapped but not saved) ------------------------------------
 function rnDraft(m) {
   const key = rnKey(m);
+  const repAt = !m.decided && m.report ? m.report.at : null;
+  if (RN.drafts[key] && (RN.drafts[key].rep || null) !== repAt) delete RN.drafts[key]; // a new / dismissed player report replaces the draft
   if (!RN.drafts[key]) {
     if (m.decided) RN.drafts[key] = m.kind === "gr" ? { a: m.scoreA, b: m.scoreB, touched: true } : { a: m.scoreA, b: m.scoreB, winner: m.winnerId, note: m.note || "", scoring: m.scoreA != null && m.scoreB != null };
+    else if (repAt) RN.drafts[key] = m.kind === "gr" ? { a: m.report.scoreA, b: m.report.scoreB, touched: true, rep: repAt } : { a: m.report.scoreA, b: m.report.scoreB, winner: m.report.winnerId || null, note: "", scoring: true, rep: repAt };
     else RN.drafts[key] = m.kind === "gr" ? { a: 0, b: 0, touched: false } : { a: null, b: null, winner: null, note: "", scoring: false };
   }
   return RN.drafts[key];
@@ -81,7 +84,7 @@ function rnStepper(side, value) {
 }
 function rnTag(cls) {
   if (!cls) return null;
-  return { cls, text: cls === "now" ? t("rnNow") : cls === "next" ? t("rnUpNext") : t("rnEditing") };
+  return { cls, text: cls === "now" ? t("rnNow") : cls === "next" ? t("rnUpNext") : cls === "attn" ? t("psReported") : t("rnEditing") };
 }
 function rnCardHtml(m, tag) {
   const tn = TOURNAMENT_DATA;
@@ -121,7 +124,8 @@ function rnCardHtml(m, tag) {
         <button type="button" class="rn-go" data-rn-act="save-ko" ${w ? "" : "disabled"}>${escapeAttr(w ? t("rnConfirmWinner").replace("{name}", w === m.a ? m.aLabel : m.bLabel) : t("rnConfirm"))}</button>
       </div>`;
   }
-  return `<div class="rn-card${tag && tag.cls === "now" ? " is-now" : ""}" data-rn-key="${rnKey(m)}" data-rn-tag="${tag ? tag.cls : ""}">${head}${body}</div>`;
+  const notice = !m.decided && m.report && typeof psReportNoticeHtml === "function" ? psReportNoticeHtml(m) : "";
+  return `<div class="rn-card${tag && tag.cls === "now" ? " is-now" : ""}${notice ? " has-report" : ""}" data-rn-key="${rnKey(m)}" data-rn-tag="${tag ? tag.cls : ""}">${head}${notice}${body}</div>`;
 }
 function rnPlayedRowHtml(m) {
   if (RN.edit === rnKey(m)) return rnCardHtml(m, { text: t("rnEditing"), cls: "edit" });
@@ -176,16 +180,19 @@ function rnListHtml() {
     const groupsDone = tn.groups && !tn.knockout && !all.some((m) => !m.decided);
     html += groupsDone ? "" : `<p class="hint-note">${escapeAttr(waiting && !RN.court && !RN.query ? t("rnNothingNow") : RN.court || RN.query ? t("rnNoMatchFilter") : t("rnAllDone"))}</p>`;
   }
+  const attn = playable.filter((m) => m.report).sort((x, y) => (y.report.status === "disputed") - (x.report.status === "disputed"));
+  if (attn.length) html += `<h4 class="rn-h rn-h-attn">${escapeAttr(t("psAttention"))} (${attn.length})</h4>` + attn.map((m) => rnCardHtml(m, { text: t("psReported"), cls: "attn" })).join("");
+  const rest = playable.filter((m) => !m.report);
   const sections = [
-    { title: t("rnNow"), items: playable.slice(0, n), cls: "now" },
-    { title: t("rnUpNext"), items: playable.slice(n, n * 2), cls: "next" },
-    { title: t("rnLater"), items: playable.slice(n * 2, n * 2 + RN.limitLater), cls: "later" },
+    { title: t("rnNow"), items: rest.slice(0, n), cls: "now" },
+    { title: t("rnUpNext"), items: rest.slice(n, n * 2), cls: "next" },
+    { title: t("rnLater"), items: rest.slice(n * 2, n * 2 + RN.limitLater), cls: "later" },
   ];
   for (const s of sections) {
     if (!s.items.length) continue;
     html += `<h4 class="rn-h">${escapeAttr(s.title)}</h4>` + s.items.map((m) => rnCardHtml(m, s.cls === "later" ? null : { text: s.title, cls: s.cls })).join("");
   }
-  const laterTotal = Math.max(0, playable.length - n * 2);
+  const laterTotal = Math.max(0, rest.length - n * 2);
   if (laterTotal > RN.limitLater) html += `<button type="button" class="secondary rn-more" data-rn-act="more-later">${escapeAttr(t("rnShowMore").replace("{n}", laterTotal - RN.limitLater))}</button>`;
   if (waiting) html += `<p class="hint-note rn-waiting">${escapeAttr(t("rnWaiting").replace("{n}", waiting))}</p>`;
   return html;
@@ -212,7 +219,7 @@ function rnHeaderHtml() {
 function renderMatchRunner() {
   const owner = tournBase();
   if (RN.owner !== owner) { rnReset(); RN.owner = owner; }
-  return `<div class="rn" id="rn-root"><div id="rn-head">${rnHeaderHtml()}</div><div id="rn-list">${rnListHtml()}</div></div>`;
+  return `<div class="rn" id="rn-root">${typeof psManagerSwitchHtml === "function" ? psManagerSwitchHtml() : ""}<div id="rn-head">${rnHeaderHtml()}</div><div id="rn-list">${rnListHtml()}</div></div>`;
 }
 function rnRefresh(headToo) {
   const list = document.getElementById("rn-list");

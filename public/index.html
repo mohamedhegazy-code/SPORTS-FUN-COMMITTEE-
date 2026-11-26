@@ -35,7 +35,7 @@
 <nav class="tabs">
   <button class="tab-btn active" data-view="events" data-i18n="tabEvents">Events</button>
   <button class="tab-btn" data-view="register" data-i18n="tabRegister">Register</button>
-  <span class="tab-wrap"><button class="tab-btn" data-view="mypoints" data-i18n="tabMyPoints">Member Profile</button><span id="mp-chat-badge" class="tab-badge hidden">0</span></span>
+  <span class="tab-wrap"><button class="tab-btn" data-view="mypoints" data-i18n="tabMyPoints">Member Profile</button><span id="mp-chat-badge" class="tab-badge hidden">0</span><span id="mp-match-badge" class="tab-badge ps-badge hidden" title="">0</span></span>
   <button class="tab-btn" id="tab-ladder-btn" data-view="ladder" data-i18n="tabLadder">Redemption Ladder</button>
   <button class="tab-btn" data-view="annual" data-i18n="tabAnnual">Annual Activities</button>
   <button class="tab-btn" data-view="tournaments" data-i18n="tabTournaments">Tournaments</button>
@@ -469,6 +469,12 @@
       <p class="hint-note" data-i18n="famContactHint">A family member never gets their own login - registration always happens under your account. This is just a contact record staff can see (e.g. in an emergency).</p>
       <button class="secondary" id="fam-add" style="margin-top:10px;" data-i18n="btnAddFamilyMember">Add family member</button>
       <div class="msg" id="fam-msg"></div>
+    </div>
+
+    <div class="card hidden" id="mp-matches-card">
+      <h2 data-i18n="psMyMatchesTitle">My matches</h2>
+      <p style="color:var(--muted);font-size:0.85rem;" data-i18n="psMyMatchesIntro">Enter your score after you play. Your opponent confirms it, and the tournament manager can always correct it.</p>
+      <div id="mp-matches-list" class="ps-list"></div>
     </div>
 
     <div class="card hidden" id="mp-registrations-card">
@@ -2031,5 +2037,6 @@
 <script src="awards.js"></script>
 <script src="sim.js"></script>
 <script src="runner.js"></script>
+<script src="pscore.js"></script>
 </body>
 </html>

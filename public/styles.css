@@ -1872,3 +1872,40 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 @media (min-width:760px){.rn-cards-grid{display:grid}}
 @media (prefers-reduced-motion:reduce){.rn-toast,.rn-bar span{transition:none}}
 .rn-card button,.rn-played button,.rn-banner button,.rn-tabs button,.rn-chips button{margin:0}
+
+/* ---- player-reported scores ---- */
+.ps-badge{inset-inline-end:auto;inset-inline-start:2px;background:#1b7f3b}
+.ps-list{display:flex;flex-direction:column;gap:12px}
+.ps-vs{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:1.05rem}
+.ps-vs span{font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.6}
+.ps-sub{display:block;font-size:.78rem;font-weight:400;opacity:.7}
+.ps-res-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ps-res-row.two{grid-template-columns:1fr 1fr}
+.ps-res{min-height:54px;padding:8px;border-radius:12px;border:2px solid #c9ced6;background:#fafbfc;color:inherit;font-weight:700;cursor:pointer;margin:0;overflow-wrap:anywhere}
+.ps-res.picked{border-color:#1b7f3b;background:rgba(27,127,59,.12)}
+.ps-state{margin:0;font-weight:700}
+.ps-state.wait{color:#8a6100}.ps-state.ask{color:#a1001a}.ps-state.bad{color:#b3261e}.ps-state.ok{color:#1b7f3b}
+.ps-score{margin:0;font-size:1.5rem;font-weight:800;font-variant-numeric:tabular-nums}
+.ps-note{width:100%}
+.ps-card.ps-to_confirm{border:2px solid #a1001a}
+.ps-card.ps-done{opacity:.85}
+.ps-card button.danger{min-height:48px;border-radius:12px;font-weight:700}
+.ps-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid #d3d8df;border-radius:12px;background:#fff;margin-bottom:10px}
+.ps-switch.on{border-color:#1b7f3b;background:rgba(27,127,59,.07)}
+.ps-switch-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ps-switch-text span{font-size:.82rem;opacity:.75}
+.ps-toggle{flex:none;width:56px;height:32px;border-radius:999px;border:0;background:#aab3bd;position:relative;cursor:pointer;padding:0;margin:0}
+.ps-toggle span{position:absolute;top:4px;inset-inline-start:4px;width:24px;height:24px;border-radius:50%;background:#fff;transition:inset-inline-start .15s}
+.ps-switch.on .ps-toggle{background:#1b7f3b}
+.ps-switch.on .ps-toggle span{inset-inline-start:28px}
+.ps-notice{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:10px;background:#fff7e0;border:1px solid #b8860b;font-size:.9rem}
+.ps-notice.bad{background:#fdecea;border-color:#b3261e}
+.ps-notice small{opacity:.75}
+.ps-notice button{align-self:flex-start;margin:0}
+.ps-notice-actions{display:flex;gap:8px;flex-wrap:wrap}
+.ps-attn{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.ps-attn h4{margin:0}
+.rn-h-attn{color:#a1001a}
+.rn-tag.attn{background:#b8860b;color:#fff}
+.rn-card.has-report{border-color:#b8860b}
+@media (prefers-reduced-motion:reduce){.ps-toggle span{transition:none}}

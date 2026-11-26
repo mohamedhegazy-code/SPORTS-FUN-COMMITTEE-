@@ -3277,6 +3277,7 @@ async function loadMyRegistrations() {
   if (!wrap) return;
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
   if (!member) return;
+  if (typeof psLoadMyMatches === "function") psLoadMyMatches();
   try {
     const regs = await api("/api/me/registrations");
     pruneStaleRegQrs(regs);
@@ -8921,6 +8922,8 @@ function renderSwissRounds() {
     }
   }
   return `
+    ${typeof psManagerSwitchHtml === "function" ? psManagerSwitchHtml() : ""}
+    ${typeof psSwissPanelHtml === "function" ? psSwissPanelHtml(round) : ""}
     <div class="swiss-round-tabs">${tabs}</div>
     <p class="hint-note">${escapeAttr(t("swissRoundOf").replace("{n}", cur).replace("{total}", sw.totalRounds))}${round.time ? " · " + escapeAttr(t("swissStarts").replace("{time}", formatTimeOfDay(round.time))) : ""}</p>
     ${warn}
