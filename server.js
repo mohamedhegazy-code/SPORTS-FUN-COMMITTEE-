@@ -2578,7 +2578,11 @@ function parseRegistrationSettings(status, opensAt) {
 // one person (a member, or one specific family member) can be registered for
 // only one of them - for example an Amateurs and a Professionals tournament.
 // Only an admin sets or sees the code; players just get a clear message when
-// they try the second event. A waiting-list place counts as registered.
+// they try the second event. Only a CONFIRMED registration blocks the other
+// event: a waiting-list place is not a place, so that person may still join
+// the other event - and simply stays on the waiting list here. Promotion off
+// the waiting list skips (or refuses) anyone who is by then confirmed in
+// another event with the same code.
 function parseExclusiveCode(raw) {
   if (raw === undefined) return { unchanged: true };
   const code = String(raw === null ? "" : raw).trim().replace(/\s+/g, " ").toUpperCase();
@@ -2592,7 +2596,7 @@ function exclusiveOverlapCount(db, code) {
   const ids = new Set(db.events.filter((e) => e.exclusiveCode === code).map((e) => e.id));
   const seen = new Map();
   for (const r of db.registrations) {
-    if (!ids.has(r.eventId)) continue;
+    if (!ids.has(r.eventId) || r.waitlisted) continue;
     const key = `${r.membershipNumber}|${r.dependentId == null ? "" : r.dependentId}`;
     if (!seen.has(key)) seen.set(key, new Set());
     seen.get(key).add(r.eventId);
@@ -2606,7 +2610,7 @@ function exclusiveConflict(db, event, membershipNumber, dependentId, ignoreEvent
   const ids = new Set(db.events.filter((e) => !skip.has(e.id) && e.exclusiveCode === code).map((e) => e.id));
   if (!ids.size) return null;
   const dep = dependentId == null ? null : dependentId;
-  const reg = db.registrations.find((r) => ids.has(r.eventId) && r.membershipNumber === membershipNumber && (r.dependentId == null ? null : r.dependentId) === dep);
+  const reg = db.registrations.find((r) => !r.waitlisted && ids.has(r.eventId) && r.membershipNumber === membershipNumber && (r.dependentId == null ? null : r.dependentId) === dep);
   if (!reg) return null;
   const other = db.events.find((e) => e.id === reg.eventId);
   return { registration: reg, event: other };
@@ -4256,7 +4260,9 @@ app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
   } else if (!reg.waitlisted) {
     promoted = db.registrations
       .filter((r) => r.eventId === reg.eventId && r.waitlisted)
-      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
+      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))
+      // skip anyone already confirmed in another event with the same event code
+      .find((r) => !exclusiveConflict(db, db.events.find((e) => e.id === reg.eventId), r.membershipNumber, r.dependentId));
     if (promoted) { promoted.waitlisted = false; promoted.whatsappConfirmedAt = null; promoted.whatsappReminderAt = null; promoted.whatsappDayOfAt = null; }
   }
   const event = db.events.find((e) => e.id === reg.eventId);
@@ -4384,7 +4390,7 @@ app.post("/api/register", requireMember, async (req, res) => {
     if (clash) {
       return res.status(409).json({
         code: "exclusive_event",
-        error: `${dependentName ? dependentName + " is" : "You're"} already ${clash.registration.waitlisted ? "on the waiting list for" : "registered for"} ${clash.event ? clash.event.nameEn : "another event"}. Only one of these events is allowed per person.`,
+        error: `${dependentName ? dependentName + " is" : "You're"} already registered for ${clash.event ? clash.event.nameEn : "another event"}. Only one of these events is allowed per person.`,
         otherEventNameEn: clash.event ? clash.event.nameEn : "",
         otherEventNameAr: clash.event ? clash.event.nameAr || clash.event.nameEn : "",
         attendeeName: dependentName || "",
@@ -4648,6 +4654,9 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), requireE
           whatsappConfirmedAt: r.whatsappConfirmedAt || null,
           whatsappReminderAt: r.whatsappReminderAt || null,
           whatsappDayOfAt: r.whatsappDayOfAt || null,
+          // Staff-recorded answer to "will you attend?": "yes" | "no" | null (no answer yet).
+          attendanceConfirm: r.attendanceConfirm || null,
+          attendanceConfirmAt: r.attendanceConfirmAt || null,
           qrDataUrl: canShowQr ? await qrDataUrl(r) : null,
         };
       })
@@ -4714,6 +4723,41 @@ app.post("/api/checkin/manual", requireStaffRole("staff"), requireRegistrationAc
 // checkedIn - see registrationPoints), and the QR becomes valid again. Not
 // allowed once the event is over, and refused if reversing it would push the
 // member's pooled balance below zero (the points were already redeemed).
+// Staff records whether a registered person has confirmed they will attend
+// (after a call / WhatsApp reply): "yes", "no", or "none" to clear it. Purely
+// informational - it never changes points, check-in or the registration itself;
+// it just helps the committee see who to expect and who to cancel before the
+// draw. Not for the waiting list or for someone already checked in.
+app.post("/api/staff/registrations/:id/attendance-confirmation", requireStaffRole("staff"), requireRegistrationAccess, (req, res) => {
+  const db = req.db;
+  if (req.staff.role === "management") return res.status(403).json({ error: "Not allowed for this account" });
+  const reg = db.registrations.find((r) => r.id === Number(req.params.id));
+  if (!reg) return res.status(404).json({ error: "Registration not found" });
+  const status = String((req.body && req.body.status) || "");
+  if (!["yes", "no", "none"].includes(status)) return res.status(400).json({ error: "Status must be yes, no or none" });
+  if (reg.waitlisted) return res.status(400).json({ error: "This person is on the waiting list" });
+  if (reg.checkedIn) return res.status(409).json({ error: "This person is already checked in" });
+  const event = db.events.find((e) => e.id === reg.eventId);
+  if (!event || eventEndDate(event) < todayStr()) return res.status(400).json({ error: "The event is over" });
+  if (status === "none") {
+    delete reg.attendanceConfirm; delete reg.attendanceConfirmAt; delete reg.attendanceConfirmBy;
+  } else {
+    reg.attendanceConfirm = status;
+    reg.attendanceConfirmAt = new Date().toISOString();
+    reg.attendanceConfirmBy = req.staff.username;
+  }
+  const attendeeName = reg.dependentName || (db.members[reg.membershipNumber] ? db.members[reg.membershipNumber].name : String(reg.membershipNumber));
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "attendance_confirmation_set",
+    details: `${attendeeName} — ${event.nameEn} — ${status === "yes" ? "confirmed" : status === "no" ? "declined" : "cleared"}`,
+  });
+  writeDb(db);
+  res.json({ success: true, registrationId: reg.id, attendanceConfirm: reg.attendanceConfirm || null, attendanceConfirmAt: reg.attendanceConfirmAt || null });
+});
+
 app.post("/api/checkin/undo", requireStaffRole("staff"), requireRegistrationAccess, (req, res) => {
   const db = req.db;
   if (req.staff.role === "management") return res.status(403).json({ error: "Not allowed for this account" });
@@ -5106,6 +5150,15 @@ app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]
   if (!reg) return res.status(404).json({ error: "No such registration" });
   if (!reg.waitlisted) return res.status(400).json({ error: "This registration isn't on a waiting list" });
   if (reg.teamId) return res.status(400).json({ code: "team_event", error: "This player is on a team that is on the waiting list - promote the whole team instead." });
+  {
+    const clash = exclusiveConflict(db, db.events.find((e) => e.id === reg.eventId), reg.membershipNumber, reg.dependentId);
+    if (clash) {
+      return res.status(409).json({
+        code: "exclusive_event",
+        error: `This person is already confirmed in ${clash.event ? clash.event.nameEn : "another event"} (same event code), so they can't be moved off the waiting list here. Cancel that registration first, or leave them on the waiting list.`,
+      });
+    }
+  }
   reg.waitlisted = false;
   // Any WhatsApp stamp from before the promotion no longer counts as a real
   // confirmation - the person is only confirmed from now on.
@@ -5147,7 +5200,9 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
   } else if (!reg.waitlisted) {
     promoted = db.registrations
       .filter((r) => r.eventId === reg.eventId && r.waitlisted)
-      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))[0];
+      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))
+      // skip anyone already confirmed in another event with the same event code
+      .find((r) => !exclusiveConflict(db, db.events.find((e) => e.id === reg.eventId), r.membershipNumber, r.dependentId));
     if (promoted) { promoted.waitlisted = false; promoted.whatsappConfirmedAt = null; promoted.whatsappReminderAt = null; promoted.whatsappDayOfAt = null; }
   }
   const event = db.events.find((e) => e.id === reg.eventId);
