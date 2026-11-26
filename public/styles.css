@@ -1756,3 +1756,11 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .reg-modal-actions .primary { flex: 2; }
 .reg-modal-actions .secondary { flex: 1; }
 .reg-modal-box #reg-capacity-note { display: none; }
+
+/* Attendance confirmation (Will attend / Won't attend) beside each roster row */
+.att-conf { display: flex; gap: 4px; flex-wrap: wrap; }
+.roster-table button.roster-btn.conf-yes, .roster-table button.roster-btn.conf-no { background: #fff; font-weight: 600; }
+.roster-table button.roster-btn.conf-yes { border-color: #1e8e3e; color: #1e8e3e; }
+.roster-table button.roster-btn.conf-no { border-color: #c0392b; color: #c0392b; }
+.roster-table button.roster-btn.conf-yes.on { background: #1e8e3e; color: #fff; }
+.roster-table button.roster-btn.conf-no.on { background: #c0392b; color: #fff; }

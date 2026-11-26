@@ -5450,9 +5450,17 @@ document.getElementById("hub-checkin-wrap").addEventListener("click", async (e) 
 // for a confirmed, checked-in, or waitlisted row - the backend endpoint
 // handles all three (see POST /api/admin/registrations/:id/cancel).
 let CANCEL_REG_ID = null;
+let CANCEL_REG_SOURCE = "hub"; // which list the cancel was started from: "hub" (Admin Manage) or "gate" (Gate Scanner)
 document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-cancel-reg]");
   if (!btn) return;
+  CANCEL_REG_SOURCE = "hub";
+  openCancelRegModal(Number(btn.dataset.cancelReg), btn.dataset.cancelName);
+});
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-cancel-reg]");
+  if (!btn) return;
+  CANCEL_REG_SOURCE = "gate";
   openCancelRegModal(Number(btn.dataset.cancelReg), btn.dataset.cancelName);
 });
 document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
@@ -5490,13 +5498,15 @@ document.getElementById("cancel-reg-confirm-btn").addEventListener("click", asyn
       body: JSON.stringify({ reason }),
     });
     closeCancelRegModal();
-    const hubMsg = document.getElementById("hub-checkin-msg");
-    showMsg(
-      hubMsg,
-      `${result.attendeeName} — ${t("cancelRegSuccess")}${result.promoted ? ` ${t("cancelRegPromotedNote")}` : ""}`,
-      true
-    );
-    await loadHubRoster(true);
+    const okText = `${result.attendeeName} — ${t("cancelRegSuccess")}${result.promoted ? ` ${t("cancelRegPromotedNote")}` : ""}`;
+    if (CANCEL_REG_SOURCE === "gate") {
+      showMsg(document.getElementById("checkin-roster-msg"), okText, true);
+      await loadCheckinRoster(true);
+    } else {
+      showMsg(document.getElementById("hub-checkin-msg"), okText, true);
+      await loadHubRoster(true);
+    }
+    // The admin dashboards only exist for Admin / Tournament Manager logins (this runs for both).
     loadAdminDashboard();
     loadAdminOverview();
   } catch (err) {
@@ -11346,7 +11356,10 @@ function renderCheckinRoster() {
     return;
   }
   const query = (document.getElementById("checkin-search").value || "").trim().toLowerCase();
-  wrap.innerHTML = rosterTableHtml(CHECKIN_ROSTER, query, document.getElementById("checkin-event-select").value);
+  // Cancelling someone's registration is for Admin and Tournament Manager
+  // logins only - gate-only staff just check people in.
+  const canCancel = !!(CURRENT_SESSION && CURRENT_SESSION.type === "staff" && ["admin", "tournament"].includes(CURRENT_SESSION.staff.role));
+  wrap.innerHTML = rosterTableHtml(CHECKIN_ROSTER, query, document.getElementById("checkin-event-select").value, canCancel);
 }
 // Direct WhatsApp "click to chat" - the official wa.me URL scheme, not the
 // Cloud API. This only ever builds a link; the admin/staff member still has
@@ -11523,6 +11536,7 @@ const ROSTER_SORT_COLS = [
   ["member", "colMember"],
   ["registered", "colRegisteredAt"],
   ["status", "colStatus"],
+  ["confirm", "colAttConfirm"],
   ["qr", "colQrCode"],
   ["actions", "colActions"],
   ["whatsapp", "colWhatsapp"],
@@ -11535,6 +11549,8 @@ function rosterSortValue(r, key) {
       return r.registeredAt ? new Date(r.registeredAt).getTime() : 0;
     case "status": // waiting for check-in first, then checked in, then waiting list
       return r.waitlisted ? 2 : r.checkedIn ? 1 : 0;
+    case "confirm": // declined first (to cancel), then no answer, then confirmed, then not applicable
+      return r.waitlisted || r.checkedIn ? 3 : r.attendanceConfirm === "no" ? 0 : r.attendanceConfirm === "yes" ? 2 : 1;
     case "qr":
       return r.qrDataUrl ? 0 : 1;
     case "actions": // rows that still need a check-in action first
@@ -11611,14 +11627,17 @@ function rosterFilterMatch(r, f) {
   if (f === "pending") return !r.waitlisted && !r.checkedIn;
   if (f === "in") return !!r.checkedIn;
   if (f === "wait") return !!r.waitlisted;
+  if (f === "conf") return !r.waitlisted && !r.checkedIn && r.attendanceConfirm === "yes";
+  if (f === "decl") return !r.waitlisted && !r.checkedIn && r.attendanceConfirm === "no";
+  if (f === "noreply") return !r.waitlisted && !r.checkedIn && !r.attendanceConfirm;
   return true;
 }
 function rosterToolbarHtml(roster, ev) {
-  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
+  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ["conf", "rosterFilterConfirmed"], ["noreply", "rosterFilterNoReply"], ["decl", "rosterFilterDeclined"], ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
   const chips = defs
     .map(([key, label]) => {
       const n = roster.filter((r) => rosterFilterMatch(r, key)).length;
-      if (key === "wait" && !n) return "";
+      if ((key === "wait" || key === "decl") && !n) return "";
       return `<button type="button" class="roster-filter${ROSTER_FILTER === key ? " active" : ""}" data-roster-filter="${key}">${escapeAttr(t(label))} <b>${fmt(n)}</b></button>`;
     })
     .join("");
@@ -11672,10 +11691,19 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         ? `<button class="roster-btn cancel" data-cancel-reg="${r.registrationId}" data-cancel-name="${escapeAttr(r.attendeeName)}">${t("btnCancelRegistration")}</button>`
         : "";
       const registeredAt = r.registeredAt ? new Date(r.registeredAt).toLocaleString() : "—";
+      // "Will attend" / "Won't attend" answer recorded by staff; tapping the active one clears it.
+      const confCell =
+        r.waitlisted || r.checkedIn
+          ? `<small style="color:var(--muted);">—</small>`
+          : `<div class="att-conf">
+              <button type="button" class="roster-btn conf-yes${r.attendanceConfirm === "yes" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "yes" ? "none" : "yes"}" data-att-reg="${r.registrationId}">\u2713 ${escapeAttr(t("attConfYes"))}</button>
+              <button type="button" class="roster-btn conf-no${r.attendanceConfirm === "no" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "no" ? "none" : "no"}" data-att-reg="${r.registrationId}">\u2717 ${escapeAttr(t("attConfNo"))}</button>
+            </div>`;
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
+        <td>${confCell}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId, true)}</td>
         <td><div class="roster-actions">${action}${cancelBtn}</div></td>
         <td class="wa-cell">${waStatusCellHtml(r, eventName, eventDate, ev)}</td>
@@ -11732,6 +11760,29 @@ document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => 
   const waBtn = e.target.closest("[data-wa-confirm]");
   if (!waBtn) return;
   sendWhatsappConfirm(waBtn, document.getElementById("checkin-roster-msg"), () => loadCheckinRoster(true));
+});
+// Attendance confirmation ("Will attend" / "Won't attend") beside each member -
+// works in both rosters (Gate Scanner and the Admin event hub).
+async function attendanceConfirmClick(btn, msgId, reload) {
+  btn.disabled = true;
+  try {
+    await api(`/api/staff/registrations/${btn.dataset.attReg}/attendance-confirmation`, {
+      method: "POST",
+      body: JSON.stringify({ status: btn.dataset.attConf }),
+    });
+    await reload();
+  } catch (err) {
+    showMsg(document.getElementById(msgId), err.message, false);
+    btn.disabled = false;
+  }
+}
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-att-conf]");
+  if (btn) attendanceConfirmClick(btn, "checkin-roster-msg", () => loadCheckinRoster(true));
+});
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-att-conf]");
+  if (btn) attendanceConfirmClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
 });
 
 
