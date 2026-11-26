@@ -127,7 +127,7 @@
         const scorers = [...form.querySelectorAll(".scorer-input")]
           .map((i) => ({ registrationId: Number(i.dataset.reg), goals: Number(i.value || 0) }))
           .filter((r) => r.goals > 0);
-        const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/match-scorers", {
+        const data = await api(tournBase() + "/match-scorers", {
           method: "PUT", body: JSON.stringify({ matchId: Number(btn.dataset.matchId), scorers }),
         });
         TOURNAMENT_DATA = data.tournament;
@@ -135,7 +135,7 @@
         showMsg($("awards-msg"), t("okScorersSaved"), true);
       } else if (action === "awards-save") {
         const val = (id) => ($(id) && $(id).value ? $(id).value : null);
-        const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/awards", {
+        const data = await api(tournBase() + "/awards", {
           method: "PUT", body: JSON.stringify({ bestGoalkeeper: val("award-gk"), bestPlayer: val("award-best"), fairPlay: val("award-fair") }),
         });
         TOURNAMENT_DATA = data.tournament;

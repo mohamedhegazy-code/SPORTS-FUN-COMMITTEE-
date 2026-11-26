@@ -464,7 +464,7 @@
         await api("/api/admin/event-teams/" + btn.dataset.teamId, { method: "PUT", body: JSON.stringify({ name: name.trim() }) });
         await refreshAfterTeamChange();
       } else if (action === "team-import") {
-        const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/import-teams", {
+        const data = await api(tournBase() + "/import-teams", {
           method: "POST",
           body: JSON.stringify({ includeIncomplete: TEAMS_INCLUDE_INCOMPLETE ? "true" : "false" }),
         });

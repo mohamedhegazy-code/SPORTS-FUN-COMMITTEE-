@@ -4097,7 +4097,7 @@ function switchAdminTab(tabKey) {
   } catch (e) {
     /* ignore - non-fatal, tab just won't be remembered on next visit */
   }
-  if (tabKey === "tournaments") loadAdminTournamentsList();
+  if (tabKey === "tournaments") { loadAdminTournamentsList(); if (typeof simTabOpened === "function") simTabOpened(); }
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
   if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
@@ -8292,6 +8292,7 @@ document.getElementById("admin-tourn-list").addEventListener("click", (e) => {
   const eventId = btn.dataset.adminTournOpen;
   const sel = document.getElementById("tourn-event-select");
   if (sel && Array.from(sel.options).some((o) => o.value === eventId)) sel.value = eventId;
+  setSimMode(null);
   loadTournamentPanel(eventId).then(() => {
     document.querySelectorAll(".admin-tourn-row").forEach((r) => r.classList.toggle("active", r.dataset.eventId === eventId));
     document.getElementById("tourn-manage-card").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -8300,6 +8301,17 @@ document.getElementById("admin-tourn-list").addEventListener("click", (e) => {
 
 let TOURNAMENT_EVENT_ID = null;
 let TOURNAMENT_DATA = null;
+// Simulation (practice) mode: while SIM_ID is set, every tournament call goes to the simulation's
+// private copy (/api/sim/:id/...) instead of the real tournament. See sim.js.
+let SIM_ID = null;
+function tournBase(eventId) {
+  const id = eventId == null ? TOURNAMENT_EVENT_ID : eventId;
+  return SIM_ID ? "/api/sim/" + SIM_ID + "/admin/tournaments/" + id : "/api/admin/tournaments/" + id;
+}
+function setSimMode(id) {
+  SIM_ID = id || null;
+  if (typeof simRefreshUi === "function") simRefreshUi();
+}
 // Team mode, pre-generation only: toggled on by the "Edit teams" button on
 // the Seeding card so the admin can get back to the per-registrant
 // team-name table after already saving teams once (saving teams moves
@@ -8312,6 +8324,7 @@ let TOURNAMENT_REGISTRATIONS = [];
 
 document.getElementById("tourn-load").addEventListener("click", () => {
   const eventId = document.getElementById("tourn-event-select").value;
+  setSimMode(null);
   if (eventId) loadTournamentPanel(eventId);
 });
 
@@ -8397,13 +8410,17 @@ async function loadTournamentPanel(eventId) {
   const msg = document.getElementById("tourn-msg");
   if (msg) msg.textContent = "";
   try {
-    const data = await api("/api/admin/tournaments/" + eventId);
+    const data = await api(tournBase(eventId));
     TOURNAMENT_DATA = data.tournament;
     TOURNAMENT_REGISTRATIONS = data.registrations || [];
     await lg("loadTeams", eventId); // registered teams (team events) + the tournament list for the season scheduler
     renderTournamentBody();
   } catch (e) {
-    document.getElementById("tourn-body").innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
+    TOURNAMENT_DATA = null;
+    const notOpen = e && e.data && e.data.code === "tournament_not_open_yet";
+    document.getElementById("tourn-body").innerHTML = notOpen
+      ? `<div class="sim-not-open"><strong>${escapeAttr(t("simNotOpenTitle"))}</strong><p>${escapeAttr(t("simNotOpenBody").replace("{date}", e.data.opensOn || ""))}</p></div>`
+      : `<p class="msg err show">${escapeAttr(e.message)}</p>`;
   }
 }
 
@@ -8523,7 +8540,7 @@ function renderTournamentBody() {
 
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = tournamentFormatLabel(TOURNAMENT_DATA.format, TOURNAMENT_DATA);
-  const matchesLink = TOURNAMENT_DATA.schedule
+  const matchesLink = TOURNAMENT_DATA.schedule && !SIM_ID
     ? `<a class="secondary small tourn-live-link" href="/matches.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnViewLiveMatches")}</a>`
     : "";
   body.innerHTML = `
@@ -8534,9 +8551,9 @@ function renderTournamentBody() {
       <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
     </div>
     ${renderTournamentProgressStepper()}
-    ${registeredTeamsCard}
+    ${SIM_ID ? "" : registeredTeamsCard}
     ${setupCard}
-    ${seasonCard}
+    ${SIM_ID ? "" : seasonCard}
     ${teamsCard}
     ${attendanceCard}
     ${liveCard}
@@ -8588,7 +8605,7 @@ function renderCasualTournamentBody(body) {
 async function setCasualSessionStatus(status) {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/casual-status", {
+    const data = await api(tournBase() + "/casual-status", {
       method: "PUT",
       body: JSON.stringify({ status }),
     });
@@ -8649,7 +8666,7 @@ function renderSwissTournamentBody(body) {
     .map((s, i) => `<div class="tourn-step ${s.state}"><span class="tourn-step-dot">${s.state === "done" ? "✓" : i + 1}</span><span class="tourn-step-label">${escapeAttr(s.label)}</span></div>`)
     .join('<div class="tourn-step-line"></div>')}</div>`;
   const printBase = `/admin/print/tournament/${TOURNAMENT_EVENT_ID}`;
-  const printLinks = `
+  const printLinks = SIM_ID ? "" : `
     <a class="secondary small" href="${printBase}?view=regulation&lang=${currentLang}" target="_blank" rel="noopener">${t("btnPrintRegulation")}</a>
     ${generated ? `<a class="secondary small" href="${printBase}?view=pairings&round=${swissViewRound()}&lang=${currentLang}" target="_blank" rel="noopener">${t("btnPrintPairings")}</a>` : ""}
     ${generated ? `<a class="secondary small" href="${printBase}?view=standings&lang=${currentLang}" target="_blank" rel="noopener">${t("btnPrintStandings")}</a>` : ""}`;
@@ -8968,7 +8985,7 @@ function swissPrizeColsHtml(sw) {
 async function swissCall(path, method, body) {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+    const data = await api(tournBase() + path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
     if (data.tournament) TOURNAMENT_DATA = data.tournament;
     swissKeepScroll(() => renderTournamentBody());
     return data;
@@ -9012,7 +9029,7 @@ async function swissSetCategory(regId, cat, checked) {
   next[cat] = checked;
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/categories", {
+    const data = await api(tournBase() + "/categories", {
       method: "PUT",
       body: JSON.stringify({ registrationId: regId, women: next.women, junior: next.junior }),
     });
@@ -9256,7 +9273,7 @@ async function updateTournamentSchedule() {
   const availableHours = document.getElementById("tourn-edit-available-hours").value.trim();
   if (!courts || !matchMinutes || !startTime) return showMsg(msg, t("scheduleFieldsRequired"), false);
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/schedule", {
+    const data = await api(tournBase() + "/schedule", {
       method: "PUT",
       body: JSON.stringify({
         courts: Number(courts),
@@ -9279,7 +9296,7 @@ async function updateTournamentSchedule() {
 async function setTournamentAttendance(registrationId, status) {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/attendance", {
+    const data = await api(tournBase() + "/attendance", {
       method: "PUT",
       body: JSON.stringify({ registrationId, status }),
     });
@@ -9630,7 +9647,7 @@ async function createTournament() {
     if (availableHours) body.availableHours = Number(availableHours);
   }
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "POST", body: JSON.stringify(body) });
+    const data = await api(tournBase(), { method: "POST", body: JSON.stringify(body) });
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("tournamentCreated"), true);
     renderTournamentBody();
@@ -9644,7 +9661,7 @@ async function deleteTournament() {
   if (!confirm(t("confirmDeleteTournament"))) return;
   const msg = document.getElementById("tourn-msg");
   try {
-    await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID, { method: "DELETE" });
+    await api(tournBase(), { method: "DELETE" });
     TOURNAMENT_DATA = null;
     showMsg(msg, t("tournamentDeleted"), true);
     renderTournamentBody();
@@ -9698,7 +9715,7 @@ async function saveTournamentTeams() {
     groups[key].memberIds.push(Number(inp.dataset.regId));
   });
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/teams", {
+    const data = await api(tournBase() + "/teams", {
       method: "PUT",
       body: JSON.stringify({ teams: Object.values(groups) }),
     });
@@ -9768,7 +9785,7 @@ async function randomizeTournamentSeed() {
 async function saveTournamentSeedOrder(order) {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/seed-order", {
+    const data = await api(tournBase() + "/seed-order", {
       method: "PUT",
       body: JSON.stringify({ seedOrder: order }),
     });
@@ -9781,7 +9798,7 @@ async function saveTournamentSeedOrder(order) {
 async function generateTournament() {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/generate", { method: "POST" });
+    const data = await api(tournBase() + "/generate", { method: "POST" });
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("tournamentGenerated"), true);
     renderTournamentBody();
@@ -9821,7 +9838,7 @@ async function reseedTournament() {
   if (!confirm(t("confirmReseedTournament"))) return;
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/reseed", { method: "POST" });
+    const data = await api(tournBase() + "/reseed", { method: "POST" });
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("tournamentReseeded"), true);
     renderTournamentBody();
@@ -10026,7 +10043,7 @@ async function recordTournamentGroupResult(btn) {
   const scoreB = wrap.querySelector('[data-score-side="b"]').value;
   if (scoreA === "" || scoreB === "") return showMsg(msg, t("bothScoresRequired"), false);
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/group-result", {
+    const data = await api(tournBase() + "/group-result", {
       method: "PUT",
       body: JSON.stringify({ matchId: Number(btn.dataset.matchId), scoreA: Number(scoreA), scoreB: Number(scoreB) }),
     });
@@ -10039,7 +10056,7 @@ async function recordTournamentGroupResult(btn) {
 async function generateTournamentKnockout() {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/generate-knockout", { method: "POST" });
+    const data = await api(tournBase() + "/generate-knockout", { method: "POST" });
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("knockoutGenerated"), true);
     renderTournamentBody();
@@ -10125,7 +10142,7 @@ async function recordTournamentKnockoutResult(btn) {
   const scoreB = wrap.querySelector('[data-ko-side="b"]').value;
   const note = wrap.querySelector(".tourn-ko-note").value;
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/knockout-result", {
+    const data = await api(tournBase() + "/knockout-result", {
       method: "PUT",
       body: JSON.stringify({
         roundIndex: Number(btn.dataset.roundIndex),
@@ -10158,7 +10175,7 @@ function renderTournamentStandings() {
 async function awardTournamentPoints() {
   const msg = document.getElementById("tourn-msg");
   try {
-    const data = await api("/api/admin/tournaments/" + TOURNAMENT_EVENT_ID + "/award-points", { method: "POST" });
+    const data = await api(tournBase() + "/award-points", { method: "POST" });
     TOURNAMENT_DATA = data.tournament;
     showMsg(msg, t("pointsAwarded").replace("{count}", data.updated), true);
     renderTournamentBody();
@@ -11536,6 +11553,7 @@ const ROSTER_SORT_COLS = [
   ["member", "colMember"],
   ["registered", "colRegisteredAt"],
   ["status", "colStatus"],
+  ["confirm", "colAttConfirm"],
   ["qr", "colQrCode"],
   ["actions", "colActions"],
   ["whatsapp", "colWhatsapp"],
@@ -11548,6 +11566,8 @@ function rosterSortValue(r, key) {
       return r.registeredAt ? new Date(r.registeredAt).getTime() : 0;
     case "status": // waiting for check-in first, then checked in, then waiting list
       return r.waitlisted ? 2 : r.checkedIn ? 1 : 0;
+    case "confirm": // declined first (to cancel), then no answer, then confirmed, then not applicable
+      return r.waitlisted || r.checkedIn ? 3 : r.attendanceConfirm === "no" ? 0 : r.attendanceConfirm === "yes" ? 2 : 1;
     case "qr":
       return r.qrDataUrl ? 0 : 1;
     case "actions": // rows that still need a check-in action first
@@ -11624,14 +11644,17 @@ function rosterFilterMatch(r, f) {
   if (f === "pending") return !r.waitlisted && !r.checkedIn;
   if (f === "in") return !!r.checkedIn;
   if (f === "wait") return !!r.waitlisted;
+  if (f === "conf") return !r.waitlisted && !r.checkedIn && r.attendanceConfirm === "yes";
+  if (f === "decl") return !r.waitlisted && !r.checkedIn && r.attendanceConfirm === "no";
+  if (f === "noreply") return !r.waitlisted && !r.checkedIn && !r.attendanceConfirm;
   return true;
 }
 function rosterToolbarHtml(roster, ev) {
-  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
+  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ["conf", "rosterFilterConfirmed"], ["noreply", "rosterFilterNoReply"], ["decl", "rosterFilterDeclined"], ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
   const chips = defs
     .map(([key, label]) => {
       const n = roster.filter((r) => rosterFilterMatch(r, key)).length;
-      if (key === "wait" && !n) return "";
+      if ((key === "wait" || key === "decl") && !n) return "";
       return `<button type="button" class="roster-filter${ROSTER_FILTER === key ? " active" : ""}" data-roster-filter="${key}">${escapeAttr(t(label))} <b>${fmt(n)}</b></button>`;
     })
     .join("");
@@ -11685,10 +11708,19 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         ? `<button class="roster-btn cancel" data-cancel-reg="${r.registrationId}" data-cancel-name="${escapeAttr(r.attendeeName)}">${t("btnCancelRegistration")}</button>`
         : "";
       const registeredAt = r.registeredAt ? new Date(r.registeredAt).toLocaleString() : "—";
+      // "Will attend" / "Won't attend" answer recorded by staff; tapping the active one clears it.
+      const confCell =
+        r.waitlisted || r.checkedIn
+          ? `<small style="color:var(--muted);">—</small>`
+          : `<div class="att-conf">
+              <button type="button" class="roster-btn conf-yes${r.attendanceConfirm === "yes" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "yes" ? "none" : "yes"}" data-att-reg="${r.registrationId}">\u2713 ${escapeAttr(t("attConfYes"))}</button>
+              <button type="button" class="roster-btn conf-no${r.attendanceConfirm === "no" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "no" ? "none" : "no"}" data-att-reg="${r.registrationId}">\u2717 ${escapeAttr(t("attConfNo"))}</button>
+            </div>`;
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
+        <td>${confCell}</td>
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId, true)}</td>
         <td><div class="roster-actions">${action}${cancelBtn}</div></td>
         <td class="wa-cell">${waStatusCellHtml(r, eventName, eventDate, ev)}</td>
@@ -11745,6 +11777,29 @@ document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => 
   const waBtn = e.target.closest("[data-wa-confirm]");
   if (!waBtn) return;
   sendWhatsappConfirm(waBtn, document.getElementById("checkin-roster-msg"), () => loadCheckinRoster(true));
+});
+// Attendance confirmation ("Will attend" / "Won't attend") beside each member -
+// works in both rosters (Gate Scanner and the Admin event hub).
+async function attendanceConfirmClick(btn, msgId, reload) {
+  btn.disabled = true;
+  try {
+    await api(`/api/staff/registrations/${btn.dataset.attReg}/attendance-confirmation`, {
+      method: "POST",
+      body: JSON.stringify({ status: btn.dataset.attConf }),
+    });
+    await reload();
+  } catch (err) {
+    showMsg(document.getElementById(msgId), err.message, false);
+    btn.disabled = false;
+  }
+}
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-att-conf]");
+  if (btn) attendanceConfirmClick(btn, "checkin-roster-msg", () => loadCheckinRoster(true));
+});
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-att-conf]");
+  if (btn) attendanceConfirmClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
 });
 
 

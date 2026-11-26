@@ -1756,3 +1756,46 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .reg-modal-actions .primary { flex: 2; }
 .reg-modal-actions .secondary { flex: 1; }
 .reg-modal-box #reg-capacity-note { display: none; }
+
+/* Attendance confirmation (Will attend / Won't attend) beside each roster row */
+.att-conf { display: flex; gap: 4px; flex-wrap: wrap; }
+.roster-table button.roster-btn.conf-yes, .roster-table button.roster-btn.conf-no { background: #fff; font-weight: 600; }
+.roster-table button.roster-btn.conf-yes { border-color: #1e8e3e; color: #1e8e3e; }
+.roster-table button.roster-btn.conf-no { border-color: #c0392b; color: #c0392b; }
+.roster-table button.roster-btn.conf-yes.on { background: #1e8e3e; color: #fff; }
+.roster-table button.roster-btn.conf-no.on { background: #c0392b; color: #fff; }
+
+/* ---- tournament simulations (practice runs) ---- */
+.sim-event-line{margin:0 0 10px;font-size:.95rem}
+.sim-create{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 14px;align-items:end;margin-bottom:14px}
+.sim-create label{display:flex;flex-direction:column;gap:4px;font-size:.88rem}
+.sim-create .sim-copy{flex-direction:row;align-items:center;gap:8px;grid-column:1/-1}
+.sim-list{display:flex;flex-direction:column;gap:8px}
+.sim-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--border,#d9dde3);border-radius:10px}
+.sim-row.active{border-color:#b8860b;background:rgba(184,134,11,.08)}
+.sim-row-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sim-row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.sim-banner{border:2px dashed #b8860b;background:rgba(184,134,11,.08);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+.sim-banner.hidden{display:none}
+.sim-banner-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sim-badge{background:#b8860b;color:#fff;font-weight:700;font-size:.75rem;letter-spacing:.06em;padding:3px 10px;border-radius:999px}
+.sim-auto{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+.sim-auto-title{font-weight:600}
+.sim-auto select{width:auto;min-width:150px}
+.sim-whatif{margin-top:12px;padding-top:12px;border-top:1px dashed #b8860b}
+.sim-whatif h3{margin:0 0 4px}
+.sim-wi-base{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px 12px;margin:10px 0}
+.sim-wi-base label{display:flex;flex-direction:column;gap:3px;font-size:.82rem}
+.sim-wi-scroll{overflow-x:auto}
+.sim-wi-table{width:100%;border-collapse:collapse;min-width:640px}
+.sim-wi-table th{font-size:.78rem;text-align:start;padding:4px 6px;white-space:nowrap}
+.sim-wi-table td{padding:3px 4px;vertical-align:middle}
+.sim-wi-table input{width:100%;min-width:64px;padding:6px 8px}
+.sim-wi-table .wi-label{min-width:110px}
+.sim-wi-finish strong{font-size:1.05rem}
+.sim-wi-finish.best{color:#1b7f3b}
+.sim-wi-warn,.sim-wi-err{color:#b3261e}
+.sim-wi-actions{display:flex;gap:8px;margin-top:10px}
+.sim-not-open{border:1px solid #b8860b;background:rgba(184,134,11,.08);border-radius:12px;padding:14px 16px}
+.sim-not-open p{margin:6px 0 0}
+.sim-create .sim-copy input{width:auto;flex:none;margin:0}
