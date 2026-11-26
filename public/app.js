@@ -4100,6 +4100,7 @@ function switchAdminTab(tabKey) {
   }
   if (tabKey === "tournaments") { loadAdminTournamentsList(); if (typeof simTabOpened === "function") simTabOpened(); }
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
+  if (tabKey === "links") mslLoad();
   if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
@@ -7010,6 +7011,8 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
   fd.append("date", date);
   fd.append("endDate", endDate);
   fd.append("startTime", startTime);
+  fd.append("locationAr", document.getElementById("ev-location-ar").value.trim());
+  fd.append("locationEn", document.getElementById("ev-location-en").value.trim());
   fd.append("endTime", endTime);
   fd.append("earlyDeadline", datetimeLocalToIsoOrEmpty(earlyDeadline));
   fd.append("descriptionEn", descriptionEn);
@@ -7045,6 +7048,8 @@ document.getElementById("ev-submit").addEventListener("click", async () => {
     document.getElementById("ev-max-capacity").value = "";
     document.getElementById("ev-end-date").value = "";
     document.getElementById("ev-start-time").value = "";
+    document.getElementById("ev-location-ar").value = "";
+    document.getElementById("ev-location-en").value = "";
     document.getElementById("ev-end-time").value = "";
     document.getElementById("ev-parent-event").value = "";
     document.getElementById("ev-allow-multi").checked = false;
@@ -7111,6 +7116,8 @@ function populateEditForm(ev) {
   document.getElementById("ev-edit-date").value = ev.date || "";
   document.getElementById("ev-edit-end-date").value = ev.endDate || "";
   document.getElementById("ev-edit-start-time").value = ev.startTime || "";
+  document.getElementById("ev-edit-location-ar").value = ev.locationAr || "";
+  document.getElementById("ev-edit-location-en").value = ev.locationEn || "";
   document.getElementById("ev-edit-end-time").value = ev.endTime || "";
   document.getElementById("ev-edit-deadline").value = isoToDatetimeLocal(ev.earlyDeadline);
   // "Opens soon" is shown only while it is still closed - once its scheduled
@@ -7195,6 +7202,8 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   fd.append("date", date);
   fd.append("endDate", endDate);
   fd.append("startTime", startTime);
+  fd.append("locationAr", document.getElementById("ev-edit-location-ar").value.trim());
+  fd.append("locationEn", document.getElementById("ev-edit-location-en").value.trim());
   fd.append("endTime", endTime);
   fd.append("earlyDeadline", datetimeLocalToIsoOrEmpty(earlyDeadline));
   fd.append("descriptionEn", descriptionEn);
@@ -11433,9 +11442,55 @@ function waLink(phone, message) {
 // then English, regardless of which language the admin/staff member
 // currently has the UI set to (the member on the receiving end may prefer
 // either). Staff can still edit it in WhatsApp itself before hitting Send.
-function waConfirmMessage(attendeeName, eventName, eventDate) {
-  const ar = `مرحبًا ${attendeeName}، تم تأكيد تسجيلك في "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. نراك هناك! - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
-  const en = `Hi ${attendeeName}, this confirms your registration for "${eventName}"${eventDate ? ` on ${eventDate}` : ""}. See you there! - Recreational Sports Committee — New Cairo Branch`;
+const WA_SIGNATURE_AR = "لجنة الرياضة الترفيهية - فرع القاهرة الجديدة";
+const WA_SIGNATURE_EN = "Recreational Sports Committee — New Cairo Branch";
+// "HH:MM" -> "5:30 PM" / "5:30 م", plus the same time N minutes earlier. Fixed formats (not the UI
+// language) because the message is always sent in both languages.
+function waClock(hhmm, lang, minusMinutes) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return "";
+  let total = Number(m[1]) * 60 + Number(m[2]) - (minusMinutes || 0);
+  total = ((total % 1440) + 1440) % 1440;
+  const h24 = Math.floor(total / 60), min = total % 60;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const suffix = lang === "ar" ? (h24 < 12 ? "ص" : "م") : h24 < 12 ? "AM" : "PM";
+  return `${h12}:${String(min).padStart(2, "0")} ${suffix}`;
+}
+// The "what to do at the event" block shared by the confirmation, the reminder (2 days before) and
+// the event-day message. Every line is built only from data that exists in the event setup (start
+// time, location inside the club) and in the Landing Page settings (WhatsApp community link), so
+// an event without a start time or location simply gets a shorter message.
+function waEventInfo(ev) {
+  const links = Array.isArray(SETTINGS.messageLinks) ? SETTINGS.messageLinks : [];
+  const locAr = ev ? (ev.locationAr || ev.locationEn || "").trim() : "";
+  const locEn = ev ? (ev.locationEn || ev.locationAr || "").trim() : "";
+  const start = ev && ev.startTime ? ev.startTime : "";
+  const ar = [], en = [];
+  ar.push("أحضر رمز QR الخاص بك واعرضه عند بوابة الفعالية.");
+  en.push("Bring your QR code and show it at the event gate.");
+  if (start) {
+    ar.push(`يرجى الحضور قبل موعد البدء بـ 30 دقيقة (الحضور ${waClock(start, "ar", 30)}، وبداية الفعالية ${waClock(start, "ar")}).`);
+    en.push(`Please arrive 30 minutes before the start (arrive ${waClock(start, "en", 30)}, event starts ${waClock(start, "en")}).`);
+  }
+  const numbered = (lines) => lines.map((l, i) => `${i + 1}- ${l}`);
+  const arOut = numbered(ar), enOut = numbered(en);
+  if (locAr) arOut.push(`📍 مكان الفعالية داخل النادي: ${locAr}`);
+  if (locEn) enOut.push(`📍 Location inside the club: ${locEn}`);
+  // The links come from the admin tab "Message links" (switched-on ones, in the admin's order).
+  for (const l of links) {
+    arOut.push(`${l.titleAr || l.titleEn}: ${l.url}`);
+    enOut.push(`${l.titleEn || l.titleAr}: ${l.url}`);
+  }
+  return { ar: arOut.join("\n"), en: enOut.join("\n") };
+}
+// The pre-filled confirmation text - always both languages, Arabic first
+// then English, regardless of which language the admin/staff member
+// currently has the UI set to (the member on the receiving end may prefer
+// either). Staff can still edit it in WhatsApp itself before hitting Send.
+function waConfirmMessage(attendeeName, eventName, eventDate, ev) {
+  const info = waEventInfo(ev);
+  const ar = `مرحبًا ${attendeeName}، تم تأكيد تسجيلك في "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}.\n\n${info.ar}\n\nنراك هناك! - ${WA_SIGNATURE_AR}`;
+  const en = `Hi ${attendeeName}, this confirms your registration for "${eventName}"${eventDate ? ` on ${eventDate}` : ""}.\n\n${info.en}\n\nSee you there! - ${WA_SIGNATURE_EN}`;
   return `${ar}\n\n${en}`;
 }
 // wa.me's click-to-chat link can only pre-fill TEXT (it's a URL scheme, not
@@ -11455,14 +11510,16 @@ function waConfirmMessage(attendeeName, eventName, eventDate) {
 // Reminder / event-day messages (follow-up and attendance check). Reminder is
 // available from 3 days before the event until the day before; the event-day
 // message from the event date (to the end date for multi-day events).
-function waReminderMessage(attendeeName, eventName, eventDate) {
-  const ar = `مرحبًا ${attendeeName}، تذكير بموعد "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}. من فضلك أكّد حضورك بالرد على هذه الرسالة. - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
-  const en = `Hi ${attendeeName}, a reminder about "${eventName}"${eventDate ? ` on ${eventDate}` : ""}. Please reply to confirm that you will attend. - Recreational Sports Committee — New Cairo Branch`;
+function waReminderMessage(attendeeName, eventName, eventDate, ev) {
+  const info = waEventInfo(ev);
+  const ar = `مرحبًا ${attendeeName}، تذكير بموعد "${eventName}"${eventDate ? ` بتاريخ ${eventDate}` : ""}.\n\n${info.ar}\n\nمن فضلك أكّد حضورك بالرد على هذه الرسالة. - ${WA_SIGNATURE_AR}`;
+  const en = `Hi ${attendeeName}, a reminder about "${eventName}"${eventDate ? ` on ${eventDate}` : ""}.\n\n${info.en}\n\nPlease reply to confirm that you will attend. - ${WA_SIGNATURE_EN}`;
   return `${ar}\n\n${en}`;
 }
-function waDayOfMessage(attendeeName, eventName, eventDate) {
-  const ar = `مرحبًا ${attendeeName}، اليوم هو موعد "${eventName}"${eventDate ? ` (${eventDate})` : ""}. نتطلع لرؤيتك! من فضلك أكّد لنا حضورك بالرد على هذه الرسالة. - لجنة الرياضة الترفيهية - فرع القاهرة الجديدة`;
-  const en = `Hi ${attendeeName}, today is the day for "${eventName}"${eventDate ? ` (${eventDate})` : ""}. We look forward to seeing you! Please reply to confirm your attendance. - Recreational Sports Committee — New Cairo Branch`;
+function waDayOfMessage(attendeeName, eventName, eventDate, ev) {
+  const info = waEventInfo(ev);
+  const ar = `مرحبًا ${attendeeName}، اليوم هو موعد "${eventName}"${eventDate ? ` (${eventDate})` : ""}. نتطلع لرؤيتك!\n\n${info.ar}\n\nمن فضلك أكّد لنا حضورك بالرد على هذه الرسالة. - ${WA_SIGNATURE_AR}`;
+  const en = `Hi ${attendeeName}, today is the day for "${eventName}"${eventDate ? ` (${eventDate})` : ""}. We look forward to seeing you!\n\n${info.en}\n\nPlease reply to confirm your attendance. - ${WA_SIGNATURE_EN}`;
   return `${ar}\n\n${en}`;
 }
 function eventDaysUntil(ev) {
@@ -11475,7 +11532,7 @@ function eventDaysUntil(ev) {
 }
 function eventReminderOpen(ev) {
   const n = eventDaysUntil(ev);
-  return n === null ? true : n >= 1 && n <= 3;
+  return n === null ? true : n >= 1 && n <= 2;
 }
 function waStatusCellHtml(r, eventName, eventDate, ev) {
   // No WhatsApp messages (confirmation, reminder, event-day) to anyone still on
@@ -11500,7 +11557,7 @@ function waStatusCellHtml(r, eventName, eventDate, ev) {
   const chips = types
     .map((ty) => {
       const sentAt = r[ty.field];
-      const message = ty.build(r.attendeeName, eventName || "", eventDate || "");
+      const message = ty.build(r.attendeeName, eventName || "", eventDate || "", ev);
       const href = hasPhoneNow ? waLink(r.phone, message) : "";
       const label = sentAt ? "\u21BB " + t(ty.resend) : t(ty.short);
       const cls = `roster-btn wa-chip ${ty.cls}${sentAt ? " sent" : ""}`;
@@ -11895,7 +11952,7 @@ document.getElementById("wa-bulk-open").addEventListener("click", async () => {
       body: JSON.stringify({ type: b.type }),
     });
     const evName = bilingual(b.ev.nameEn, b.ev.nameAr);
-    const href = waLink(r.phone || sent.phone, def.build(r.attendeeName, evName, b.ev.date));
+    const href = waLink(r.phone || sent.phone, def.build(r.attendeeName, evName, b.ev.date, b.ev));
     if (!href) throw new Error(t("waNoPhoneNote"));
     r[def.field] = sent[def.field] || new Date().toISOString();
     window.open(href, "_blank", "noopener");
@@ -12176,3 +12233,95 @@ document.getElementById("birth-csv-btn").addEventListener("click", () => {
     a.remove();
   }, 500);
 });
+
+// =====================================================================
+// ADMIN: "Message links" tab - the links added at the end of the WhatsApp confirmation, reminder and
+// event-day messages (waEventInfo above reads SETTINGS.messageLinks). Rows: Arabic title, English title,
+// address, an on/off switch and order arrows. Saving replaces the whole list.
+// =====================================================================
+let MSL = [];
+function mslPreviewText() {
+  const on = MSL.filter((l) => l.enabled && l.url && (l.titleAr || l.titleEn));
+  if (!on.length) return t("mslPreviewEmpty");
+  return on.map((l) => `${l.titleAr || l.titleEn}: ${l.url}`).join("\n") + "\n\n" + on.map((l) => `${l.titleEn || l.titleAr}: ${l.url}`).join("\n");
+}
+function mslRender() {
+  const list = document.getElementById("msl-list");
+  if (!list) return;
+  list.innerHTML = MSL.length
+    ? MSL.map((l, i) => `<div class="msl-row${l.enabled ? "" : " off"}" data-msl-i="${i}">
+        <div class="msl-fields">
+          <label>${escapeAttr(t("mslTitleAr"))}<input data-msl-f="titleAr" dir="rtl" maxlength="100" value="${escapeAttr(l.titleAr)}" /></label>
+          <label>${escapeAttr(t("mslTitleEn"))}<input data-msl-f="titleEn" maxlength="100" value="${escapeAttr(l.titleEn)}" /></label>
+          <label class="msl-url">${escapeAttr(t("mslUrl"))}<input data-msl-f="url" type="url" dir="ltr" maxlength="500" placeholder="https://" value="${escapeAttr(l.url)}" /></label>
+        </div>
+        <div class="msl-row-actions">
+          <label class="checkbox-row"><input type="checkbox" data-msl-f="enabled" ${l.enabled ? "checked" : ""} /> <span>${escapeAttr(t("mslInclude"))}</span></label>
+          <button type="button" class="secondary small" data-msl-act="up" ${i === 0 ? "disabled" : ""} aria-label="${escapeAttr(t("mslUp"))}">&uarr;</button>
+          <button type="button" class="secondary small" data-msl-act="down" ${i === MSL.length - 1 ? "disabled" : ""} aria-label="${escapeAttr(t("mslDown"))}">&darr;</button>
+          <button type="button" class="danger small" data-msl-act="del">${escapeAttr(t("mslDelete"))}</button>
+        </div>
+      </div>`).join("")
+    : `<p class="hint-note">${escapeAttr(t("mslEmpty"))}</p>`;
+  mslPreview();
+}
+function mslPreview() {
+  const pre = document.getElementById("msl-preview");
+  if (pre) pre.textContent = mslPreviewText();
+}
+async function mslLoad() {
+  const msg = document.getElementById("msl-msg");
+  try {
+    const data = await api("/api/admin/message-links");
+    MSL = (data.links || []).map((l) => ({ titleAr: l.titleAr || "", titleEn: l.titleEn || "", url: l.url || "", enabled: l.enabled !== false }));
+    mslRender();
+  } catch (e) { if (msg) showMsg(msg, e.message, false); }
+}
+(function mslWire() {
+  const panel = document.querySelector('[data-admin-panel="links"]');
+  if (!panel) return;
+  panel.addEventListener("input", (e) => {
+    const f = e.target.dataset && e.target.dataset.mslF;
+    const row = e.target.closest("[data-msl-i]");
+    if (!f || !row || f === "enabled") return;
+    MSL[Number(row.dataset.mslI)][f] = e.target.value;
+    mslPreview();
+  });
+  panel.addEventListener("change", (e) => {
+    if (!(e.target.dataset && e.target.dataset.mslF === "enabled")) return;
+    const row = e.target.closest("[data-msl-i]");
+    MSL[Number(row.dataset.mslI)].enabled = e.target.checked;
+    row.classList.toggle("off", !e.target.checked);
+    mslPreview();
+  });
+  panel.addEventListener("click", async (e) => {
+    const act = e.target.closest("[data-msl-act]");
+    if (act) {
+      const i = Number(act.closest("[data-msl-i]").dataset.mslI);
+      if (act.dataset.mslAct === "del") MSL.splice(i, 1);
+      else {
+        const j = act.dataset.mslAct === "up" ? i - 1 : i + 1;
+        if (j >= 0 && j < MSL.length) [MSL[i], MSL[j]] = [MSL[j], MSL[i]];
+      }
+      return mslRender();
+    }
+    if (e.target.closest("#msl-add")) {
+      MSL.push({ titleAr: "", titleEn: "", url: "", enabled: true });
+      mslRender();
+      const rows = panel.querySelectorAll("[data-msl-i]");
+      const last = rows[rows.length - 1];
+      if (last) last.querySelector("input").focus();
+      return;
+    }
+    if (e.target.closest("#msl-save")) {
+      const msg = document.getElementById("msl-msg");
+      try {
+        const data = await api("/api/admin/message-links", { method: "PUT", body: JSON.stringify({ links: MSL }) });
+        SETTINGS.messageLinks = (data.links || []).filter((l) => l.enabled && l.url);
+        MSL = (data.links || []).map((l) => ({ titleAr: l.titleAr, titleEn: l.titleEn, url: l.url, enabled: l.enabled }));
+        mslRender();
+        showMsg(msg, t("mslSaved"), true);
+      } catch (err) { showMsg(msg, err.message, false); }
+    }
+  });
+})();

@@ -1912,3 +1912,15 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .ps-state.sched{color:#555;font-weight:600}
 .ps-link{align-self:flex-start;font-size:.85rem;color:var(--red);text-decoration:underline}
 .ps-card.ps-scheduled{background:#fafbfc}
+
+/* ---- admin: message links ---- */
+.msl-row{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;display:flex;flex-direction:column;gap:10px;background:#fff}
+.msl-row.off{opacity:.6}
+.msl-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.msl-fields label{display:flex;flex-direction:column;gap:4px;font-size:.85rem}
+.msl-fields .msl-url{grid-column:1 / -1}
+.msl-row-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.msl-row-actions .checkbox-row{margin-inline-end:auto}
+.msl-actions{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0}
+.msl-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f8;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:inherit;font-size:.9rem;margin:6px 0 0}
+@media (max-width:640px){.msl-fields{grid-template-columns:1fr}}
