@@ -6976,7 +6976,7 @@ function scheduleGroupMatches(t) {
 
 // Assigns each knockout round its own consecutive block of time slots
 // (a later round can't start until the round before it can actually be
-// played), cycling matches across courts within a round. Bye matches don't
+// played), cycling matches across courts evenly over the whole bracket. Bye matches don't
 // need a real time slot since nothing is actually played. Starts right
 // after the group stage's schedule (plus breakMinutes) when this
 // tournament had a group stage, otherwise at the tournament's start time.
@@ -6986,15 +6986,41 @@ function scheduleKnockoutRounds(t) {
     t.format === "groups" && t.lastGroupSlotEnd != null
       ? t.lastGroupSlotEnd + (t.breakMinutes || 0)
       : timeStrToMinutes(t.startTime);
+  // Matches already decided keep the court and time they were played at (so a
+  // re-schedule mid-event never rewrites history). They also count towards each
+  // court's load and occupy their court at their time.
+  const keep = (m) => !!m.winnerId && m.court != null && m.time != null;
+  const load = Array(t.courts + 1).fill(0);
+  const taken = new Set();
+  for (const round of t.knockout.rounds) {
+    for (const m of round) {
+      if (m.bye || !keep(m)) continue;
+      if (m.court >= 1 && m.court <= t.courts) load[m.court]++;
+      taken.add(m.time + "|" + m.court);
+    }
+  }
   for (const round of t.knockout.rounds) {
     const real = round.filter((m) => !m.bye);
-    let i = 0;
     let localSlot = slotStart;
-    while (i < real.length) {
-      for (let c = 0; c < t.courts && i < real.length; c++, i++) {
-        real[i].court = c + 1;
-        real[i].time = minutesToTimeStr(localSlot);
-      }
+    for (let i = 0; i < real.length; i += t.courts) {
+      const time = minutesToTimeStr(localSlot);
+      const slot = real.slice(i, i + t.courts);
+      const todo = slot.filter((m) => !keep(m));
+      // Courts that can take this slot's remaining matches: the ones not already
+      // used at this time, the least-used first, so matches that don't fill a
+      // whole slot are shared out evenly and every court ends up with the same
+      // number of matches (+/- 1) over the whole bracket.
+      let free = [];
+      for (let c = 1; c <= t.courts; c++) if (!taken.has(time + "|" + c)) free.push(c);
+      if (free.length < todo.length) free = Array.from({ length: t.courts }, (_, k) => k + 1);
+      free.sort((x, y) => load[x] - load[y] || x - y);
+      const chosen = free.slice(0, todo.length).sort((x, y) => x - y);
+      todo.forEach((m, k) => {
+        m.court = chosen[k];
+        m.time = time;
+        load[chosen[k]]++;
+        taken.add(time + "|" + chosen[k]);
+      });
       localSlot += t.matchMinutes;
     }
     slotStart = localSlot;
@@ -8423,7 +8449,8 @@ app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole(["tournamen
     scheduleGroupMatches(t);
   }
   if (t.knockout) {
-    t.knockout.rounds.forEach((round) => round.forEach((m) => { m.court = null; m.time = null; }));
+    // Matches already played keep the court/time they were played at; only the rest are re-planned.
+    t.knockout.rounds.forEach((round) => round.forEach((m) => { if (!m.winnerId) { m.court = null; m.time = null; } }));
     scheduleKnockoutRounds(t);
   }
   writeDb(db);
