@@ -160,7 +160,11 @@ const cairoToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Afr
   ok(r.status === 403, "an unregistered member can't report", r.json);
   r = await api(`/api/admin/tournaments/${evK}/player-scores`, { method: "PUT", jar: admin, body: { enabled: false } });
   ok(r.status === 200 && r.json.tournament.playerScores === false, "manager switches it off");
-  ok((await mine(A)).length === 0, "off -> nothing to report");
+  const offList = await mine(A);
+  ok(offList.length > 0 && offList.every((x) => x.scoring === false && ["scheduled", "done"].includes(x.state)), "off -> schedule and results still shown, nothing to report", offList.map((x) => x.state));
+  ok(offList.filter((x) => x.state === "scheduled").every((x) => x.report === null), "off -> pending reports are not exposed to players");
+  r = await rep(A, { eventId: evK, kind: "ko", roundIndex: 0, matchId: m0.id, scoreA: 1, scoreB: 0 });
+  ok(r.status === 403, "off -> reporting is refused", r.json);
   ok(serverErrors.length === 0, "no 5xx", serverErrors);
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

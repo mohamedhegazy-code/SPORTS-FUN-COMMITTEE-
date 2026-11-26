@@ -67,7 +67,10 @@ const cairoToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Afr
   section("switch off -> no card");
   const pA = await mkCtx(A.jar, true);
   await openProfile(pA);
-  ok(await pA.locator("#mp-matches-card:not(.hidden)").count() === 0, "card hidden while the switch is off");
+  ok(await pA.locator("#mp-matches-card:not(.hidden)").count() === 1, "schedule card is shown even while score entry is off");
+  ok(await pA.locator(".ps-card.ps-scheduled").count() === 1 && await pA.locator('[data-ps-act="send"],[data-ps-act="inc"]').count() === 0, "scheduled match, no score buttons");
+  ok((await pA.locator(".ps-card.ps-scheduled").innerText()).includes("09:00"), "kick-off time shown");
+  ok(await pA.locator(".ps-card .ps-link").count() === 1, "link to the full schedule & results");
 
   section("manager turns the switch on (UI)");
   const pM = await mkCtx(admin, false);
@@ -154,7 +157,8 @@ const cairoToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Afr
   await pM.locator('[data-ps-mgr="toggle"]').click(); await pM.waitForTimeout(1200);
   ok(await pM.locator(".ps-switch.on").count() === 0, "switch off");
   await openProfile(pA);
-  ok(await pA.locator("#mp-matches-card:not(.hidden)").count() === 0, "player card disappears");
+  ok(await pA.locator('.ps-card [data-ps-act="inc"], .ps-card [data-ps-act="send"]').count() === 0, "score buttons disappear, schedule/results stay");
+  ok(await pA.locator("#mp-matches-card:not(.hidden)").count() === 1, "player still sees schedule and results");
 
   const allErrs = [pA, pB, pC, pD, pM].flatMap((p) => p.errs);
   ok(allErrs.length === 0, "no page errors", allErrs);
