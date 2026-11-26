@@ -4,7 +4,7 @@
 PORT=3951
 OUT=${OUT:-/tmp/fullrun}
 mkdir -p $OUT; : > $OUT/summary.txt
-SUITES="platform_e2e:N=300 registration_open_e2e waitlist_whatsapp_e2e exclusive_code_e2e event_heads_e2e event_merge_e2e partner_e2e members_admin_e2e member_details_e2e birthdate_request_e2e birthday_e2e birthday_video_e2e committee_whatsapp_e2e dashboard_cards_e2e custom_report_e2e reports_e2e awards_e2e tournament_e2e swiss_e2e league_e2e ps_ko64_e2e ps_ko64_b_e2e simulation_e2e player_scores_e2e tournaments_matrix_e2e registration_confirm_ui_e2e whatsapp_event_info_ui_e2e gate_cancel_and_attendance_confirm_ui_e2e simulation_ui_e2e runner_ui_e2e player_scores_ui_e2e tournament_1000_e2e"
+SUITES="platform_e2e:N=300 registration_open_e2e waitlist_whatsapp_e2e exclusive_code_e2e event_heads_e2e event_merge_e2e partner_e2e members_admin_e2e member_details_e2e birthdate_request_e2e birthday_e2e birthday_video_e2e committee_whatsapp_e2e dashboard_cards_e2e custom_report_e2e reports_e2e awards_e2e tournament_e2e swiss_e2e league_e2e ps_ko64_e2e ps_ko64_b_e2e simulation_e2e player_scores_e2e tournaments_matrix_e2e registration_confirm_ui_e2e whatsapp_event_info_ui_e2e court_balance_e2e gate_cancel_and_attendance_confirm_ui_e2e simulation_ui_e2e runner_ui_e2e player_scores_ui_e2e tournament_1000_e2e"
 for entry in $SUITES; do
   name=${entry%%:*}; extra=""; [[ "$entry" == *:* ]] && extra=${entry#*:}
   pkill -f "node server.js" 2>/dev/null; sleep 1
