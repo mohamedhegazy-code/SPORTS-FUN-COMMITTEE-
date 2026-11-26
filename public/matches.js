@@ -160,22 +160,23 @@ async function loadAndRenderEvent() {
     const now = new Date();
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const matchLen = tn.schedule.matchMinutes;
-    const times = [...new Set(matches.map((m) => timeToMinutes(m.time)))].sort((a, b) => a - b);
-    // The "current" slot is the one whose window [start, start+matchLen)
-    // contains the wall-clock time; before the first slot or after the
-    // last slot's window there simply is no "now", only "next"/"finished".
-    let currentSlotMin = times.find((tmin) => nowMin >= tmin && nowMin < tmin + matchLen);
+    // Only matches still to be played count for "now" / "up next" - a tournament rarely runs exactly on
+    // the printed times, so what has already been decided must never be shown as upcoming.
+    const pending = matches.filter((m) => !m.decided && m.a && m.b);
+    const times = [...new Set(pending.map((m) => timeToMinutes(m.time)))].sort((a, b) => a - b);
+    // The "current" slot is the one whose window [start, start+matchLen) contains the wall-clock time.
+    // Otherwise the next slot is the first one still ahead - or, when play is running late (or early),
+    // simply the earliest slot that has not been played yet.
+    const currentSlotMin = times.find((tmin) => nowMin >= tmin && nowMin < tmin + matchLen);
     let nextSlotMin;
-    if (currentSlotMin !== undefined) {
-      nextSlotMin = times.find((tmin) => tmin > currentSlotMin);
-    } else {
-      nextSlotMin = times.find((tmin) => tmin > nowMin);
-    }
-    const nowMatches = currentSlotMin !== undefined ? matches.filter((m) => timeToMinutes(m.time) === currentSlotMin) : [];
-    const nextMatches = nextSlotMin !== undefined ? matches.filter((m) => timeToMinutes(m.time) === nextSlotMin) : [];
+    if (currentSlotMin !== undefined) nextSlotMin = times.find((tmin) => tmin > currentSlotMin);
+    else nextSlotMin = times.find((tmin) => tmin > nowMin) !== undefined ? times.find((tmin) => tmin > nowMin) : times[0];
+    const nowMatches = currentSlotMin !== undefined ? pending.filter((m) => timeToMinutes(m.time) === currentSlotMin) : [];
+    const nextMatches = nextSlotMin !== undefined ? pending.filter((m) => timeToMinutes(m.time) === nextSlotMin) : [];
     let inner;
     if (!nowMatches.length && !nextMatches.length) {
-      inner = `<div class="empty-state"><h2>${esc(t("tournStatusCompleted"))}</h2></div>`;
+      const champ = tn.status === "completed" && tn.standings && tn.standings[0] ? tn.standings[0].label : "";
+      inner = `<div class="empty-state"><h2>${esc(t("tournStatusCompleted"))}</h2>${champ ? `<p class="champion-line">${esc(t("rnChampion"))}: <strong>${esc(champ)}</strong></p>` : ""}</div>`;
     } else {
       inner = renderSlots(nowMatches, nextMatches, null, nextSlotMin !== undefined ? minutesToStr(nextSlotMin) : null, tn.entrants);
     }
