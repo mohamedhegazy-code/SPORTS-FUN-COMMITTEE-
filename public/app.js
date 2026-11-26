@@ -8519,9 +8519,8 @@ function renderTournamentBody() {
   else if (TOURNAMENT_DATA.status === "seeding") preGenContent = renderTournamentSeeding();
   else if (TOURNAMENT_DATA.status === "groups" || TOURNAMENT_DATA.status === "knockout") preGenContent = renderTournamentReseedPanel();
   let liveContent = "";
-  if (TOURNAMENT_DATA.status === "groups") liveContent = renderTournamentGroups();
-  else if (TOURNAMENT_DATA.status === "knockout") liveContent = renderTournamentBracket();
-  else if (TOURNAMENT_DATA.status === "completed") liveContent = renderTournamentBracket();
+  // Phone-first match runner (runner.js): to play / played / bracket & tables.
+  if (["groups", "knockout", "completed"].includes(TOURNAMENT_DATA.status)) liveContent = renderMatchRunner();
   const standingsContent = TOURNAMENT_DATA.status === "completed" ? renderTournamentStandings() : "";
 
   const setupCard = tournCardHtml(TOURN_ICON.setup, t("tournCardSetupTitle"), renderTournamentScheduleEditor(), "tourn-card-setup");
@@ -8538,6 +8537,8 @@ function renderTournamentBody() {
   const standingsCard = tournCardHtml(TOURN_ICON.standings, t("finalStandingsTitle"), standingsContent, "tourn-card-standings");
   const scorersCard = ["groups", "knockout", "completed"].includes(TOURNAMENT_DATA.status) ? tournCardHtml(TOURN_ICON.standings, t("scorersAwardsCardTitle"), aw("cardHtml") || "", "tourn-card-standings") : "";
 
+  // While matches are being played the scoreboard goes first, so a phone never has to scroll past setup cards.
+  const playingNow = ["groups", "knockout"].includes(TOURNAMENT_DATA.status);
   const modeLabel = TOURNAMENT_DATA.mode === "team" ? t("tournamentModeTeam") : t("tournamentModeIndividual");
   const formatLabel = tournamentFormatLabel(TOURNAMENT_DATA.format, TOURNAMENT_DATA);
   const matchesLink = TOURNAMENT_DATA.schedule && !SIM_ID
@@ -8551,12 +8552,13 @@ function renderTournamentBody() {
       <button class="danger small" style="margin-inline-start:auto;" data-tourn-action="delete-tournament">${t("btnDeleteTournament")}</button>
     </div>
     ${renderTournamentProgressStepper()}
+    ${playingNow ? liveCard : ""}
     ${SIM_ID ? "" : registeredTeamsCard}
     ${setupCard}
     ${SIM_ID ? "" : seasonCard}
     ${teamsCard}
     ${attendanceCard}
-    ${liveCard}
+    ${playingNow ? "" : liveCard}
     ${scorersCard}
     ${standingsCard}
   `;

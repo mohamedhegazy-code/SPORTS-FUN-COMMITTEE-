@@ -1799,3 +1799,76 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .sim-not-open{border:1px solid #b8860b;background:rgba(184,134,11,.08);border-radius:12px;padding:14px 16px}
 .sim-not-open p{margin:6px 0 0}
 .sim-create .sim-copy input{width:auto;flex:none;margin:0}
+
+/* ---- match runner (phone-first Matches & Scores) ---- */
+.rn{display:flex;flex-direction:column;gap:12px}
+.rn-progress{display:flex;flex-direction:column;gap:6px}
+.rn-bar{height:10px;border-radius:999px;background:rgba(0,0,0,.08);overflow:hidden}
+.rn-bar span{display:block;height:100%;background:#1b7f3b;border-radius:999px;transition:width .3s}
+.rn-progress-text{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;font-size:.92rem}
+.rn-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:rgba(0,0,0,.05);padding:4px;border-radius:12px}
+.rn-tab{min-height:46px;border:0;border-radius:9px;background:transparent;color:inherit;font-weight:600;font-size:.95rem;padding:6px 4px;cursor:pointer}
+.rn-tab.on{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.18);color:#a1001a}
+.rn-filters{display:flex;flex-direction:column;gap:8px}
+.rn-chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.rn-chip{flex:none;min-height:40px;padding:6px 14px;border-radius:999px;border:1px solid #c9ced6;background:#fff;color:inherit;font-weight:600;cursor:pointer}
+.rn-chip.on{background:#a1001a;border-color:#a1001a;color:#fff}
+.rn-search{width:100%;min-height:46px;font-size:1rem}
+.rn-h{margin:6px 0 0;font-size:1rem;letter-spacing:.02em}
+.rn-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:12px;background:rgba(27,127,59,.12);border:1px solid #1b7f3b}
+.rn-banner.champ{background:linear-gradient(135deg,#fff4cc,#ffe08a);border-color:#b8860b}
+.rn-banner.champ strong{font-size:1.25rem}
+.rn-card{border:1px solid #d3d8df;border-radius:14px;padding:12px;background:#fff;display:flex;flex-direction:column;gap:10px}
+.rn-card.is-now{border:2px solid #a1001a;box-shadow:0 2px 10px rgba(161,0,26,.15)}
+.rn-card-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:.85rem}
+.rn-stage{font-weight:700}
+.rn-when{opacity:.8}
+.rn-tag{margin-inline-start:auto;padding:2px 10px;border-radius:999px;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.rn-tag.now{background:#a1001a;color:#fff}
+.rn-tag.next{background:#e8ecf2;color:#333}
+.rn-tag.edit{background:#b8860b;color:#fff}
+.rn-row{display:flex;align-items:center;gap:10px}
+.rn-name{flex:1;min-width:0;font-weight:600;font-size:1.05rem;overflow-wrap:anywhere}
+.rn-roster{font-size:.78rem;font-weight:400;opacity:.75}
+.rn-pick{flex:1;min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:start;padding:10px 14px;border-radius:12px;border:2px solid #c9ced6;background:#fafbfc;color:inherit;cursor:pointer}
+.rn-pick.picked{border-color:#1b7f3b;background:rgba(27,127,59,.12)}
+.rn-tick{color:#1b7f3b;font-size:1.4rem;font-weight:700}
+.rn-step{display:flex;align-items:center;gap:6px;flex:none}
+.rn-step button{width:48px;height:48px;border-radius:12px;border:1px solid #b9bfc9;background:#fff;color:inherit;font-size:1.5rem;font-weight:700;line-height:1;cursor:pointer;padding:0}
+.rn-step output{min-width:34px;text-align:center;font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums}
+.rn-quick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.rn-quick button{min-height:46px;padding:6px 8px;font-size:.88rem;border-radius:10px;border:1px solid #c9ced6;background:#f3f5f8;color:inherit;font-weight:600;cursor:pointer;overflow-wrap:anywhere}
+.rn-hint{margin:0;font-size:.9rem;opacity:.8}
+.rn-note{width:100%;min-height:44px}
+.rn-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.rn-actions button{min-height:48px;padding:8px 16px;border-radius:12px;font-weight:700}
+.rn-go{flex:1 1 180px;background:#1b7f3b;color:#fff;border:0;cursor:pointer}
+.rn-go:disabled{background:#aab3bd;cursor:not-allowed}
+.rn-more{min-height:46px;width:100%}
+.rn-waiting{text-align:center}
+.rn-played{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #e0e4ea;border-radius:12px;background:#fff}
+.rn-played-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rn-played-stage{font-size:.78rem;opacity:.7}
+.rn-played-names{font-size:.95rem;overflow-wrap:anywhere}
+.rn-played-names i{font-style:normal;font-weight:700;padding:0 6px}
+.rn-played-names em{font-size:.8rem;opacity:.75}
+.rn-played b.won,.rn-ov-row b.won{color:#1b7f3b}
+.rn-ov-round{border:1px solid #e0e4ea;border-radius:12px;padding:8px 10px;background:#fff;margin-bottom:8px}
+.rn-ov-title{font-weight:700;margin-bottom:4px}
+.rn-ov-title small{font-weight:400;opacity:.7;margin-inline-start:6px}
+.rn-ov-row{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px;align-items:center;padding:6px 0;border-top:1px solid #eef0f4;font-size:.9rem}
+.rn-ov-row b{font-weight:500;overflow-wrap:anywhere}
+.rn-ov-row b.won{font-weight:700}
+.rn-ov-row i{font-style:normal;font-weight:700;text-align:center}
+.rn-ov-time{opacity:.65;font-size:.78rem;min-width:40px}
+.rn-ov-row.done{opacity:.85}
+.rn-wide{margin-top:8px}
+.rn-wide summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
+.rn-wide .tourn-bracket{overflow-x:auto}
+.rn-tables{display:flex;flex-direction:column;gap:12px}
+.rn-toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,40px);opacity:0;pointer-events:none;background:#1b7f3b;color:#fff;padding:12px 18px;border-radius:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.3);z-index:9999;max-width:92vw;text-align:center;transition:all .25s}
+.rn-toast.show{opacity:1;transform:translate(-50%,0)}
+.rn-toast.err{background:#b3261e}
+@media (min-width:760px){.rn-cards-grid{display:grid}}
+@media (prefers-reduced-motion:reduce){.rn-toast,.rn-bar span{transition:none}}
+.rn-card button,.rn-played button,.rn-banner button,.rn-tabs button,.rn-chips button{margin:0}
