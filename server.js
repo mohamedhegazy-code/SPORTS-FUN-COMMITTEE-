@@ -230,6 +230,22 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Simulation requests reuse the real tournament handlers: /api/sim/:simId/admin/tournaments/:eventId/...
+// is rewritten to /api/admin/tournaments/:eventId/... and flagged, so requireStaffRole can swap in
+// the simulation's private data. Only the listed tournament sub-routes can be reached this way.
+const SIM_REWRITE_RE = /^\/api\/sim\/(\d+)\/admin\/tournaments\/(\d+)((?:\/(?:teams|seed-order|schedule|generate|reseed|casual-status|group-result|attendance|generate-knockout|knockout-result|match-scorers|awards|award-points|import-teams|categories|swiss\/(?:next-round|undo-round|result|swap|withdraw|info|settings)))?)(\?.*)?$/;
+app.use((req, res, next) => {
+  if (req.url.startsWith("/api/sim/")) {
+    const m = SIM_REWRITE_RE.exec(req.url);
+    if (m) {
+      req.simId = Number(m[1]);
+      req.simEventId = Number(m[2]);
+      req.url = "/api/admin/tournaments/" + m[2] + (m[3] || "") + (m[4] || "");
+    }
+  }
+  next();
+});
 app.use(
   express.static(path.join(__dirname, "public"), {
     // Everything is no-store so a deploy shows up immediately - except video:
@@ -771,6 +787,9 @@ function readDb() {
   // for the full data model and bracket-math helpers.
   db.nextIds.tournament = db.nextIds.tournament || 1;
   db.tournaments = db.tournaments || [];
+  // Tournament simulations (practice runs) - fully isolated copies, see the SIMULATION block.
+  db.simulations = db.simulations || [];
+  db.nextIds.simulation = db.nextIds.simulation || 1;
   // Teams that players register as (events with team registration switched on).
   db.nextIds.eventTeam = db.nextIds.eventTeam || 1;
   db.eventTeams = db.eventTeams || [];
@@ -1007,6 +1026,8 @@ function backupDbFile() {
 // the new complete version, never a half-written one. Previously this was
 // a plain writeFileSync straight to db.json, which had no such guarantee.
 function writeDb(db) {
+  // A simulation's virtual db never touches the real collections - only its own sandbox is saved.
+  if (db && db.__sim) return writeSimDb(db);
   const json = JSON.stringify(db, null, 2);
   backupDbFile();
   const tmpPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
@@ -1140,8 +1161,17 @@ function requireStaffRole(role) {
     const db = readDb();
     const staff = db.staffAccounts[session.id];
     if (!staff) return res.status(401).json({ error: "Please sign in" });
-    req.db = db;
     req.staff = staff;
+    if (req.simId) {
+      // Simulation request (rewritten from /api/sim/:id/admin/tournaments/...): run the very same
+      // tournament handlers against the simulation's private copy of the data.
+      const found = simAccess(db, staff, req.simId, req.simEventId);
+      if (found.error) return res.status(found.status).json({ error: found.error });
+      req.sim = found.sim;
+      req.db = buildSimDb(db, found.sim);
+    } else {
+      req.db = db;
+    }
     next();
   };
 }
@@ -2782,6 +2812,23 @@ function eventAccessCheck(db, staff, eventId) {
   if (!isEventManager(db, ev, staff.username)) return { ok: false, error: "You are not assigned as a manager of this event" };
   if (!managerAccessOpen(ev)) return { ok: false, error: "Manager access to this event ended 7 days after it finished" };
   return { ok: true };
+}
+// Today's date in Cairo (the club's time zone), so "event day" starts at local midnight.
+function cairoToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
+}
+// The REAL tournament screens open for a Tournament Manager on the event day (admins are never
+// held back). Before that the manager practises with a simulation, which can run any time.
+function requireTournamentDayAccess(req, res, next) {
+  const access = eventAccessCheck(req.db, req.staff, req.params.eventId);
+  if (!access.ok) return res.status(403).json({ error: access.error });
+  if (!req.db.__sim && req.staff && req.staff.role === "tournament") {
+    const ev = req.db.events.find((e) => e.id === Number(req.params.eventId));
+    if (ev && ev.date && cairoToday() < ev.date) {
+      return res.status(403).json({ error: `The real tournament opens for managers on the event day (${ev.date}). Until then, practise with a simulation.`, code: "tournament_not_open_yet", opensOn: ev.date });
+    }
+  }
+  next();
 }
 function requireEventAccess(req, res, next) {
   const access = eventAccessCheck(req.db, req.staff, req.params.eventId);
@@ -7434,6 +7481,414 @@ function serializeTournament(db, t, forPublic) {
   };
 }
 
+// =========================================================================
+// SIMULATION (practice runs of a tournament)
+// =========================================================================
+// A simulation is a private sandbox for one event's tournament: its own copy of the players
+// (real registrants and/or dummy players), its own tournament record and its own counters, stored
+// in db.simulations[]. The real tournament screens are reused unchanged - requests to
+// /api/sim/:id/admin/tournaments/... are rewritten (see SIM_REWRITE_RE) and requireStaffRole hands
+// the handlers a virtual db built by buildSimDb(); writeDb() on that virtual db saves only the
+// sandbox. Nothing here can touch real registrations, members, points, reports or public pages.
+// A simulation can be run at any time; the REAL tournament opens for Tournament Managers on the
+// event day (requireTournamentDayAccess).
+const SIM_MAX_PLAYERS = 1200;
+const SIM_MAX_PER_EVENT = 6;
+const SIM_STALE_DAYS = 45;
+function simEventAccess(db, staff, eventId) {
+  const ev = db.events.find((e) => e.id === Number(eventId));
+  if (!ev) return { ok: false, status: 404, error: "No such event" };
+  if (staff.role === "admin") return { ok: true, ev };
+  if (staff.role !== "tournament") return { ok: false, status: 403, error: "Not allowed for this account" };
+  if (!isEventManager(db, ev, staff.username)) return { ok: false, status: 403, error: "You are not assigned as a manager of this event" };
+  if (!managerAccessOpen(ev)) return { ok: false, status: 403, error: "Manager access to this event ended 7 days after it finished" };
+  return { ok: true, ev };
+}
+function simAccess(db, staff, simId, eventId) {
+  const sim = (db.simulations || []).find((s) => s.id === Number(simId));
+  if (!sim || (eventId != null && sim.eventId !== Number(eventId))) return { status: 404, error: "No such simulation" };
+  const acc = simEventAccess(db, staff, sim.eventId);
+  if (!acc.ok) return { status: acc.status, error: acc.error };
+  return { sim };
+}
+// The tournament code works on a whole db object, so give it one: the real events/staff/settings
+// are shared read-only, everything a tournament writes to is the simulation's own copy.
+function buildSimDb(realDb, sim) {
+  const d = sim.data;
+  return Object.assign({}, realDb, {
+    registrations: d.registrations,
+    members: d.members,
+    tournaments: d.tournaments,
+    nextIds: d.nextIds,
+    eventTeams: d.eventTeams || [],
+    activityLog: [],
+    __sim: sim.id,
+  });
+}
+function writeSimDb(vdb) {
+  const real = readDb();
+  const sim = real.simulations.find((s) => s.id === vdb.__sim);
+  if (!sim) return;
+  sim.data = { registrations: vdb.registrations, members: vdb.members, tournaments: vdb.tournaments, nextIds: vdb.nextIds, eventTeams: vdb.eventTeams || [] };
+  sim.updatedAt = new Date().toISOString();
+  writeDb(real);
+}
+function simPlayerName(n) {
+  return "SIM Player " + String(n).padStart(3, "0");
+}
+// Builds a fresh sandbox for `ev`. mode: "registrants" (every confirmed real registration, copied),
+// "dummy" (exactly `playerCount` made-up players) or "both" (real registrants topped up with dummy
+// players until `playerCount`). `copySetup` carries over the event's real tournament set-up
+// (format, courts, minutes, start time ...) when there is one, reset to "not started".
+function buildSimData(real, ev, p) {
+  const data = { registrations: [], members: {}, tournaments: [], eventTeams: [], nextIds: { ...real.nextIds } };
+  const nextReg = () => data.nextIds.registration++;
+  if (p.mode === "registrants" || p.mode === "both") {
+    for (const r of real.registrations) {
+      if (r.eventId !== ev.id || r.waitlisted) continue;
+      const m = real.members[r.membershipNumber];
+      if (m && !data.members[m.membershipNumber]) {
+        data.members[m.membershipNumber] = {
+          membershipNumber: m.membershipNumber, name: m.name, nickname: "", gender: m.gender || "", ageGroup: m.ageGroup || "", birthDate: m.birthDate || "", clubId: m.clubId || m.membershipNumber, dependents: [],
+        };
+      }
+      data.registrations.push({ ...r, checkedIn: false, checkInAt: null, position: null, teamId: undefined, waitlisted: false });
+    }
+  }
+  const realCount = data.registrations.length;
+  const target = p.mode === "dummy" ? p.playerCount : p.mode === "both" ? Math.max(p.playerCount, realCount) : realCount;
+  for (let i = realCount; i < target; i++) {
+    const n = i - realCount + 1;
+    const key = "SIM" + String(n).padStart(4, "0");
+    data.members[key] = { membershipNumber: key, name: simPlayerName(n), nickname: "", gender: "", ageGroup: "", birthDate: "", clubId: key, dependents: [] };
+    data.registrations.push({
+      id: nextReg(), membershipNumber: key, eventId: ev.id, dependentId: null, dependentName: null, registeredAt: new Date().toISOString(), earlyRegistration: false,
+      position: null, checkedIn: false, checkInAt: null, waitlisted: false, whatsappConfirmedAt: null,
+      catWomen: Math.random() < 0.12, catJunior: Math.random() < 0.12,
+    });
+  }
+  const t0 = p.copySetup ? (real.tournaments || []).find((t) => t.eventId === ev.id) : null;
+  if (t0) {
+    const t = JSON.parse(JSON.stringify(t0));
+    t.id = data.nextIds.tournament++;
+    Object.assign(t, { teams: [], seedOrder: [], nextMatchId: 1, groups: null, knockout: null, standings: null, pointsAwardedAt: null, attendance: {}, awards: undefined, scorers: undefined, seasonSchedule: undefined, finalsPlan: undefined, estimatedFinishMinutes: undefined, lastGroupSlotEnd: undefined });
+    delete t.awards; delete t.seasonSchedule; delete t.finalsPlan;
+    if (t.format === "swiss" && t.swiss) t.swiss = { ...t.swiss, rounds: [], withdrawn: [], nextPairingId: 1 };
+    if (t.mode === "team") {
+      const size = Math.max(2, Number(p.teamSize) || (t0.teams.length ? Math.round(t0.teams.reduce((a, x) => a + x.memberIds.length, 0) / t0.teams.length) : 5));
+      const ids = data.registrations.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += size) t.teams.push({ id: "team" + (t.teams.length + 1), name: "Team " + (t.teams.length + 1), memberIds: ids.slice(i, i + size) });
+      t.teams = t.teams.filter((x) => x.memberIds.length >= 1);
+    }
+    t.status = t.mode === "team" && t.teams.length < 2 ? "team-setup" : t.format === "casual" ? "casual" : "seeding";
+    data.tournaments.push(t);
+    const vdb = Object.assign({}, real, { registrations: data.registrations, members: data.members, tournaments: data.tournaments, nextIds: data.nextIds, eventTeams: [] });
+    reconcileSeedOrder(vdb, t);
+  }
+  return data;
+}
+function simSummary(real, sim) {
+  const ev = real.events.find((e) => e.id === sim.eventId);
+  const t = sim.data.tournaments[0] || null;
+  return {
+    id: sim.id, eventId: sim.eventId, eventNameEn: ev ? ev.nameEn : "", eventNameAr: ev ? ev.nameAr : "", eventDate: ev ? ev.date : "",
+    name: sim.name, mode: sim.mode, playerCount: sim.data.registrations.length, teamSize: sim.teamSize || null,
+    tournament: t ? { format: t.format, mode: t.mode, status: t.status } : null,
+    createdBy: sim.createdBy, createdAt: sim.createdAt, updatedAt: sim.updatedAt,
+  };
+}
+function simParams(body, ev) {
+  const mode = ["registrants", "dummy", "both"].includes(body.mode) ? body.mode : null;
+  if (!mode) return { error: "mode must be 'registrants', 'dummy' or 'both'" };
+  let playerCount = body.playerCount === undefined || body.playerCount === "" ? Number(ev.maxCapacity) || 16 : Number(body.playerCount);
+  if (mode !== "registrants" && (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > SIM_MAX_PLAYERS)) {
+    return { error: `Number of players must be a whole number from 2 to ${SIM_MAX_PLAYERS}` };
+  }
+  const teamSize = body.teamSize === undefined || body.teamSize === "" ? null : Number(body.teamSize);
+  if (teamSize !== null && (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > 50)) return { error: "Team size must be a whole number from 1 to 50" };
+  const name = String(body.name || "").trim().slice(0, 60);
+  return { mode, playerCount, teamSize, copySetup: body.copySetup !== false, name };
+}
+
+app.get("/api/sim", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const eventId = req.query.eventId !== undefined ? Number(req.query.eventId) : null;
+  const list = (db.simulations || [])
+    .filter((s) => (eventId === null || s.eventId === eventId) && simEventAccess(db, req.staff, s.eventId).ok)
+    .map((s) => simSummary(db, s))
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  res.json({ simulations: list, maxPerEvent: SIM_MAX_PER_EVENT, maxPlayers: SIM_MAX_PLAYERS });
+});
+
+app.post("/api/sim", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const acc = simEventAccess(db, req.staff, req.body.eventId);
+  if (!acc.ok) return res.status(acc.status).json({ error: acc.error });
+  const p = simParams(req.body, acc.ev);
+  if (p.error) return res.status(400).json({ error: p.error });
+  // housekeeping: forget abandoned practice runs
+  const cutoff = Date.now() - SIM_STALE_DAYS * 86400000;
+  db.simulations = (db.simulations || []).filter((s) => new Date(s.updatedAt || s.createdAt).getTime() >= cutoff);
+  if (db.simulations.filter((s) => s.eventId === acc.ev.id).length >= SIM_MAX_PER_EVENT) {
+    return res.status(400).json({ error: `This event already has ${SIM_MAX_PER_EVENT} simulations - delete one first`, code: "sim_limit" });
+  }
+  const data = buildSimData(db, acc.ev, p);
+  if (data.registrations.length < 2) {
+    return res.status(400).json({ error: "This event has fewer than 2 confirmed registrants - choose dummy players (or both) for the simulation", code: "sim_too_few" });
+  }
+  const now = new Date().toISOString();
+  const sim = { id: db.nextIds.simulation++, eventId: acc.ev.id, name: p.name || "", mode: p.mode, playerCount: p.playerCount, teamSize: p.teamSize, copySetup: p.copySetup, createdBy: req.staff.username, createdAt: now, updatedAt: now, data };
+  db.simulations.push(sim);
+  writeDb(db);
+  res.status(201).json({ simulation: simSummary(db, sim) });
+});
+
+app.delete("/api/sim/:id", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const found = simAccess(db, req.staff, req.params.id);
+  if (found.error) return res.status(found.status).json({ error: found.error });
+  db.simulations = db.simulations.filter((s) => s.id !== found.sim.id);
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+// Throws the sandbox away and rebuilds it with the same settings (fresh players, no tournament played).
+app.post("/api/sim/:id/restart", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const found = simAccess(db, req.staff, req.params.id);
+  if (found.error) return res.status(found.status).json({ error: found.error });
+  const sim = found.sim;
+  const ev = db.events.find((e) => e.id === sim.eventId);
+  const data = buildSimData(db, ev, { mode: sim.mode, playerCount: sim.playerCount, teamSize: sim.teamSize, copySetup: sim.copySetup !== false });
+  if (data.registrations.length < 2) return res.status(400).json({ error: "Fewer than 2 players to simulate" });
+  sim.data = data;
+  sim.updatedAt = new Date().toISOString();
+  writeDb(db);
+  res.json({ simulation: simSummary(db, sim) });
+});
+
+// ---- auto-play with random results -------------------------------------------------------
+function simPoisson(lambda) {
+  const L = Math.exp(-lambda);
+  let k = 0, p = 1;
+  do { k++; p *= Math.random(); } while (p > L);
+  return k - 1;
+}
+// strength 0..1 per side; 0.5/0.5 is a pure coin-flip match
+function simScore(sA, sB) {
+  return [simPoisson(0.7 + sA * 1.6), simPoisson(0.7 + sB * 1.6)];
+}
+function simStrengthFn(t, style) {
+  const n = Math.max(1, t.seedOrder.length);
+  return (id) => {
+    if (style !== "seeded") return 0.5;
+    const i = t.seedOrder.indexOf(id);
+    return i < 0 ? 0.5 : 0.75 - (i / n) * 0.5;
+  };
+}
+function simPlayGroups(t, str) {
+  let played = 0;
+  for (const g of t.groups) {
+    for (const m of g.matches) {
+      if (m.result) continue;
+      const [sa, sb] = simScore(str(m.a), str(m.b));
+      m.result = { scoreA: sa, scoreB: sb, winnerId: sa === sb ? null : sa > sb ? m.a : m.b };
+      played++;
+    }
+  }
+  return played;
+}
+function simPlayKnockoutRound(t, ri, str) {
+  let played = 0;
+  const round = t.knockout.rounds[ri];
+  round.forEach((m, mi) => {
+    if (m.bye || m.winnerId || !m.a || !m.b) return;
+    let [sa, sb] = simScore(str(m.a), str(m.b));
+    let winner;
+    if (sa === sb) {
+      winner = Math.random() < 0.5 ? m.a : m.b; // level after extra time - decided on penalties
+      m.note = "pens";
+    } else {
+      winner = sa > sb ? m.a : m.b;
+      m.note = "";
+    }
+    m.scoreA = sa;
+    m.scoreB = sb;
+    propagateKnockoutWinner(t, ri, mi, winner);
+    played++;
+  });
+  return played;
+}
+function simPlayKnockout(t, str, onlyFirstRound) {
+  let played = 0;
+  for (let ri = 0; ri < t.knockout.rounds.length; ri++) {
+    const n = simPlayKnockoutRound(t, ri, str);
+    played += n;
+    if (onlyFirstRound && n > 0) break;
+  }
+  return played;
+}
+function simSwissResult(sA, sB) {
+  const r = Math.random();
+  const pDraw = 0.2;
+  const pA = (1 - pDraw) * (sA / (sA + sB));
+  if (r < pDraw) return "1/2-1/2";
+  return r < pDraw + pA ? "1-0" : "0-1";
+}
+// until: "draw" = only draw the bracket / groups / round 1; "stage" = finish the stage in progress
+// (the group stage, one knockout round or one Swiss round); "end" = play everything to the final.
+function simAutoPlay(vdb, t, until, style) {
+  const str = simStrengthFn(t, style);
+  const out = { played: 0, steps: [] };
+  if (t.format === "casual") return { error: "Fun sessions have no matches to simulate" };
+  if (t.mode === "team" && t.teams.length < 2) return { error: "Define at least 2 teams before simulating" };
+  if (!tournamentIsGenerated(t)) {
+    const made = generateTournamentDraw(vdb, t);
+    if (made.error) return { error: made.error };
+    out.steps.push("draw");
+    if (until === "draw") return out;
+  } else if (until === "draw") {
+    return { error: "The draw has already been made" };
+  }
+  if (t.status === "completed") return { error: "This simulated tournament is already finished" };
+  if (t.format === "swiss") {
+    const sw = t.swiss;
+    for (let guard = 0; guard < 60; guard++) {
+      const last = sw.rounds[sw.rounds.length - 1];
+      if (!last) break;
+      for (const p of last.pairings) {
+        if (p.b == null || p.result != null) continue;
+        p.result = simSwissResult(str(p.a), str(p.b));
+        out.played++;
+      }
+      refreshSwissStatus(vdb, t);
+      out.steps.push("round " + last.number);
+      if (t.status === "completed" || until === "stage") break;
+      const made = generateSwissRound(vdb, t);
+      if (made.error) break;
+    }
+    return out;
+  }
+  if (t.groups && !t.knockout) {
+    out.played += simPlayGroups(t, str);
+    out.steps.push("groups");
+    if (until === "stage") return out;
+    const made = buildKnockoutFromGroups(t);
+    if (made.error) return { error: made.error };
+    out.steps.push("knockout drawn");
+  }
+  if (t.knockout) {
+    out.played += simPlayKnockout(t, str, until === "stage");
+    out.steps.push("knockout");
+  }
+  return out;
+}
+app.post("/api/sim/:id/autoplay", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const found = simAccess(db, req.staff, req.params.id);
+  if (found.error) return res.status(found.status).json({ error: found.error });
+  const sim = found.sim;
+  const until = ["draw", "stage", "end"].includes(req.body.until) ? req.body.until : "end";
+  const style = req.body.style === "seeded" ? "seeded" : "random";
+  const vdb = buildSimDb(db, sim);
+  const t = findTournament(vdb, sim.eventId);
+  if (!t) return res.status(400).json({ error: "Create the tournament in this simulation first (format, mode, courts ...)", code: "sim_no_tournament" });
+  const out = simAutoPlay(vdb, t, until, style);
+  if (out.error) return res.status(400).json({ error: out.error });
+  writeDb(vdb);
+  res.json({ played: out.played, steps: out.steps, tournament: serializeTournament(vdb, t) });
+});
+
+// ---- "what-if" projection: how long will it take with these settings? ------------------------
+// Builds a throw-away bracket / group stage with the REAL scheduling code for N anonymous
+// entrants, so the finish time shown is exactly what the real tournament would be given.
+function projectTournament(cfg) {
+  const players = Number(cfg.players);
+  const courts = Number(cfg.courts);
+  const matchMinutes = Number(cfg.matchMinutes);
+  const breakMinutes = cfg.breakMinutes === undefined || cfg.breakMinutes === "" ? 0 : Number(cfg.breakMinutes);
+  const startTime = String(cfg.startTime || "");
+  if (!Number.isInteger(players) || players < 2 || players > 5000) return { error: "Players must be a whole number of at least 2" };
+  if (!Number.isInteger(courts) || courts < 1) return { error: "Courts must be a whole number of at least 1" };
+  if (!Number.isInteger(matchMinutes) || matchMinutes < 1) return { error: "Minutes per match must be a whole number of at least 1" };
+  if (!Number.isInteger(breakMinutes) || breakMinutes < 0) return { error: "Break must be a whole number of 0 or more" };
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) return { error: "Start time must be in HH:MM format" };
+  const teamSize = Math.max(1, Number(cfg.teamSize) || 1);
+  const entrants = cfg.mode === "team" ? Math.max(2, Math.ceil(players / teamSize)) : players;
+  const format = cfg.format;
+  const startMin = timeStrToMinutes(startTime);
+  const ids = Array.from({ length: entrants }, (_, i) => "e" + (i + 1));
+  const t = { format, courts, matchMinutes, startTime, breakMinutes, nextMatchId: 1, groups: null, knockout: null, finalsMode: cfg.finalsMode === "table" ? "table" : null };
+  let totalMatches = 0;
+  let finishMin;
+  let note = "";
+  if (format === "knockout") {
+    buildKnockoutRounds(t, ids);
+    totalMatches = t.knockout.rounds.reduce((a, r) => a + r.filter((m) => !m.bye).length, 0);
+    finishMin = t.estimatedFinishMinutes;
+  } else if (format === "groups") {
+    const tableFinals = t.finalsMode === "table";
+    const numGroups = tableFinals ? 1 : Number(cfg.numGroups);
+    const advance = tableFinals ? 4 : Number(cfg.advancePerGroup);
+    if (!Number.isInteger(numGroups) || numGroups < 1 || !Number.isInteger(advance) || advance < 1) return { error: "Groups and qualifiers per group must be whole numbers" };
+    if (entrants < numGroups * 2) return { error: `Need at least ${numGroups * 2} entrants for ${numGroups} group(s)` };
+    if (tableFinals && entrants < 4) return { error: "A league with finals needs at least 4 teams" };
+    t.numGroups = numGroups;
+    t.advancePerGroup = advance;
+    buildGroups(t, ids, numGroups);
+    totalMatches = t.groups.reduce((a, g) => a + g.matches.length, 0);
+    if (tableFinals) {
+      const finals = entrants >= 4 ? 2 : 1;
+      totalMatches += finals;
+      finishMin = t.lastGroupSlotEnd + breakMinutes + Math.ceil(finals / courts) * matchMinutes;
+    } else {
+      const q = Math.min(entrants, numGroups * advance);
+      if (q < 2) return { error: "Not enough qualifiers for a knockout stage" };
+      buildKnockoutRounds(t, ids.slice(0, q));
+      totalMatches += t.knockout.rounds.reduce((a, r) => a + r.filter((m) => !m.bye).length, 0);
+      finishMin = t.estimatedFinishMinutes;
+    }
+  } else if (format === "swiss") {
+    const rounds = Number(cfg.swissRounds) || 7;
+    const games = Math.floor(entrants / 2);
+    const waves = Math.max(1, Math.ceil(games / courts));
+    totalMatches = games * rounds;
+    finishMin = startMin + rounds * waves * matchMinutes + (rounds - 1) * breakMinutes;
+    note = `${rounds} rounds x ${waves} wave(s)`;
+  } else {
+    return { error: "Choose knockout, groups or swiss" };
+  }
+  const duration = finishMin - startMin;
+  const availableHours = Number(cfg.availableHours) > 0 ? Number(cfg.availableHours) : null;
+  return {
+    players, entrants, courts, matchMinutes, breakMinutes, startTime, totalMatches,
+    finishTime: minutesToTimeStr(finishMin), durationMinutes: duration, nextDay: finishMin >= 1440, note,
+    fitsAvailableHours: availableHours ? duration <= availableHours * 60 : null,
+  };
+}
+app.post("/api/sim/:id/whatif", requireStaffRole(["tournament"]), (req, res) => {
+  const db = req.db;
+  const found = simAccess(db, req.staff, req.params.id);
+  if (found.error) return res.status(found.status).json({ error: found.error });
+  const sim = found.sim;
+  const t = sim.data.tournaments[0] || null;
+  const base = {
+    format: t ? t.format : undefined, mode: t ? t.mode : "individual", numGroups: t ? t.numGroups : undefined, advancePerGroup: t ? t.advancePerGroup : undefined,
+    finalsMode: t ? t.finalsMode : null, swissRounds: t && t.swiss ? t.swiss.totalRounds : undefined, availableHours: t ? t.availableHours : null,
+    teamSize: sim.teamSize || (t && t.mode === "team" && t.teams.length ? Math.round(t.teams.reduce((a, x) => a + x.memberIds.length, 0) / t.teams.length) : 1),
+    players: sim.data.registrations.length, courts: t ? t.courts : undefined, matchMinutes: t ? t.matchMinutes : undefined, startTime: t ? t.startTime : undefined, breakMinutes: t ? t.breakMinutes : 0,
+  };
+  if (req.body.base && typeof req.body.base === "object") Object.assign(base, req.body.base);
+  const scenarios = Array.isArray(req.body.scenarios) ? req.body.scenarios.slice(0, 12) : [];
+  if (!scenarios.length) return res.status(400).json({ error: "Add at least one scenario to compare" });
+  const results = scenarios.map((sc, i) => {
+    const cfg = { ...base, ...(sc || {}) };
+    const out = projectTournament(cfg);
+    return { label: String((sc && sc.label) || "").slice(0, 40) || "#" + (i + 1), ...(out.error ? { error: out.error } : out) };
+  });
+  res.json({ base: { format: base.format || null, mode: base.mode }, results });
+});
+
 // Public: lightweight list of every event that has a tournament, for the
 // public Tournaments nav tab. Kept separate from serializeTournament (which
 // resolves the full bracket/groups) since the listing page only needs enough
@@ -7475,7 +7930,7 @@ app.get("/api/tournaments/:eventId", (req, res) => {
   res.json({ tournament: serializeTournament(db, t, true) });
 });
 
-app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);
@@ -7515,7 +7970,7 @@ function parseSetupFields(body, current) {
   return result;
 }
 
-app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const event = db.events.find((e) => e.id === eventId);
@@ -7616,7 +8071,7 @@ app.post("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), re
   res.status(201).json({ tournament: serializeTournament(db, t) });
 });
 
-app.delete("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.delete("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const before = db.tournaments.length;
@@ -7630,7 +8085,7 @@ app.delete("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), 
 // registration not included in a team is simply left out of the
 // tournament. Replaces the whole team list each call (simplest mental
 // model - re-submit the full set to make a change).
-app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);
@@ -7664,7 +8119,7 @@ app.put("/api/admin/tournaments/:eventId/teams", requireStaffRole(["tournament"]
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -7686,7 +8141,7 @@ app.put("/api/admin/tournaments/:eventId/seed-order", requireStaffRole(["tournam
 // scratch with the same scheduling algorithm used at generation time;
 // results and winners already recorded are untouched, only when/where each
 // still-to-play match happens moves.
-app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -7729,33 +8184,39 @@ app.put("/api/admin/tournaments/:eventId/schedule", requireStaffRole(["tournamen
 // (format=knockout) from the current seed order. One-way door: once
 // generated, entrants are locked in for this tournament (delete and
 // recreate to change who's playing).
-app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
-  const db = req.db;
-  const t = findTournament(db, Number(req.params.eventId));
-  if (!t) return res.status(404).json({ error: "No tournament for this event" });
-  if (t.format === "casual") return res.status(400).json({ error: "Fun sessions don't use a generated bracket - just track attendance" });
-  if (tournamentIsGenerated(t)) return res.status(400).json({ error: "Already generated for this tournament" });
+// Builds the draw (group stage / knockout bracket / Swiss round 1) from the current seed order.
+// Shared by the real Generate button and the simulation auto-play. Returns { error } or { warnings }.
+function generateTournamentDraw(db, t) {
+  if (t.format === "casual") return { error: "Fun sessions don't use a generated bracket - just track attendance" };
+  if (tournamentIsGenerated(t)) return { error: "Already generated for this tournament" };
   const entrants = reconcileSeedOrder(db, t);
-  if (entrants.length < 2) return res.status(400).json({ error: "Need at least 2 entrants to generate a tournament" });
+  if (entrants.length < 2) return { error: "Need at least 2 entrants to generate a tournament" };
   if (t.format === "swiss") {
     const made = generateSwissRound(db, t);
-    if (made.error) return res.status(400).json({ error: made.error });
-    writeDb(db);
-    return res.json({ tournament: serializeTournament(db, t), warnings: made.warnings });
+    if (made.error) return { error: made.error };
+    return { warnings: made.warnings };
   }
   if (t.format === "groups") {
     if (entrants.length < t.numGroups * 2) {
-      return res.status(400).json({ error: `Need at least ${t.numGroups * 2} entrants for ${t.numGroups} groups (2 per group minimum)` });
+      return { error: `Need at least ${t.numGroups * 2} entrants for ${t.numGroups} groups (2 per group minimum)` };
     }
     if (t.finalsMode === "table" && entrants.length < 4) {
-      return res.status(400).json({ error: "A league with a final and a 3rd-place match needs at least 4 teams" });
+      return { error: "A league with a final and a 3rd-place match needs at least 4 teams" };
     }
     buildGroups(t, t.seedOrder, t.numGroups);
   } else {
     buildKnockoutRounds(t, t.seedOrder);
   }
+  return {};
+}
+app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const made = generateTournamentDraw(db, t);
+  if (made.error) return res.status(400).json({ error: made.error });
   writeDb(db);
-  res.json({ tournament: serializeTournament(db, t) });
+  res.json({ tournament: serializeTournament(db, t), warnings: made.warnings });
 });
 
 // Undoes generation and sends the tournament back to the seeding step, so
@@ -7768,7 +8229,7 @@ app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tourname
 // already exists, the admin needs to delete and recreate the tournament
 // instead - same trade-off already made for editing team rosters/seed
 // order after generation (see the project notes on that decision).
-app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -7810,7 +8271,7 @@ app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament
 // gate check-in regardless of this toggle. Reversible either direction, so
 // an admin who ends a session by mistake (or wants to reopen it for a late
 // arrival) isn't stuck.
-app.put("/api/admin/tournaments/:eventId/casual-status", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/casual-status", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -7866,7 +8327,7 @@ function applyFinalsPlan(t) {
   }
 }
 
-app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
@@ -7921,7 +8382,7 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tourn
 // own gate-scanner check-in, which is about arriving at the venue at all
 // rather than being ready to play a specific match. "not_yet" is just the
 // absence of a key, so clearing it back to not_yet removes the entry.
-app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -7940,29 +8401,34 @@ app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole(["tournam
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
-  const db = req.db;
-  const t = findTournament(db, Number(req.params.eventId));
-  if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
-  if (t.knockout) return res.status(400).json({ error: "Knockout stage already generated" });
+// Draws the knockout stage (or the table finals) from finished group tables. Returns { error } or {}.
+function buildKnockoutFromGroups(t) {
   const undecided = t.groups.reduce((sum, g) => sum + g.matches.filter((m) => !m.result).length, 0);
   if (undecided > 0) {
-    return res.status(400).json({ error: `${undecided} group-stage match(es) still need a result before the knockout stage can be generated` });
+    return { error: `${undecided} group-stage match(es) still need a result before the knockout stage can be generated` };
   }
   const standingsPerGroup = t.groups.map((g) => computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)));
   if (t.finalsMode === "table") {
     buildTableFinals(t, standingsPerGroup[0].map((s) => s.entrantId));
-    writeDb(db);
-    return res.json({ tournament: serializeTournament(db, t) });
+    return {};
   }
   const qualifiers = qualifiersFromGroups(t, standingsPerGroup);
-  if (qualifiers.length < 2) return res.status(400).json({ error: "Not enough qualifiers to build a knockout stage" });
+  if (qualifiers.length < 2) return { error: "Not enough qualifiers to build a knockout stage" };
   buildKnockoutRounds(t, qualifiers);
+  return {};
+}
+app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
+  if (t.knockout) return res.status(400).json({ error: "Knockout stage already generated" });
+  const made = buildKnockoutFromGroups(t);
+  if (made.error) return res.status(400).json({ error: made.error });
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
 
-app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t || !t.knockout) return res.status(404).json({ error: "No knockout bracket for this event" });
@@ -8022,7 +8488,7 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["to
 // Records who scored in one match. Body: { matchId, scorers: [{ registrationId, goals }] }
 // - replaces the match's list. Scorers must belong to one of the two sides and
 // a side's scorers can't add up to more goals than the side's score.
-app.put("/api/admin/tournaments/:eventId/match-scorers", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/match-scorers", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -8068,7 +8534,7 @@ app.put("/api/admin/tournaments/:eventId/match-scorers", requireStaffRole(["tour
 // Sets the tournament awards. Body (any subset): { bestGoalkeeper, bestPlayer }
 // = a registrationId of a player in the tournament, { fairPlay } = an entrant
 // id (a team, or a player in individual mode); null/"" clears one.
-app.put("/api/admin/tournaments/:eventId/awards", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/awards", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
   if (!t) return res.status(404).json({ error: "No tournament for this event" });
@@ -8107,7 +8573,7 @@ app.put("/api/admin/tournaments/:eventId/awards", requireStaffRole(["tournament"
 // admin tool uses, so points calculate identically either way. Safe to
 // call more than once (e.g. after fixing a mistake); each call just
 // re-applies the current standings.
-app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.post("/api/admin/tournaments/:eventId/award-points", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const t = findTournament(db, eventId);
@@ -8468,7 +8934,7 @@ app.post("/api/admin/event-teams/:id/remove", requireStaffRole(["tournament"]), 
 
 // Fills a team-mode tournament's teams from the event's confirmed registered
 // teams. Teams below the minimum squad size are left out unless asked for.
-app.post("/api/admin/tournaments/:eventId/import-teams", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.post("/api/admin/tournaments/:eventId/import-teams", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const ev = db.events.find((e) => e.id === eventId);
@@ -8509,7 +8975,7 @@ function swissFor(db, req, res) {
 }
 
 // Draws round 2..N (round 1 comes from the normal "generate" step).
-app.post("/api/admin/tournaments/:eventId/swiss/next-round", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.post("/api/admin/tournaments/:eventId/swiss/next-round", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -8522,7 +8988,7 @@ app.post("/api/admin/tournaments/:eventId/swiss/next-round", requireStaffRole(["
 
 // Removes the newest round, only while none of its games has a result - so a
 // draw made before everyone arrived can be redone.
-app.post("/api/admin/tournaments/:eventId/swiss/undo-round", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.post("/api/admin/tournaments/:eventId/swiss/undo-round", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -8539,7 +9005,7 @@ app.post("/api/admin/tournaments/:eventId/swiss/undo-round", requireStaffRole(["
 });
 
 // Records (or corrects, or clears) one game's result.
-app.put("/api/admin/tournaments/:eventId/swiss/result", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/swiss/result", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -8569,7 +9035,7 @@ app.put("/api/admin/tournaments/:eventId/swiss/result", requireStaffRole(["tourn
 // Arbiter override on the newest round: swap two players' places (or, naming
 // the two players of one board, flip their colours). Only boards with no
 // result yet can change. Rematches it creates are reported, not blocked.
-app.put("/api/admin/tournaments/:eventId/swiss/swap", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/swiss/swap", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -8613,7 +9079,7 @@ app.put("/api/admin/tournaments/:eventId/swiss/swap", requireStaffRole(["tournam
 
 // A player leaving the event: stays in the standings with the points they
 // scored but is not drawn into further rounds. Reversible.
-app.put("/api/admin/tournaments/:eventId/swiss/withdraw", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/swiss/withdraw", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -8630,7 +9096,7 @@ app.put("/api/admin/tournaments/:eventId/swiss/withdraw", requireStaffRole(["tou
 });
 
 // Venue / organizer / time-control text used by the printable regulation sheet.
-app.put("/api/admin/tournaments/:eventId/swiss/info", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/swiss/info", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -8654,7 +9120,7 @@ app.put("/api/admin/tournaments/:eventId/swiss/info", requireStaffRole(["tournam
 // Admin-editable settings: how many rounds the event plays and the (optional)
 // prize amounts per ranking. Rounds can be raised or lowered any time as long
 // as it isn't below the rounds already drawn and points haven't been awarded.
-app.put("/api/admin/tournaments/:eventId/swiss/settings", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/swiss/settings", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = swissFor(db, req, res);
   if (!t) return;
@@ -9205,7 +9671,7 @@ app.get("/birthday/:token", (req, res) => {
 
 // Staff correction of a player's Women / Juniors ranking categories (e.g.
 // after checking age or ID at the door). Allowed at any time.
-app.put("/api/admin/tournaments/:eventId/categories", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+app.put("/api/admin/tournaments/:eventId/categories", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const eventId = Number(req.params.eventId);
   const reg = db.registrations.find((r) => r.id === Number(req.body.registrationId) && r.eventId === eventId);
