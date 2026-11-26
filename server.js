@@ -7974,7 +7974,8 @@ app.get("/api/me/tournament-matches", requireMember, (req, res) => {
   const evIds = new Set(db.registrations.filter((r) => r.membershipNumber === member.membershipNumber && !r.waitlisted).map((r) => r.eventId));
   const out = [];
   for (const t of db.tournaments) {
-    if (!evIds.has(t.eventId) || !t.playerScores || !tournamentIsGenerated(t)) continue;
+    if (!evIds.has(t.eventId) || !tournamentIsGenerated(t)) continue;
+    const scoring = psActive(t); // players only get score buttons while the manager has the switch on
     const ev = db.events.find((e) => e.id === t.eventId);
     const ents = tournamentEntrants(db, t, true);
     const labelOf = (id) => { const e = ents.find((x) => x.id === id); return e ? e.label : ""; };
@@ -7983,12 +7984,13 @@ app.get("/api/me/tournament-matches", requireMember, (req, res) => {
       if (!a || !b) return;
       const side = psSide(db, t, member, a, b);
       if (!side) return;
-      let state = "to_report";
+      let state = scoring ? "to_report" : "scheduled";
       if (decided) state = "done";
+      else if (!scoring) state = "scheduled";
       else if (m.report) state = m.report.status === "disputed" ? "disputed" : m.report.side === side ? "waiting_opponent" : "to_confirm";
       items.push({
         eventId: t.eventId, eventNameEn: ev ? ev.nameEn : "", eventNameAr: ev ? ev.nameAr : "", kind, ...extra, court: m.court || null, time: m.time || null,
-        side, aLabel: labelOf(a), bLabel: labelOf(b), state, result: decided ? result : null,
+        side, aLabel: labelOf(a), bLabel: labelOf(b), state, scoring, result: decided ? result : null,
         report: m.report && !decided ? { side: m.report.side, scoreA: m.report.scoreA, scoreB: m.report.scoreB, winnerId: m.report.winnerId || null, result: m.report.result || null, status: m.report.status, disputeNote: m.report.disputeNote || "", at: m.report.at } : null,
         aId: a, bId: b,
       });
@@ -7999,8 +8001,8 @@ app.get("/api/me/tournament-matches", requireMember, (req, res) => {
     const done = items.filter((x) => x.state === "done").slice(-4);
     out.push(...items.filter((x) => x.state !== "done"), ...done);
   }
-  const order = { to_confirm: 0, disputed: 1, to_report: 2, waiting_opponent: 3, done: 4 };
-  out.sort((x, y) => order[x.state] - order[y.state]);
+  const order = { to_confirm: 0, disputed: 1, to_report: 2, waiting_opponent: 3, scheduled: 4, done: 5 };
+  out.sort((x, y) => order[x.state] - order[y.state] || String(x.time || "99:99").localeCompare(String(y.time || "99:99")) || (x.court || 99) - (y.court || 99));
   res.json({ matches: out.slice(0, 60) });
 });
 
