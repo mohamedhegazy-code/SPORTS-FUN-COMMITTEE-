@@ -864,6 +864,20 @@ function readDb() {
   if (typeof db.landingPage.whatsapp.bodyAr !== "string") db.landingPage.whatsapp.bodyAr = "";
   if (typeof db.landingPage.whatsapp.qrImage !== "string") db.landingPage.whatsapp.qrImage = "";
   if (typeof db.landingPage.whatsapp.link !== "string") db.landingPage.whatsapp.link = "";
+  // One-time seed of the club's WhatsApp Community invite link (used by the landing page button and by the
+  // confirmation / reminder / event-day WhatsApp messages). Seeded once, so an admin can still change or clear it.
+  if (!db.landingPage.whatsapp.linkSeeded) {
+    if (!db.landingPage.whatsapp.link) db.landingPage.whatsapp.link = "https://chat.whatsapp.com/IiF2wsmyiwuEUKMga84dnN";
+    db.landingPage.whatsapp.linkSeeded = true;
+  }
+  // Links that are added to the WhatsApp confirmation / reminder / event-day messages (admin tab "Message links").
+  // Seeded once with the site and the community invite; after that the admin owns the list.
+  if (!Array.isArray(db.messageLinks)) {
+    db.messageLinks = [
+      { id: 1, titleEn: "For more information visit MyAhlawy", titleAr: "لمزيد من المعلومات زر موقع MyAhlawy", url: "https://myahlawy.com", enabled: true },
+      { id: 2, titleEn: "Join our WhatsApp community", titleAr: "انضم إلى مجتمعنا على واتساب", url: db.landingPage.whatsapp.link || "https://chat.whatsapp.com/IiF2wsmyiwuEUKMga84dnN", enabled: true },
+    ];
+  }
   // The committee's shared WhatsApp number (members tap a button to start a chat with it).
   if (typeof db.landingPage.whatsapp.committeePhone !== "string") db.landingPage.whatsapp.committeePhone = "";
   // Public contact form block: title/intro shown above the form on the
@@ -2975,6 +2989,8 @@ app.post(
       endDate,
       startTime,
       endTime,
+      locationAr,
+      locationEn,
       earlyDeadline,
       descriptionEn,
       descriptionAr,
@@ -3046,6 +3062,9 @@ app.post(
       endDate: parsedEndDate,
       startTime: parsedStartTime,
       endTime: parsedEndTime,
+      // Where inside the club the event takes place - used in the WhatsApp confirmation / reminder messages.
+      locationAr: String(locationAr || "").trim().slice(0, 120),
+      locationEn: String(locationEn || "").trim().slice(0, 120),
       earlyDeadline: earlyDeadline || null,
       descriptionEn: descriptionEn || "",
       descriptionAr: descriptionAr || "",
@@ -3114,6 +3133,8 @@ app.put(
       endDate,
       startTime,
       endTime,
+      locationAr,
+      locationEn,
       earlyDeadline,
       descriptionEn,
       descriptionAr,
@@ -3161,6 +3182,8 @@ app.put(
     event.endDate = parsedEndDate;
     event.startTime = parsedStartTime;
     event.endTime = parsedEndTime;
+    event.locationAr = String(locationAr || "").trim().slice(0, 120);
+    event.locationEn = String(locationEn || "").trim().slice(0, 120);
     event.earlyDeadline = earlyDeadline || null;
     event.descriptionEn = descriptionEn || "";
     event.descriptionAr = descriptionAr || "";
@@ -3735,6 +3758,7 @@ app.put("/api/admin/landing/whatsapp", requireStaffRole("admin"), uploadEventPho
     bodyEn: (bodyEn || "").trim(),
     bodyAr: (bodyAr || "").trim(),
     link: (link || "").trim(),
+    linkSeeded: true, // an admin has saved this block: never re-seed the default invite link over their choice
     qrImage: req.file
       ? `/uploads/events/${req.file.filename}`
       : removeQrImage === "true"
@@ -6535,7 +6559,31 @@ app.get("/api/settings", (req, res) => {
     landingPage: db.landingPage,
     terms: db.termsAndConditions,
     committeeTierLabels: db.committeeTierLabels,
+    // Only the links switched on, in order - they are public by nature (they go into messages to members).
+    messageLinks: (db.messageLinks || []).filter((l) => l.enabled && l.url),
   });
+});
+
+// Links shown at the end of the WhatsApp confirmation / reminder / event-day messages.
+app.get("/api/admin/message-links", requireStaffRole("admin"), (req, res) => {
+  res.json({ links: req.db.messageLinks || [] });
+});
+app.put("/api/admin/message-links", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const raw = req.body && req.body.links;
+  if (!Array.isArray(raw) || raw.length > 12) return res.status(400).json({ error: "Send a list of up to 12 links" });
+  const links = [];
+  for (const [i, l] of raw.entries()) {
+    const titleEn = String((l && l.titleEn) || "").trim().slice(0, 100);
+    const titleAr = String((l && l.titleAr) || "").trim().slice(0, 100);
+    const url = String((l && l.url) || "").trim();
+    if (!titleEn && !titleAr) return res.status(400).json({ error: `Link ${i + 1}: add a title (Arabic or English)` });
+    if (!/^https?:\/\/[^\s]{3,490}$/i.test(url)) return res.status(400).json({ error: `Link ${i + 1}: the address must start with http:// or https://` });
+    links.push({ id: i + 1, titleEn, titleAr, url, enabled: l.enabled !== false });
+  }
+  db.messageLinks = links;
+  writeDb(db);
+  res.json({ links });
 });
 
 app.put("/api/settings", requireStaffRole("admin"), (req, res) => {
