@@ -7236,6 +7236,7 @@ function serializeSwiss(db, t, entrants, labelOf, forPublic) {
       aLabel: labelOf(p.a),
       bLabel: p.b != null ? labelOf(p.b) : null,
       result: p.result,
+      report: forPublic ? null : p.report || null,
     })),
   }));
   const last = sw.rounds[sw.rounds.length - 1];
@@ -7407,7 +7408,7 @@ function serializeTournament(db, t, forPublic) {
     ? t.groups.map((g) => ({
         entrantIds: g.entrantIds,
         standings: computeGroupStandings(g, t.seedOrder, pointsConfigOf(t)).map((s) => ({ ...s, label: labelOf(s.entrantId) })),
-        matches: g.matches.map((m) => ({ ...m, aLabel: labelOf(m.a), bLabel: labelOf(m.b), scorers: matchScorersOut(db, t, entrants, m, forPublic) })),
+        matches: g.matches.map((m) => ({ ...m, report: forPublic ? undefined : m.report, aLabel: labelOf(m.a), bLabel: labelOf(m.b), scorers: matchScorersOut(db, t, entrants, m, forPublic) })),
       }))
     : null;
   const knockout = t.knockout
@@ -7416,6 +7417,7 @@ function serializeTournament(db, t, forPublic) {
         rounds: t.knockout.rounds.map((round) =>
           round.map((m) => ({
             ...m,
+            report: forPublic ? undefined : m.report,
             aLabel: m.a ? labelOf(m.a) : null,
             bLabel: m.b ? labelOf(m.b) : null,
             scorers: matchScorersOut(db, t, entrants, m, forPublic),
@@ -7448,6 +7450,7 @@ function serializeTournament(db, t, forPublic) {
     advancePerGroup: t.advancePerGroup,
     finalsMode: t.finalsMode || null,
     h2hTiebreak: !!t.h2hTiebreak,
+    playerScores: !!t.playerScores,
     seasonSchedule: t.seasonSchedule || null,
     winPoints: pointsConfigOf(t).win,
     drawPoints: pointsConfigOf(t).draw,
@@ -7889,6 +7892,203 @@ app.post("/api/sim/:id/whatif", requireStaffRole(["tournament"]), (req, res) => 
   res.json({ base: { format: base.format || null, mode: base.mode }, results });
 });
 
+// =========================================================================
+// PLAYER-REPORTED SCORES
+// =========================================================================
+// When the manager switches "Players report their own scores" on for a tournament, a player (or any
+// member of their team) can enter the score of their own match from their member account. The
+// opponent then confirms it (becoming the official result through the very same code the manager's
+// Save uses) or disputes it (the manager decides). The manager can always edit or replace any result.
+// A report lives on the match as `report` and is never exposed on public pages.
+function psActive(t) {
+  return !!(t && t.playerScores && tournamentIsGenerated(t) && t.status !== "completed");
+}
+function psFindMatch(t, ref) {
+  if (ref.kind === "gr" && t.groups) {
+    for (const g of t.groups) {
+      const m = g.matches.find((x) => x.id === ref.matchId);
+      if (m) return { kind: "gr", match: m, a: m.a, b: m.b, decided: !!m.result, ready: true };
+    }
+  } else if (ref.kind === "ko" && t.knockout) {
+    const round = t.knockout.rounds[ref.roundIndex];
+    const mi = round ? round.findIndex((x) => x.id === ref.matchId) : -1;
+    if (mi >= 0) {
+      const m = round[mi];
+      return { kind: "ko", match: m, ri: ref.roundIndex, mi, a: m.a, b: m.b, decided: !!m.winnerId, ready: !m.bye && !!m.a && !!m.b };
+    }
+  } else if (ref.kind === "sw" && t.swiss) {
+    const round = t.swiss.rounds.find((r) => r.number === ref.roundNumber);
+    const p = round ? round.pairings.find((x) => x.id === ref.matchId) : null;
+    if (p) return { kind: "sw", match: p, round, a: p.a, b: p.b, decided: p.result != null, ready: p.b != null };
+  }
+  return null;
+}
+function psSide(db, t, member, aId, bId) {
+  const ents = tournamentEntrants(db, t);
+  const mine = new Set(db.registrations.filter((r) => r.eventId === t.eventId && !r.waitlisted && r.membershipNumber === member.membershipNumber).map((r) => r.id));
+  const hit = (id) => { const e = ents.find((x) => x.id === id); return !!e && e.registrationIds.some((r) => mine.has(r)); };
+  const ha = hit(aId), hb = hit(bId);
+  return ha && !hb ? "a" : hb && !ha ? "b" : null;
+}
+function psRefOf(body) {
+  return { kind: String(body.kind || ""), matchId: Number(body.matchId), roundIndex: Number(body.roundIndex), roundNumber: Number(body.roundNumber) };
+}
+// Shared checks for every member action. Replies and returns null on failure.
+function psContext(req, res) {
+  const db = req.db;
+  const t = findTournament(db, Number(req.body.eventId));
+  if (!t || !psActive(t)) { res.status(403).json({ error: "Players can't enter scores for this tournament right now" }); return null; }
+  const found = psFindMatch(t, psRefOf(req.body));
+  if (!found) { res.status(404).json({ error: "No such match" }); return null; }
+  if (!found.ready) { res.status(409).json({ error: "This match isn't ready to be played yet" }); return null; }
+  const side = psSide(db, t, req.member, found.a, found.b);
+  if (!side) { res.status(403).json({ error: "You are not playing in this match" }); return null; }
+  return { db, t, found, side };
+}
+function psParseScore(found, body) {
+  if (found.kind === "sw") {
+    if (!["1-0", "0-1", "1/2-1/2"].includes(body.result)) return { error: "result must be 1-0, 0-1 or 1/2-1/2" };
+    return { result: body.result };
+  }
+  const sa = Number(body.scoreA), sb = Number(body.scoreB);
+  if (!Number.isInteger(sa) || sa < 0 || sa > 999 || !Number.isInteger(sb) || sb < 0 || sb > 999) return { error: "Both scores must be whole numbers of 0 or more" };
+  if (found.kind === "gr") return { scoreA: sa, scoreB: sb };
+  let winnerId;
+  if (sa !== sb) winnerId = sa > sb ? found.a : found.b;
+  else if (body.winner === "a") winnerId = found.a;
+  else if (body.winner === "b") winnerId = found.b;
+  else return { error: "The score is level - say who won (for example on penalties)", code: "winner_needed" };
+  return { scoreA: sa, scoreB: sb, winnerId };
+}
+function psLog(db, req, action, details) {
+  logActivity(db, { actorType: "member", actorId: req.member.membershipNumber, actorName: req.member.name, action, details });
+}
+function psEventName(db, t) {
+  const ev = db.events.find((e) => e.id === t.eventId);
+  return ev ? ev.nameEn : "event " + t.eventId;
+}
+
+app.get("/api/me/tournament-matches", requireMember, (req, res) => {
+  const db = req.db;
+  const member = req.member;
+  const evIds = new Set(db.registrations.filter((r) => r.membershipNumber === member.membershipNumber && !r.waitlisted).map((r) => r.eventId));
+  const out = [];
+  for (const t of db.tournaments) {
+    if (!evIds.has(t.eventId) || !t.playerScores || !tournamentIsGenerated(t)) continue;
+    const ev = db.events.find((e) => e.id === t.eventId);
+    const ents = tournamentEntrants(db, t, true);
+    const labelOf = (id) => { const e = ents.find((x) => x.id === id); return e ? e.label : ""; };
+    const items = [];
+    const push = (kind, m, a, b, extra, decided, result) => {
+      if (!a || !b) return;
+      const side = psSide(db, t, member, a, b);
+      if (!side) return;
+      let state = "to_report";
+      if (decided) state = "done";
+      else if (m.report) state = m.report.status === "disputed" ? "disputed" : m.report.side === side ? "waiting_opponent" : "to_confirm";
+      items.push({
+        eventId: t.eventId, eventNameEn: ev ? ev.nameEn : "", eventNameAr: ev ? ev.nameAr : "", kind, ...extra, court: m.court || null, time: m.time || null,
+        side, aLabel: labelOf(a), bLabel: labelOf(b), state, result: decided ? result : null,
+        report: m.report && !decided ? { side: m.report.side, scoreA: m.report.scoreA, scoreB: m.report.scoreB, winnerId: m.report.winnerId || null, result: m.report.result || null, status: m.report.status, disputeNote: m.report.disputeNote || "", at: m.report.at } : null,
+        aId: a, bId: b,
+      });
+    };
+    if (t.groups) t.groups.forEach((g, gi) => g.matches.forEach((m) => push("gr", m, m.a, m.b, { matchId: m.id, stage: { type: "group", groupIndex: gi } }, !!m.result, m.result ? { scoreA: m.result.scoreA, scoreB: m.result.scoreB, winnerId: m.result.winnerId } : null)));
+    if (t.knockout) t.knockout.rounds.forEach((round, ri) => round.forEach((m) => { if (!m.bye) push("ko", m, m.a, m.b, { matchId: m.id, roundIndex: ri, stage: { type: "ko", roundIndex: ri, totalRounds: t.knockout.rounds.length, place: m.place || null, table: t.finalsMode === "table" } }, !!m.winnerId, m.winnerId ? { scoreA: m.scoreA, scoreB: m.scoreB, winnerId: m.winnerId } : null); }));
+    if (t.swiss) t.swiss.rounds.forEach((r) => r.pairings.forEach((p) => { if (p.b != null) push("sw", p, p.a, p.b, { matchId: p.id, roundNumber: r.number, stage: { type: "swiss", roundNumber: r.number } }, p.result != null, p.result != null ? { result: p.result } : null); }));
+    const done = items.filter((x) => x.state === "done").slice(-4);
+    out.push(...items.filter((x) => x.state !== "done"), ...done);
+  }
+  const order = { to_confirm: 0, disputed: 1, to_report: 2, waiting_opponent: 3, done: 4 };
+  out.sort((x, y) => order[x.state] - order[y.state]);
+  res.json({ matches: out.slice(0, 60) });
+});
+
+app.post("/api/me/tournament-matches/report", requireMember, (req, res) => {
+  const ctx = psContext(req, res);
+  if (!ctx) return;
+  const { db, t, found, side } = ctx;
+  if (found.decided) return res.status(409).json({ error: "A result is already recorded for this match" });
+  const m = found.match;
+  if (m.report) {
+    if (m.report.status === "disputed") return res.status(409).json({ error: "This score is disputed - the tournament manager will decide" });
+    if (m.report.side !== side) return res.status(409).json({ error: "Your opponent already entered a score - open it and confirm or dispute it", code: "opponent_reported" });
+  }
+  const parsed = psParseScore(found, req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error, code: parsed.code });
+  m.report = { ...parsed, side, by: req.member.membershipNumber, byName: req.member.name, at: new Date().toISOString(), status: "pending" };
+  psLog(db, req, "tournament_score_reported", `${psEventName(db, t)} - match ${found.kind}${found.match.id}`);
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+app.post("/api/me/tournament-matches/confirm", requireMember, (req, res) => {
+  const ctx = psContext(req, res);
+  if (!ctx) return;
+  const { db, t, found, side } = ctx;
+  if (found.decided) return res.status(409).json({ error: "A result is already recorded for this match" });
+  const rep = found.match.report;
+  if (!rep || rep.status !== "pending") return res.status(409).json({ error: "There is no score waiting for your confirmation" });
+  if (rep.side === side) return res.status(403).json({ error: "Your opponent has to confirm the score you entered" });
+  let applied = {};
+  if (found.kind === "gr") applied = applyGroupResult(db, t, found.match, rep.scoreA, rep.scoreB);
+  else if (found.kind === "ko") applied = applyKnockoutResult(db, t, found.ri, found.mi, rep.scoreA, rep.scoreB, rep.winnerId, "");
+  else { found.match.result = rep.result; delete found.match.report; refreshSwissStatus(db, t); }
+  if (applied.error) return res.status(applied.status).json({ error: applied.error });
+  psLog(db, req, "tournament_score_confirmed", `${psEventName(db, t)} - match ${found.kind}${found.match.id}`);
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+app.post("/api/me/tournament-matches/dispute", requireMember, (req, res) => {
+  const ctx = psContext(req, res);
+  if (!ctx) return;
+  const { db, t, found, side } = ctx;
+  const rep = found.match.report;
+  if (found.decided || !rep || rep.status !== "pending") return res.status(409).json({ error: "There is no score waiting for your answer" });
+  if (rep.side === side) return res.status(403).json({ error: "Only your opponent can dispute the score you entered" });
+  rep.status = "disputed";
+  rep.disputeNote = String(req.body.note || "").trim().slice(0, 200);
+  rep.disputedAt = new Date().toISOString();
+  psLog(db, req, "tournament_score_disputed", `${psEventName(db, t)} - match ${found.kind}${found.match.id}`);
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+app.post("/api/me/tournament-matches/retract", requireMember, (req, res) => {
+  const ctx = psContext(req, res);
+  if (!ctx) return;
+  const { db, found, side } = ctx;
+  const rep = found.match.report;
+  if (found.decided || !rep) return res.status(409).json({ error: "Nothing to take back" });
+  if (rep.side !== side) return res.status(403).json({ error: "You can only take back a score you entered" });
+  delete found.match.report;
+  writeDb(db);
+  res.json({ ok: true });
+});
+
+// Manager: switch the feature on/off for one tournament.
+app.put("/api/admin/tournaments/:eventId/player-scores", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (t.format === "casual") return res.status(400).json({ error: "Fun sessions have no scores to report" });
+  t.playerScores = req.body.enabled === true;
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+// Manager: throw away a player's report without recording a result (e.g. a dispute that was settled elsewhere).
+app.put("/api/admin/tournaments/:eventId/report-clear", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  const found = psFindMatch(t, psRefOf(req.body));
+  if (!found) return res.status(404).json({ error: "No such match" });
+  delete found.match.report;
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
 // Public: lightweight list of every event that has a tournament, for the
 // public Tournaments nav tab. Kept separate from serializeTournament (which
 // resolves the full bracket/groups) since the listing page only needs enough
@@ -8327,24 +8527,11 @@ function applyFinalsPlan(t) {
   }
 }
 
-app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
-  const db = req.db;
-  const t = findTournament(db, Number(req.params.eventId));
-  if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
-  const { matchId, scoreA, scoreB } = req.body;
-  let match = null;
-  for (const g of t.groups) {
-    match = g.matches.find((m) => m.id === Number(matchId));
-    if (match) break;
-  }
-  if (!match) return res.status(404).json({ error: "No such match" });
-  const sa = Number(scoreA);
-  const sb = Number(scoreB);
-  if (!Number.isInteger(sa) || sa < 0 || !Number.isInteger(sb) || sb < 0) {
-    return res.status(400).json({ error: "scoreA and scoreB must both be whole numbers of 0 or more" });
-  }
+// Records a group-stage result (shared by the manager's Save and a player's confirmed report).
+// Returns {} or { status, error, code }.
+function applyGroupResult(db, t, match, sa, sb) {
   if (scorersConflict(t, db, match, sa, sb)) {
-    return res.status(409).json({ error: "This match already has scorers recorded for more goals than the new score - edit the scorers first.", code: "scorers_exceed_score" });
+    return { status: 409, error: "This match already has scorers recorded for more goals than the new score - edit the scorers first.", code: "scorers_exceed_score" };
   }
   const winnerId = sa === sb ? null : sa > sb ? match.a : match.b;
   const previous = match.result;
@@ -8369,9 +8556,30 @@ app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tourn
     }
     if (!same) {
       match.result = previous;
-      return res.status(400).json({ error: "The knockout stage was already drawn from these group tables - this correction would change who qualifies. Delete and recreate the tournament if the result really has to change." });
+      return { status: 400, error: "The knockout stage was already drawn from these group tables - this correction would change who qualifies. Delete and recreate the tournament if the result really has to change." };
     }
   }
+  delete match.report; // a manager's / confirmed result replaces any player report
+  return {};
+}
+app.put("/api/admin/tournaments/:eventId/group-result", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t || !t.groups) return res.status(404).json({ error: "No group stage for this event" });
+  const { matchId, scoreA, scoreB } = req.body;
+  let match = null;
+  for (const g of t.groups) {
+    match = g.matches.find((m) => m.id === Number(matchId));
+    if (match) break;
+  }
+  if (!match) return res.status(404).json({ error: "No such match" });
+  const sa = Number(scoreA);
+  const sb = Number(scoreB);
+  if (!Number.isInteger(sa) || sa < 0 || !Number.isInteger(sb) || sb < 0) {
+    return res.status(400).json({ error: "scoreA and scoreB must both be whole numbers of 0 or more" });
+  }
+  const applied = applyGroupResult(db, t, match, sa, sb);
+  if (applied.error) return res.status(applied.status).json({ error: applied.error, code: applied.code });
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
@@ -8428,6 +8636,37 @@ app.post("/api/admin/tournaments/:eventId/generate-knockout", requireStaffRole([
   res.json({ tournament: serializeTournament(db, t) });
 });
 
+// Records a knockout result (shared by the manager's Save and a player's confirmed report).
+// `match` is round[mIdx]; sa/sb are integers or null; finalWinnerId must be one of the two sides.
+function applyKnockoutResult(db, t, rIdx, mIdx, sa, sb, finalWinnerId, note) {
+  const match = t.knockout.rounds[rIdx][mIdx];
+  if (finalWinnerId !== match.a && finalWinnerId !== match.b) {
+    return { status: 400, error: "winnerId must be one of the match's two entrants" };
+  }
+  if (sa !== null && sb !== null && scorersConflict(t, db, match, sa, sb)) {
+    return { status: 409, error: "This match already has scorers recorded for more goals than the new score - edit the scorers first.", code: "scorers_exceed_score" };
+  }
+  // Correcting a score without changing who won is always safe. Changing
+  // who won is only safe if the next round hasn't already been decided off
+  // the old winner - otherwise the next match (and anything past it) would
+  // be left pointing at a matchup that never happened. Ask the admin to
+  // undo/edit that later match first rather than silently cascading.
+  if (match.winnerId && finalWinnerId !== match.winnerId) {
+    const nextRound = t.knockout.rounds[rIdx + 1];
+    if (nextRound) {
+      const nextMatch = nextRound[Math.floor(mIdx / 2)];
+      if (nextMatch.winnerId) {
+        return { status: 400, error: "Can't change the winner - the next round's match already has a result. Edit or undo that match first." };
+      }
+    }
+  }
+  match.scoreA = sa;
+  match.scoreB = sb;
+  match.note = typeof note === "string" ? note.slice(0, 60) : "";
+  delete match.report; // a manager's / confirmed result replaces any player report
+  propagateKnockoutWinner(t, rIdx, mIdx, finalWinnerId);
+  return {};
+}
 app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
   const t = findTournament(db, Number(req.params.eventId));
@@ -8457,30 +8696,8 @@ app.put("/api/admin/tournaments/:eventId/knockout-result", requireStaffRole(["to
   }
   let finalWinnerId = winnerId;
   if (sa !== null && sb !== null && sa !== sb) finalWinnerId = sa > sb ? match.a : match.b;
-  if (finalWinnerId !== match.a && finalWinnerId !== match.b) {
-    return res.status(400).json({ error: "winnerId must be one of the match's two entrants" });
-  }
-  if (sa !== null && sb !== null && scorersConflict(t, db, match, sa, sb)) {
-    return res.status(409).json({ error: "This match already has scorers recorded for more goals than the new score - edit the scorers first.", code: "scorers_exceed_score" });
-  }
-  // Correcting a score without changing who won is always safe. Changing
-  // who won is only safe if the next round hasn't already been decided off
-  // the old winner - otherwise the next match (and anything past it) would
-  // be left pointing at a matchup that never happened. Ask the admin to
-  // undo/edit that later match first rather than silently cascading.
-  if (match.winnerId && finalWinnerId !== match.winnerId) {
-    const nextRound = t.knockout.rounds[rIdx + 1];
-    if (nextRound) {
-      const nextMatch = nextRound[Math.floor(mIdx / 2)];
-      if (nextMatch.winnerId) {
-        return res.status(400).json({ error: "Can't change the winner - the next round's match already has a result. Edit or undo that match first." });
-      }
-    }
-  }
-  match.scoreA = sa;
-  match.scoreB = sb;
-  match.note = typeof note === "string" ? note.slice(0, 60) : "";
-  propagateKnockoutWinner(t, rIdx, mIdx, finalWinnerId);
+  const applied = applyKnockoutResult(db, t, rIdx, mIdx, sa, sb, finalWinnerId, note);
+  if (applied.error) return res.status(applied.status).json({ error: applied.error, code: applied.code });
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
 });
@@ -9027,6 +9244,7 @@ app.put("/api/admin/tournaments/:eventId/swiss/result", requireStaffRole(["tourn
     }
     pairing.result = result;
   }
+  delete pairing.report; // a manager's result replaces any player report
   refreshSwissStatus(db, t);
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
