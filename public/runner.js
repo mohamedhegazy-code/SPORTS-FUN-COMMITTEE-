@@ -139,9 +139,43 @@ function rnPlayedRowHtml(m) {
     <button type="button" class="secondary small" data-rn-act="edit">${escapeAttr(t("rnEdit"))}</button>
   </div>`;
 }
+// Courts x stages grid: how many matches each court hosts in every round (group
+// stage counts as one column), with how many are already played, so the organiser
+// can see at a glance that the courts are evenly loaded.
+function rnCourtChartHtml() {
+  const tn = TOURNAMENT_DATA;
+  const courts = tn.schedule && tn.schedule.courts ? tn.schedule.courts : 0;
+  if (!courts) return "";
+  const cols = [];
+  if (tn.groups) cols.push({ label: t("rnCcGroups"), items: tn.groups.flatMap((g) => g.matches.map((m) => ({ court: m.court, done: !!m.result }))) });
+  if (tn.knockout) tn.knockout.rounds.forEach((round, ri) => {
+    const real = round.filter((m) => !m.bye);
+    if (real.length) cols.push({ label: rnStageLabel(tn, ri, round[0] || {}), items: real.map((m) => ({ court: m.court, done: !!m.winnerId })) });
+  });
+  if (!cols.length) return "";
+  const rows = Array.from({ length: courts }, (_, i) => i + 1);
+  const unassigned = cols.some((c) => c.items.some((m) => !m.court || m.court > courts));
+  if (unassigned) rows.push(0);
+  const cell = (items) => ({ n: items.length, d: items.filter((m) => m.done).length });
+  const inRow = (c, items) => items.filter((m) => (c === 0 ? !m.court || m.court > courts : m.court === c));
+  const grid = rows.map((c) => cols.map((col) => cell(inRow(c, col.items))));
+  const maxN = Math.max(1, ...grid.flat().map((x) => x.n));
+  const rowTotals = grid.map((r) => r.reduce((a, x) => ({ n: a.n + x.n, d: a.d + x.d }), { n: 0, d: 0 }));
+  const colTotals = cols.map((_, j) => grid.reduce((a, r) => ({ n: a.n + r[j].n, d: a.d + r[j].d }), { n: 0, d: 0 }));
+  const all = rowTotals.reduce((a, x) => ({ n: a.n + x.n, d: a.d + x.d }), { n: 0, d: 0 });
+  const td = (x, cls) => `<td class="${cls || ""}"${x.n ? ` style="--cc:${(x.n / maxN).toFixed(2)}"` : ""}>${x.n ? `<b>${x.n}</b>${x.d ? `<small>${escapeAttr(t("rnCcPlayed").replace("{n}", x.d))}</small>` : ""}` : "<span class=\"cc-zero\">&ndash;</span>"}</td>`;
+  const head = `<tr><th>${escapeAttr(t("rnCcCourt"))}</th>${cols.map((c) => `<th>${escapeAttr(c.label)}</th>`).join("")}<th>${escapeAttr(t("rnCcTotal"))}</th></tr>`;
+  const body = rows.map((c, i) => `<tr><th scope="row">${c === 0 ? escapeAttr(t("rnCcNoCourt")) : escapeAttr(t("courtLabel")) + " " + c}</th>${grid[i].map((x) => td(x, "cc-cell")).join("")}${td(rowTotals[i], "cc-total")}</tr>`).join("");
+  const foot = `<tr class="cc-foot"><th scope="row">${escapeAttr(t("rnCcTotal"))}</th>${colTotals.map((x) => td(x, "cc-total")).join("")}${td(all, "cc-total")}</tr>`;
+  const counts = rowTotals.filter((_, i) => rows[i] !== 0).map((x) => x.n);
+  const even = counts.length && Math.max(...counts) - Math.min(...counts) <= 1;
+  return `<h4 class="rn-h">${escapeAttr(t("rnCcTitle"))}</h4>
+    <p class="hint-note">${escapeAttr(t(even ? "rnCcEven" : "rnCcUneven"))}</p>
+    <div class="tourn-table-scroll"><table class="cc-table"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
+}
 function rnOverviewHtml() {
   const tn = TOURNAMENT_DATA;
-  let html = "";
+  let html = rnCourtChartHtml();
   if (tn.groups) {
     html += `<h4 class="rn-h">${escapeAttr(t("rnTablesTitle"))}</h4><div class="rn-tables">` + tn.groups.map((g, gi) => `
       <div class="tourn-group"><h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>

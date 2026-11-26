@@ -1924,3 +1924,15 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .msl-actions{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0}
 .msl-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f8;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:inherit;font-size:.9rem;margin:6px 0 0}
 @media (max-width:640px){.msl-fields{grid-template-columns:1fr}}
+
+/* Courts x rounds chart (Bracket & tables tab) */
+.cc-table { border-collapse: collapse; width: 100%; min-width: 420px; text-align: center; font-variant-numeric: tabular-nums; }
+.cc-table th, .cc-table td { padding: 8px 10px; border: 1px solid var(--border, #e3e0dc); }
+.cc-table thead th { background: var(--surface-2, #f6f3f0); font-size: .82rem; white-space: nowrap; }
+.cc-table tbody th, .cc-table tfoot th { text-align: start; white-space: nowrap; background: var(--surface-2, #f6f3f0); }
+.cc-table td { position: relative; }
+.cc-table td.cc-cell { background: color-mix(in srgb, #c8102e calc(var(--cc, 0) * 28%), transparent); }
+.cc-table td b { display: block; font-size: 1.05rem; }
+.cc-table td small { display: block; font-size: .7rem; opacity: .7; }
+.cc-table .cc-zero { opacity: .35; }
+.cc-table td.cc-total, .cc-table tfoot td { font-weight: 700; background: var(--surface-2, #f6f3f0); }
