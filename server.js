@@ -18,6 +18,7 @@ const XLSX = require("xlsx");
 const helmet = require("helmet");
 const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
+const { renderSchedulePrint } = require("./schedule_print");
 const { renderEventSheet, renderAgeReport, renderCustomReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
 const AgeUtils = require("./age_utils");
 const CustomReport = require("./custom_report");
@@ -225,7 +226,7 @@ app.use((req, res, next) => {
 // Server-side source files must never be downloadable, even if one is
 // uploaded into public/ by mistake (it happened once with server.js).
 app.use((req, res, next) => {
-  if (/^\/(server|swiss|swiss_print|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+  if (/^\/(server|swiss|swiss_print|schedule_print|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
     return res.status(404).end();
   }
   next();
@@ -9464,10 +9465,24 @@ app.put("/api/admin/tournaments/:eventId/swiss/settings", requireStaffRole(["tou
 // Printable A4 sheets (regulation poster / round pairings / standings &
 // prizes) for staff to print or save as PDF. Plain HTML page, not JSON.
 app.get("/admin/print/tournament/:eventId", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
-  const db = req.db;
+  let db = req.db;
   const eventId = Number(req.params.eventId);
+  // ?sim=ID prints a practice run's private copy instead of the real tournament.
+  if (req.query.sim) {
+    const found = simAccess(db, req.staff, Number(req.query.sim), eventId);
+    if (found.error) return res.status(404).type("text/plain").send("No such simulation");
+    db = buildSimDb(db, found.sim);
+  }
   const event = db.events.find((e) => e.id === eventId);
   const t = findTournament(db, eventId);
+  // Match schedule sheets (by court / by time) for knockout and group tournaments.
+  if (["courts", "time"].includes(req.query.view)) {
+    if (!event || !t || t.format === "swiss" || !tournamentIsGenerated(t)) return res.status(404).type("text/plain").send("No generated schedule for this event");
+    const lang = req.query.lang === "en" ? "en" : "ar";
+    const court = Number.isInteger(Number(req.query.court)) && Number(req.query.court) > 0 ? Number(req.query.court) : null;
+    res.set("Cache-Control", "no-store");
+    return res.type("html").send(renderSchedulePrint({ event, tn: serializeTournament(db, t), view: req.query.view, lang, courtFilter: court }));
+  }
   if (!event || !t || t.format !== "swiss" || !t.swiss) return res.status(404).type("text/plain").send("No Swiss tournament for this event");
   const view = ["regulation", "pairings", "standings"].includes(req.query.view) ? req.query.view : "regulation";
   const lang = req.query.lang === "en" ? "en" : "ar";
