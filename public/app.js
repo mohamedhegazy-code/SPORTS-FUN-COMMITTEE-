@@ -4101,7 +4101,7 @@ function switchAdminTab(tabKey) {
   if (tabKey === "tournaments") { loadAdminTournamentsList(); if (typeof simTabOpened === "function") simTabOpened(); }
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
   if (tabKey === "links") mslLoad();
-  if (tabKey === "backup") bkLoad();
+  if (tabKey === "backup") { bkLoad(); cbLoad(); }
   if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
@@ -12424,3 +12424,76 @@ document.getElementById("bk-check").addEventListener("click", bkCheck);
 document.getElementById("bk-restore").addEventListener("click", bkRestore);
 document.getElementById("bk-confirm-input").addEventListener("input", (e) => { document.getElementById("bk-restore").disabled = !BK_TOKEN || e.target.value.trim() !== "RESTORE"; });
 document.getElementById("bk-file").addEventListener("change", () => { BK_TOKEN = null; document.getElementById("bk-confirm").classList.add("hidden"); document.getElementById("bk-preview").innerHTML = ""; });
+
+// ---- Nightly cloud backup (Cloudflare R2) - status, test, run now, list of copies
+let CB_CONFIGURED = false;
+async function cbLoad() {
+  const box = document.getElementById("cb-status"), intro = document.getElementById("cb-intro");
+  try {
+    const d = await api("/api/admin/backup/cloud");
+    const c = d.config, st = d.status || {};
+    CB_CONFIGURED = !!c.configured;
+    const hour = String(c.hour).padStart(2, "0");
+    intro.textContent = c.configured ? t("cbIntro").replace("{hour}", hour).replace("{keep}", c.keep) : t("cbIntroOff");
+    document.getElementById("cb-run").disabled = !c.configured;
+    document.getElementById("cb-test").disabled = !c.configured;
+    document.getElementById("cb-refresh").disabled = !c.configured;
+    let cls = "good", text;
+    if (!c.configured) { cls = "warn"; text = t("cbOff").replace("{missing}", c.missing.join(", ")); }
+    else if (c.disabled) { cls = "warn"; text = t("cbDisabled"); }
+    else if (!st.lastSuccessAt) { cls = st.lastError ? "bad" : "warn"; text = t("cbOnNone").replace("{hour}", hour).replace("{bucket}", c.bucket); }
+    else {
+      const age = (Date.now() - new Date(st.lastSuccessAt).getTime()) / 86400000;
+      cls = age > 2 ? "bad" : "good";
+      text = age > 2 ? t("cbOnOld").replace("{when}", bkFmtDate(st.lastSuccessAt)) : t("cbOnOk").replace("{when}", bkFmtDate(st.lastSuccessAt)).replace("{size}", bkFmtBytes(st.lastBytes)).replace("{hour}", hour).replace("{keep}", c.keep);
+    }
+    box.className = "bk-status " + cls;
+    box.textContent = text;
+    if (st.lastError && c.configured) {
+      const sub = document.createElement("span");
+      sub.className = "cb-sub";
+      sub.textContent = t("cbLastFail").replace("{when}", bkFmtDate(st.lastAttemptAt)).replace("{error}", st.lastError);
+      box.appendChild(sub);
+      if (cls === "good") box.className = "bk-status warn";
+    }
+    document.getElementById("cb-setup").innerHTML = c.configured ? "" : `<details class="cb-setup" open><summary>${escapeAttr(t("cbSetupTitle"))}</summary><ol>${[1, 2, 3, 4, 5].map((i) => `<li>${escapeAttr(t("cbSetup" + i))}</li>`).join("")}</ol><p>${escapeAttr(t("cbSetupOptional"))}</p></details>`;
+    if (c.configured) cbList(); else document.getElementById("cb-list").innerHTML = `<p class="hint-note">${escapeAttr(t("cbListNeedSetup"))}</p>`;
+  } catch (e) {
+    box.className = "bk-status bad";
+    box.textContent = e.message;
+  }
+}
+async function cbList() {
+  const el = document.getElementById("cb-list");
+  el.innerHTML = `<p class="hint-note">${escapeAttr(t("cbListLoading"))}</p>`;
+  try {
+    const d = await api("/api/admin/backup/cloud/list");
+    if (!d.ok) { el.innerHTML = `<p class="hint-note">${escapeAttr(d.error || "")}</p>`; return; }
+    el.innerHTML = d.items.length
+      ? `<table class="bk-table"><thead><tr><th>${escapeAttr(t("bkSnapWhen"))}</th><th>${escapeAttr(t("bkSnapSize"))}</th><th></th></tr></thead><tbody>${d.items.map((s) => `<tr><td>${escapeAttr(s.name.replace(/^MyAhlawy-backup-/, "").replace(/\.zip$/, "").replace("_", "  "))}</td><td>${bkFmtBytes(s.bytes)}</td><td><a class="secondary small" href="/api/admin/backup/cloud/download/${encodeURIComponent(s.name)}">${escapeAttr(t("bkSnapDownload"))}</a></td></tr>`).join("")}</tbody></table>`
+      : `<p class="hint-note">${escapeAttr(t("cbListEmpty"))}</p>`;
+  } catch (e) { el.innerHTML = `<p class="hint-note">${escapeAttr(e.message)}</p>`; }
+}
+async function cbRun() {
+  const btn = document.getElementById("cb-run"), msg = document.getElementById("cb-msg");
+  btn.disabled = true; showMsg(msg, t("cbRunning"), true);
+  try {
+    const d = await api("/api/admin/backup/cloud/run", { method: "POST", body: JSON.stringify({}) });
+    if (d.ok) showMsg(msg, t("cbRunOk").replace("{name}", String(d.key).split("/").pop()).replace("{size}", bkFmtBytes(d.bytes)).replace("{kept}", d.prune.kept).replace("{pruned}", d.prune.pruned) + (d.pruneError ? " " + t("cbRunWarn").replace("{warn}", d.pruneError) : ""), true);
+    else showMsg(msg, d.error || t("errGeneric"), false);
+  } catch (e) { showMsg(msg, e.message, false); }
+  await cbLoad();
+  btn.disabled = !CB_CONFIGURED;
+}
+async function cbTest() {
+  const btn = document.getElementById("cb-test"), msg = document.getElementById("cb-msg");
+  btn.disabled = true; showMsg(msg, t("cbTesting"), true);
+  try {
+    const d = await api("/api/admin/backup/cloud/test", { method: "POST", body: JSON.stringify({}) });
+    showMsg(msg, d.ok ? t("cbTestOk").replace("{n}", d.existing) : d.error, !!d.ok);
+  } catch (e) { showMsg(msg, e.message, false); }
+  btn.disabled = !CB_CONFIGURED;
+}
+document.getElementById("cb-run").addEventListener("click", cbRun);
+document.getElementById("cb-test").addEventListener("click", cbTest);
+document.getElementById("cb-refresh").addEventListener("click", cbList);

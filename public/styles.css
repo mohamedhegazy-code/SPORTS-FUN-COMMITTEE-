@@ -1945,6 +1945,13 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .bk-status { padding: 10px 14px; border-radius: 8px; font-weight: 600; margin: 8px 0 14px; background: #f1ede7; }
 .bk-status.good { background: #e6f4ea; color: #0a5c24; }
 .bk-status.warn { background: #fff4d6; color: #7a5200; }
+.bk-status.bad { background: #fde8e8; color: #8a1111; }
+.bk-status .cb-sub { display: block; margin-top: 6px; font-weight: 500; }
+.cb-setup { margin: 12px 0 4px; border: 1px solid var(--border, #e4dfd8); border-radius: 10px; padding: 10px 14px; background: #fff; }
+.cb-setup summary { cursor: pointer; font-weight: 700; }
+.cb-setup ol { margin: 10px 0 6px; padding-inline-start: 22px; display: grid; gap: 6px; }
+.cb-setup p { margin: 8px 0 0; font-size: .85rem; color: var(--muted, #6b6b6b); }
+.cb-setup code { background: #f1ede7; padding: 1px 5px; border-radius: 4px; font-size: .85em; }
 .bk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 8px 0 14px; }
 .bk-tile { border: 1px solid var(--border, #e4dfd8); border-radius: 10px; padding: 10px 12px; background: #fff; }
 .bk-tile b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }

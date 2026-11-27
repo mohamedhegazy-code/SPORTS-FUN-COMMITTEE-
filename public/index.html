@@ -1684,6 +1684,20 @@
           <p class="hint-note" data-i18n="bkDownloadHint">The file is a .zip named with today's date. It holds phone numbers and password hashes, so keep it private (not in a shared chat or folder). Download one before every big event.</p>
           <div class="msg" id="bk-dl-msg"></div>
         </div>
+        <div class="card" id="cb-card">
+          <h2 data-i18n="cbTitle">Nightly cloud backup</h2>
+          <p class="section-sub" id="cb-intro" data-i18n="cbIntro">Every night the platform makes a full backup and saves it in a Cloudflare R2 bucket - a different place from this server - and keeps only the newest copies.</p>
+          <div id="cb-status" class="bk-status"></div>
+          <div class="bk-file-row">
+            <button class="primary" type="button" id="cb-run" data-i18n="cbRun">Back up to cloud now</button>
+            <button class="secondary" type="button" id="cb-test" data-i18n="cbTest">Test connection</button>
+            <button class="secondary" type="button" id="cb-refresh" data-i18n="cbRefresh">Refresh list</button>
+          </div>
+          <div class="msg" id="cb-msg"></div>
+          <div id="cb-setup"></div>
+          <h3 data-i18n="cbListTitle">Copies in the cloud bucket</h3>
+          <div id="cb-list"></div>
+        </div>
         <div class="card">
           <h2 data-i18n="bkRestoreTitle">Restore from a backup</h2>
           <p class="section-sub" data-i18n="bkRestoreIntro">Choose a backup file made by this platform. It is checked first and nothing changes until you confirm. A safety copy of the current data is saved before the restore, so it can be undone.</p>
