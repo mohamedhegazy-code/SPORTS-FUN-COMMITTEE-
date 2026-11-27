@@ -19,6 +19,8 @@ const helmet = require("helmet");
 const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
 const { renderSchedulePrint } = require("./schedule_print");
+const backupLib = require("./backup");
+const os = require("os");
 const { renderEventSheet, renderAgeReport, renderCustomReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
 const AgeUtils = require("./age_utils");
 const CustomReport = require("./custom_report");
@@ -226,7 +228,7 @@ app.use((req, res, next) => {
 // Server-side source files must never be downloadable, even if one is
 // uploaded into public/ by mistake (it happened once with server.js).
 app.use((req, res, next) => {
-  if (/^\/(server|swiss|swiss_print|schedule_print|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+  if (/^\/(server|swiss|swiss_print|schedule_print|backup|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
     return res.status(404).end();
   }
   next();
@@ -10525,6 +10527,143 @@ app.get("/api/admin/management/events/:eventId/report.docx", requireStaffRole(["
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
   res.setHeader("Content-Disposition", `attachment; filename="${safeName || "event"}-report.docx"`);
   res.send(buffer);
+});
+
+
+// ---------------------------------------------------- full backup & restore ---
+// Admin only. One .zip holds the whole database, every uploaded photo/video and readable CSV tables
+// (see backup.js). Restore verifies the file first, saves a safety copy of the current data, then
+// swaps the data in with atomic renames. Everything here is synchronous file work on purpose: no
+// other request can run halfway through a restore.
+const BACKUP_UPLOADS_DIR = path.join(__dirname, "data", "uploads");
+const qrFingerprint = () => crypto.createHash("sha256").update("fp:" + QR_SECRET).digest("hex").slice(0, 12);
+const pendingRestores = new Map(); // token -> { file, inspected, staffId, expires }
+let backupBusy = false;
+function purgePendingRestores() {
+  const now = Date.now();
+  for (const [tok, p] of pendingRestores) if (p.expires < now) { try { fs.unlinkSync(p.file); } catch (e) { /* gone */ } pendingRestores.delete(tok); }
+}
+const uploadBackupFile = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, os.tmpdir()),
+    filename: (req, file, cb) => cb(null, `ahlawy-restore-${crypto.randomBytes(8).toString("hex")}.upload`),
+  }),
+  limits: { fileSize: 1024 * 1024 * 1024, files: 1 },
+});
+function dbBackupListing() {
+  try {
+    return fs.readdirSync(DB_BACKUP_DIR)
+      .filter((f) => /^(db-[0-9TZ-]+\.json|pre-restore-[0-9TZ-]+\.zip)$/.test(f))
+      .map((f) => { const st = fs.statSync(path.join(DB_BACKUP_DIR, f)); return { name: f, bytes: st.size, at: st.mtime.toISOString(), kind: f.startsWith("pre-restore") ? "pre-restore" : "auto" }; })
+      .sort((a, b) => b.at.localeCompare(a.at));
+  } catch (e) { return []; }
+}
+app.get("/api/admin/backup/info", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const files = backupLib.walk(BACKUP_UPLOADS_DIR).map((f) => ({ ...f, size: fs.statSync(f.full).size }));
+  let freeBytes = null;
+  try { const st = fs.statfsSync(path.join(__dirname, "data")); freeBytes = st.bavail * st.bsize; } catch (e) { /* unsupported */ }
+  res.set("Cache-Control", "no-store");
+  res.json({
+    last: (db.settings && db.settings.lastBackup) || null,
+    counts: backupLib.countsOf(db),
+    uploads: backupLib.uploadsSummary(files),
+    dbBytes: fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0,
+    snapshots: dbBackupListing(),
+    qrFingerprint: qrFingerprint(),
+    freeBytes,
+  });
+});
+app.get("/api/admin/backup/download", requireStaffRole("admin"), (req, res) => {
+  if (backupBusy) return res.status(409).json({ error: "A backup or restore is already running - try again in a moment" });
+  backupBusy = true;
+  const stamp = new Date().toLocaleString("sv-SE", { timeZone: "Africa/Cairo" }).slice(0, 16).replace(" ", "_").replace(":", "");
+  const out = path.join(os.tmpdir(), `ahlawy-backup-${crypto.randomBytes(6).toString("hex")}.zip`);
+  let manifest;
+  try {
+    manifest = backupLib.buildBackup({ dbPath: DB_PATH, uploadsDir: BACKUP_UPLOADS_DIR, outPath: out, createdBy: req.staff.name || req.staff.username, qrSecretFingerprint: qrFingerprint(), appVersion: "1" });
+  } catch (e) {
+    backupBusy = false;
+    console.error("Backup failed:", e);
+    return res.status(500).json({ error: "The backup could not be created: " + e.message });
+  }
+  const bytes = fs.statSync(out).size;
+  const db = readDb();
+  db.settings = db.settings || {};
+  db.settings.lastBackup = { at: manifest.createdAt, by: req.staff.name || req.staff.username, bytes, files: manifest.files.length, counts: manifest.counts };
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "backup_download", details: `Full backup downloaded (${manifest.files.length} files, ${Math.round(bytes / 1024)} KB)` });
+  writeDb(db);
+  res.set("Cache-Control", "no-store");
+  res.download(out, `MyAhlawy-backup-${stamp}.zip`, () => { backupBusy = false; try { fs.unlinkSync(out); } catch (e) { /* gone */ } });
+});
+app.get("/api/admin/backup/snapshot/:name", requireStaffRole("admin"), (req, res) => {
+  const name = String(req.params.name);
+  if (!/^(db-[0-9TZ-]+\.json|pre-restore-[0-9TZ-]+\.zip)$/.test(name)) return res.status(400).json({ error: "Bad file name" });
+  const full = path.join(DB_BACKUP_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: "No such file" });
+  res.set("Cache-Control", "no-store");
+  res.download(full, name);
+});
+app.post("/api/admin/backup/inspect", requireStaffRole("admin"), uploadBackupFile.single("backup"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Choose a backup file first" });
+  purgePendingRestores();
+  let inspected;
+  try {
+    inspected = backupLib.inspectBackup(req.file.path, { knownDbKeys: Object.keys(readDb()), currentQrFingerprint: qrFingerprint() });
+  } catch (e) {
+    try { fs.unlinkSync(req.file.path); } catch (x) { /* gone */ }
+    return res.status(400).json({ error: "The file could not be read: " + e.message });
+  }
+  const summary = { ok: inspected.ok, kind: inspected.kind, problems: inspected.problems, warnings: inspected.warnings, manifest: inspected.manifest ? { createdAt: inspected.manifest.createdAt, createdBy: inspected.manifest.createdBy, counts: inspected.manifest.counts, uploads: inspected.manifest.uploads, fileCount: (inspected.manifest.files || []).length } : null, current: backupLib.countsOf(readDb()) };
+  if (!inspected.ok) {
+    try { fs.unlinkSync(req.file.path); } catch (x) { /* gone */ }
+    return res.json(summary);
+  }
+  const token = crypto.randomBytes(16).toString("hex");
+  pendingRestores.set(token, { file: req.file.path, inspected, staffId: req.staff.username, expires: Date.now() + 30 * 60 * 1000 });
+  res.json({ ...summary, token });
+});
+app.post("/api/admin/backup/restore", requireStaffRole("admin"), (req, res) => {
+  const { token, confirm } = req.body || {};
+  purgePendingRestores();
+  const pending = pendingRestores.get(String(token || ""));
+  if (!pending || pending.staffId !== req.staff.username) return res.status(400).json({ error: "Check the backup file first (the check expires after 30 minutes)" });
+  if (String(confirm || "").trim() !== "RESTORE") return res.status(400).json({ error: "Type RESTORE to confirm" });
+  if (backupBusy) return res.status(409).json({ error: "A backup or restore is already running - try again in a moment" });
+  backupBusy = true;
+  const myToken = req.cookies && req.cookies[SESSION_COOKIE];
+  const mySession = myToken ? sessions.get(myToken) : null;
+  let result;
+  try {
+    result = backupLib.restoreBackup({
+      filePath: pending.file, inspected: pending.inspected,
+      dataDir: path.join(__dirname, "data"), dbPath: DB_PATH, uploadsDir: BACKUP_UPLOADS_DIR, backupsDir: DB_BACKUP_DIR,
+      ensureDirs: [EVENT_UPLOADS_DIR, HERO_VIDEO_UPLOADS_DIR, BRANDING_UPLOADS_DIR],
+      createdBy: req.staff.name || req.staff.username, qrSecretFingerprint: qrFingerprint(), appVersion: "1",
+    });
+  } catch (e) {
+    backupBusy = false;
+    console.error("Restore failed (rolled back):", e);
+    return res.status(500).json({ error: "The restore failed and the current data was left as it was: " + e.message });
+  }
+  // The in-memory sign-ins must match the restored data: reload them from it, and keep the admin
+  // who is restoring signed in (if the restored data has their account).
+  try {
+    sessions.clear();
+    const restoredDb = readDb();
+    const now = Date.now();
+    for (const [tok, sess] of Object.entries(restoredDb.sessions || {})) if (sess && sess.expiresAt > now) sessions.set(tok, sess);
+    if (myToken && mySession) sessions.set(myToken, mySession);
+    restoredDb.settings = restoredDb.settings || {};
+    const staffNow = restoredDb.staffAccounts[req.staff.username];
+    logActivity(restoredDb, { actorType: "staff", actorId: req.staff.username, actorName: (staffNow || req.staff).name, action: "backup_restore", details: `Platform restored from a ${pending.inspected.kind === "zip" ? "full backup" : "database snapshot"} made ${pending.inspected.manifest && pending.inspected.manifest.createdAt ? pending.inspected.manifest.createdAt : "earlier"}; safety copy ${result.safetyCopy}` });
+    writeDb(restoredDb);
+    persistSessions();
+  } catch (e) { console.error("Post-restore refresh failed:", e); }
+  pendingRestores.delete(String(token));
+  try { fs.unlinkSync(pending.file); } catch (e) { /* gone */ }
+  backupBusy = false;
+  res.json({ ok: true, ...result, counts: backupLib.countsOf(readDb()), staffStillExists: !!readDb().staffAccounts[req.staff.username] });
 });
 
 // Turns multer upload errors (file too big, wrong type, etc.) into a JSON
