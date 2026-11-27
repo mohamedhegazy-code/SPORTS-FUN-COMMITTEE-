@@ -4101,6 +4101,7 @@ function switchAdminTab(tabKey) {
   if (tabKey === "tournaments") { loadAdminTournamentsList(); if (typeof simTabOpened === "function") simTabOpened(); }
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
   if (tabKey === "links") mslLoad();
+  if (tabKey === "backup") bkLoad();
   if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
@@ -12325,3 +12326,101 @@ async function mslLoad() {
     }
   });
 })();
+
+// ------------------------------------------------------------ Backup & restore (admin) ---
+let BK_TOKEN = null;
+const bkFmtBytes = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : (n || 0) + " B");
+const bkFmtDate = (iso) => { if (!iso) return "-"; try { return new Date(iso).toLocaleString(currentLang === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { timeZone: "Africa/Cairo", dateStyle: "medium", timeStyle: "short" }); } catch (e) { return iso; } };
+const BK_COUNT_KEYS = [["members", "bkcMembers"], ["dependents", "bkcDependents"], ["events", "bkcEvents"], ["registrations", "bkcRegistrations"], ["waitlisted", "bkcWaitlisted"], ["checkedIn", "bkcCheckedIn"], ["tournaments", "bkcTournaments"], ["staffAccounts", "bkcStaff"], ["activityLog", "bkcActivity"]];
+async function bkLoad() {
+  const status = document.getElementById("bk-status");
+  try {
+    const d = await api("/api/admin/backup/info");
+    const old = d.last ? (Date.now() - new Date(d.last.at).getTime()) / 86400000 : null;
+    status.className = "bk-status " + (d.last ? (old > 7 ? "warn" : "good") : "warn");
+    status.textContent = d.last ? t(old > 7 ? "bkLastOld" : "bkLast").replace("{when}", bkFmtDate(d.last.at)).replace("{by}", d.last.by || "").replace("{size}", bkFmtBytes(d.last.bytes)) : t("bkNever");
+    const tiles = BK_COUNT_KEYS.map(([k, label]) => `<div class="bk-tile"><b>${Number(d.counts[k] || 0).toLocaleString()}</b><span>${escapeAttr(t(label))}</span></div>`);
+    tiles.push(`<div class="bk-tile"><b>${d.uploads.files.toLocaleString()}</b><span>${escapeAttr(t("bkcFiles"))} (${bkFmtBytes(d.uploads.bytes)})</span></div>`);
+    tiles.push(`<div class="bk-tile"><b>${bkFmtBytes(d.dbBytes)}</b><span>${escapeAttr(t("bkcDb"))}</span></div>`);
+    document.getElementById("bk-counts").innerHTML = tiles.join("");
+    const snaps = document.getElementById("bk-snaps");
+    snaps.innerHTML = d.snapshots.length
+      ? `<table class="bk-table"><thead><tr><th>${escapeAttr(t("bkSnapWhen"))}</th><th>${escapeAttr(t("bkSnapKind"))}</th><th>${escapeAttr(t("bkSnapSize"))}</th><th></th></tr></thead><tbody>${d.snapshots.slice(0, 20).map((s) => `<tr><td>${escapeAttr(bkFmtDate(s.at))}</td><td>${escapeAttr(t(s.kind === "pre-restore" ? "bkSnapPre" : "bkSnapAuto"))}</td><td>${bkFmtBytes(s.bytes)}</td><td><a class="secondary small" href="/api/admin/backup/snapshot/${encodeURIComponent(s.name)}">${escapeAttr(t("bkSnapDownload"))}</a></td></tr>`).join("")}</tbody></table>`
+      : `<p class="hint-note">${escapeAttr(t("bkSnapNone"))}</p>`;
+  } catch (e) {
+    status.className = "bk-status warn";
+    status.textContent = e.message;
+  }
+}
+async function bkDownload() {
+  const btn = document.getElementById("bk-download"), msg = document.getElementById("bk-dl-msg");
+  btn.disabled = true;
+  showMsg(msg, t("bkPreparing"), true);
+  try {
+    const res = await fetch("/api/admin/backup/download", { credentials: "include" });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || t("errGeneric")); }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename="?([^";]+)"?/.exec(cd);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? m[1] : "MyAhlawy-backup.zip";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    showMsg(msg, t("bkDownloaded").replace("{name}", a.download).replace("{size}", bkFmtBytes(blob.size)), true);
+    bkLoad();
+  } catch (e) { showMsg(msg, e.message, false); }
+  btn.disabled = false;
+}
+function bkPreviewHtml(d) {
+  let h = "";
+  if (d.problems && d.problems.length) h += `<div class="bk-alert bad"><strong>${escapeAttr(t("bkProblems"))}</strong><ul>${d.problems.map((p) => `<li>${escapeAttr(p)}</li>`).join("")}</ul></div>`;
+  if (d.warnings && d.warnings.length) h += `<div class="bk-alert warn"><strong>${escapeAttr(t("bkWarnings"))}</strong><ul>${d.warnings.map((p) => `<li>${escapeAttr(p)}</li>`).join("")}</ul></div>`;
+  if (d.manifest) {
+    const m = d.manifest;
+    h += `<p class="bk-meta">${escapeAttr(t("bkMadeOn").replace("{when}", m.createdAt ? bkFmtDate(m.createdAt) : t("bkUnknown")).replace("{by}", m.createdBy || "-"))}</p>`;
+    h += `<table class="bk-table"><thead><tr><th></th><th>${escapeAttr(t("bkColBackup"))}</th><th>${escapeAttr(t("bkColNow"))}</th></tr></thead><tbody>${BK_COUNT_KEYS.map(([k, label]) => `<tr><td>${escapeAttr(t(label))}</td><td><b>${Number(m.counts[k] || 0).toLocaleString()}</b></td><td>${Number(d.current[k] || 0).toLocaleString()}</td></tr>`).join("")}${m.uploads ? `<tr><td>${escapeAttr(t("bkcFiles"))}</td><td><b>${m.uploads.files.toLocaleString()}</b> (${bkFmtBytes(m.uploads.bytes)})</td><td></td></tr>` : ""}</tbody></table>`;
+  }
+  if (d.ok) h += `<div class="bk-alert good">${escapeAttr(t("bkVerified"))}</div>`;
+  return h;
+}
+async function bkCheck() {
+  const file = document.getElementById("bk-file").files[0], msg = document.getElementById("bk-msg");
+  BK_TOKEN = null;
+  document.getElementById("bk-confirm").classList.add("hidden");
+  document.getElementById("bk-preview").innerHTML = "";
+  if (!file) return showMsg(msg, t("bkPickFile"), false);
+  const btn = document.getElementById("bk-check");
+  btn.disabled = true; showMsg(msg, t("bkChecking"), true);
+  try {
+    const fd = new FormData(); fd.append("backup", file);
+    const d = await api("/api/admin/backup/inspect", { method: "POST", body: fd });
+    document.getElementById("bk-preview").innerHTML = bkPreviewHtml(d);
+    if (d.ok && d.token) {
+      BK_TOKEN = d.token;
+      document.getElementById("bk-confirm").classList.remove("hidden");
+      document.getElementById("bk-confirm-input").value = "";
+      document.getElementById("bk-restore").disabled = true;
+      showMsg(msg, t("bkReadyToRestore"), true);
+    } else showMsg(msg, t("bkNotRestorable"), false);
+  } catch (e) { showMsg(msg, e.message, false); }
+  btn.disabled = false;
+}
+async function bkRestore() {
+  const msg = document.getElementById("bk-msg"), btn = document.getElementById("bk-restore");
+  btn.disabled = true; showMsg(msg, t("bkRestoring"), true);
+  try {
+    const d = await api("/api/admin/backup/restore", { method: "POST", body: JSON.stringify({ token: BK_TOKEN, confirm: document.getElementById("bk-confirm-input").value }) });
+    BK_TOKEN = null;
+    document.getElementById("bk-confirm").classList.add("hidden");
+    document.getElementById("bk-preview").innerHTML = "";
+    showMsg(msg, t("bkRestored").replace("{members}", d.counts.members).replace("{events}", d.counts.events).replace("{files}", d.uploadsRestored).replace("{safety}", d.safetyCopy) + (d.staffStillExists ? "" : " " + t("bkSignInAgain")), true);
+    bkLoad();
+    if (typeof loadSettings === "function") loadSettings().catch(() => {});
+  } catch (e) { showMsg(msg, e.message, false); btn.disabled = false; }
+}
+document.getElementById("bk-download").addEventListener("click", bkDownload);
+document.getElementById("bk-check").addEventListener("click", bkCheck);
+document.getElementById("bk-restore").addEventListener("click", bkRestore);
+document.getElementById("bk-confirm-input").addEventListener("input", (e) => { document.getElementById("bk-restore").disabled = !BK_TOKEN || e.target.value.trim() !== "RESTORE"; });
+document.getElementById("bk-file").addEventListener("change", () => { BK_TOKEN = null; document.getElementById("bk-confirm").classList.add("hidden"); document.getElementById("bk-preview").innerHTML = ""; });
