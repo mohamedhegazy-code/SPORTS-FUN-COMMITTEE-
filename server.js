@@ -8067,8 +8067,8 @@ app.get("/api/me/tournament-matches", requireMember, (req, res) => {
       else if (!scoring) state = "scheduled";
       else if (m.report) state = m.report.status === "disputed" ? "disputed" : m.report.side === side ? "waiting_opponent" : "to_confirm";
       items.push({
-        eventId: t.eventId, eventNameEn: ev ? ev.nameEn : "", eventNameAr: ev ? ev.nameAr : "", kind, ...extra, court: m.court || null, time: m.time || null,
-        side, aLabel: labelOf(a), bLabel: labelOf(b), state, scoring, result: decided ? result : null,
+        eventId: t.eventId, eventNameEn: ev ? ev.nameEn : "", eventNameAr: ev ? ev.nameAr : "", eventDate: ev ? ev.date || "" : "", kind, ...extra, court: m.court || null, time: m.time || null,
+        side, cardToken: signCard(t.eventId, side === "a" ? a : b), aLabel: labelOf(a), bLabel: labelOf(b), state, scoring, result: decided ? result : null,
         report: m.report && !decided ? { side: m.report.side, scoreA: m.report.scoreA, scoreB: m.report.scoreB, winnerId: m.report.winnerId || null, result: m.report.result || null, status: m.report.status, disputeNote: m.report.disputeNote || "", at: m.report.at } : null,
         aId: a, bId: b,
       });
@@ -8208,6 +8208,101 @@ app.get("/api/tournaments/:eventId", (req, res) => {
   // every other serializeTournament() call site is an admin route and
   // deliberately leaves this off (defaults to false/real names).
   res.json({ tournament: serializeTournament(db, t, true) });
+});
+
+
+// ---- Player match card: a public, sign-in-free page per player (/card.html?c=TOKEN) ----------------------------
+// The link carries a signed token (event + entrant), so it cannot be guessed or edited to look at another player,
+// and the page only ever shows what the public tournament pages already show (public names, courts, times, scores).
+function signCard(eventId, entrantId) {
+  const payload = Buffer.from(JSON.stringify([Number(eventId), String(entrantId)])).toString("base64url");
+  const mac = crypto.createHmac("sha256", QR_SECRET).update("card:" + payload).digest("hex").slice(0, 20);
+  return payload + "." + mac;
+}
+function verifyCard(token) {
+  const [payload, mac] = String(token || "").split(".");
+  if (!payload || !mac || mac.length !== 20) return null;
+  const want = crypto.createHmac("sha256", QR_SECRET).update("card:" + payload).digest("hex").slice(0, 20);
+  if (!crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(want))) return null;
+  try {
+    const [eventId, entrantId] = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return Number.isInteger(eventId) && typeof entrantId === "string" ? { eventId, entrantId } : null;
+  } catch (e) { return null; }
+}
+// Everything the card page needs for one entrant, from the already-public tournament view.
+function buildPlayerCard(db, eventId, entrantId) {
+  const t = findTournament(db, eventId);
+  const ev = db.events.find((e) => e.id === eventId);
+  if (!t || !ev) return null;
+  const tn = serializeTournament(db, t, true);
+  const me = (tn.entrants || []).find((e) => e.id === entrantId);
+  if (!me) return null;
+  const labelOf = (id) => { const e = (tn.entrants || []).find((x) => x.id === id); return e ? e.label : ""; };
+  const mine = []; // every match this entrant plays, in tournament order
+  const push = (stage, m, extra) => {
+    const isA = m.a === entrantId, isB = m.b === entrantId;
+    if (!isA && !isB) return;
+    mine.push({ stage, ...extra, court: m.court || null, time: m.time || null, date: m.date || null, oppId: isA ? m.b : m.a, opponent: m.a && m.b ? labelOf(isA ? m.b : m.a) : "", opponentKnown: !!(m.a && m.b), decided: !!extra.decided, decidedAt: m.decidedAt || null });
+  };
+  (tn.groups || []).forEach((g, gi) => g.matches.forEach((m) => {
+    const r = m.result;
+    const isA = m.a === entrantId;
+    push({ type: "group", groupIndex: gi }, m, { decided: !!r, scoreFor: r ? (isA ? r.scoreA : r.scoreB) : null, scoreAgainst: r ? (isA ? r.scoreB : r.scoreA) : null, won: r ? (r.winnerId ? r.winnerId === entrantId : null) : null });
+  }));
+  if (tn.knockout) {
+    const total = tn.knockout.rounds.length;
+    tn.knockout.rounds.forEach((round, ri) => round.forEach((m) => {
+      if (m.bye) return;
+      const isA = m.a === entrantId;
+      const has = m.scoreA != null && m.scoreB != null;
+      push({ type: "ko", roundIndex: ri, totalRounds: total, place: m.place || null }, m, { decided: !!m.winnerId, scoreFor: has ? (isA ? m.scoreA : m.scoreB) : null, scoreAgainst: has ? (isA ? m.scoreB : m.scoreA) : null, won: m.winnerId ? m.winnerId === entrantId : null });
+    }));
+  }
+  let swissInfo = null;
+  if (tn.swiss) {
+    tn.swiss.rounds.forEach((r) => r.pairings.forEach((p) => {
+      if (p.b == null) return;
+      const isA = p.a === entrantId;
+      if (!isA && p.b !== entrantId) return;
+      const res = p.result;
+      const won = res == null ? null : res === "1/2-1/2" ? null : (res === "1-0") === isA;
+      mine.push({ stage: { type: "swiss", roundNumber: r.number }, court: p.table || p.board || null, time: p.time || r.time || null, oppId: isA ? p.b : p.a, opponent: labelOf(isA ? p.b : p.a), opponentKnown: true, decided: res != null, scoreFor: null, scoreAgainst: null, won, draw: res === "1/2-1/2" });
+    }));
+    const row = (tn.swiss.standings || []).find((x) => x.entrantId === entrantId);
+    swissInfo = row ? { rank: row.rank, points: row.points, totalRounds: tn.swiss.totalRounds, generated: tn.swiss.generatedRounds } : { rank: null, points: 0, totalRounds: tn.swiss.totalRounds, generated: tn.swiss.generatedRounds };
+  }
+  const played = mine.filter((m) => m.decided);
+  const pending = mine.filter((m) => !m.decided);
+  const next = pending.find((m) => m.opponentKnown) || pending[0] || null;
+  const koRounds = tn.knockout ? tn.knockout.rounds.length : 0;
+  const lostKo = mine.find((m) => m.stage.type === "ko" && m.decided && m.won === false);
+  const standing = (tn.standings || []).findIndex((x) => x.entrantId === entrantId);
+  const finished = tn.status === "completed";
+  let groupInfo = null;
+  if (tn.groups) {
+    const gi = tn.groups.findIndex((g) => g.entrantIds.includes(entrantId));
+    if (gi >= 0) {
+      const rows = tn.groups[gi].standings;
+      const rank = rows.findIndex((r) => r.entrantId === entrantId);
+      groupInfo = { groupIndex: gi, rank: rank + 1, size: rows.length, points: rank >= 0 ? rows[rank].points : 0, advance: tn.advancePerGroup || null };
+    }
+  }
+  return {
+    event: { id: ev.id, nameEn: ev.nameEn, nameAr: ev.nameAr, date: ev.date || "", sport: ev.sport || "" },
+    tournament: { format: tn.format, status: tn.status, finalsMode: tn.finalsMode || null, koRounds, hasSchedule: hasSchedule(t) },
+    player: { label: me.label, players: me.players || null },
+    next: next ? { stage: next.stage, court: next.court, time: next.time, date: next.date, opponent: next.opponent, opponentKnown: next.opponentKnown } : null,
+    played: played.map((m) => ({ stage: m.stage, opponent: m.opponent, scoreFor: m.scoreFor, scoreAgainst: m.scoreAgainst, won: m.won, draw: !!m.draw })),
+    journey: { groupInfo, swissInfo, inKnockout: mine.some((m) => m.stage.type === "ko"), koRounds, lostAtRound: lostKo ? lostKo.stage.roundIndex : null, champion: finished && standing === 0, finalPlace: finished && standing >= 0 ? standing + 1 : null, finished },
+  };
+}
+app.get("/api/public/card/:token", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const v = verifyCard(req.params.token);
+  if (!v) return res.status(404).json({ error: "This card link is not valid" });
+  const card = buildPlayerCard(readDb(), v.eventId, v.entrantId);
+  if (!card) return res.status(404).json({ error: "This card is no longer available" });
+  res.json(card);
 });
 
 app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
@@ -8617,6 +8712,7 @@ function applyGroupResult(db, t, match, sa, sb) {
   const winnerId = sa === sb ? null : sa > sb ? match.a : match.b;
   const previous = match.result;
   match.result = { scoreA: sa, scoreB: sb, winnerId };
+  match.decidedAt = new Date().toISOString(); // lets the TV screen show the latest results in the order they were played
   // Once the knockout stage has been drawn from these groups, a correction is
   // only allowed if the same players still qualify - otherwise the bracket
   // would silently disagree with the group tables.
@@ -8743,6 +8839,7 @@ function applyKnockoutResult(db, t, rIdx, mIdx, sa, sb, finalWinnerId, note) {
   }
   match.scoreA = sa;
   match.scoreB = sb;
+  match.decidedAt = new Date().toISOString(); // see applyGroupResult
   match.note = typeof note === "string" ? note.slice(0, 60) : "";
   delete match.report; // a manager's / confirmed result replaces any player report
   propagateKnockoutWinner(t, rIdx, mIdx, finalWinnerId);
