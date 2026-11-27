@@ -174,6 +174,13 @@ function rnCourtChartHtml() {
     <div class="tourn-table-scroll"><table class="cc-table"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 // Print buttons for the schedule sheets (one page per court / all matches by time / a single court).
+function rnTvHtml() {
+  const tn = TOURNAMENT_DATA;
+  if (!tn || typeof TOURNAMENT_EVENT_ID === "undefined" || !TOURNAMENT_EVENT_ID || (typeof SIM_ID !== "undefined" && SIM_ID)) return "";
+  return `<h4 class="rn-h">${escapeAttr(t("tvOpen"))}</h4>
+    <div class="rn-print"><a class="secondary small" href="/tv.html?event=${TOURNAMENT_EVENT_ID}&lang=${currentLang}" target="_blank" rel="noopener">${escapeAttr(t("tvOpen"))}</a></div>
+    <p class="hint-note">${escapeAttr(t("tvOpenHint"))}</p>`;
+}
 function rnPrintHtml() {
   const tn = TOURNAMENT_DATA;
   if (!tn || tn.format === "swiss" || typeof TOURNAMENT_EVENT_ID === "undefined" || !TOURNAMENT_EVENT_ID) return "";
@@ -188,7 +195,7 @@ function rnPrintHtml() {
 }
 function rnOverviewHtml() {
   const tn = TOURNAMENT_DATA;
-  let html = rnCourtChartHtml() + rnPrintHtml();
+  let html = rnCourtChartHtml() + rnTvHtml() + rnPrintHtml();
   if (tn.groups) {
     html += `<h4 class="rn-h">${escapeAttr(t("rnTablesTitle"))}</h4><div class="rn-tables">` + tn.groups.map((g, gi) => `
       <div class="tourn-group"><h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>

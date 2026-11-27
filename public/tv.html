@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MyAhlawy TV</title>
+<!-- Venue TV board: live courts, up next, latest results and a rotating tables/bracket panel.
+     No login. Open it on the TV and press F for full screen; it refreshes itself every 10 seconds. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;900&display=swap" />
+<link rel="stylesheet" href="/tv.css" />
+<script src="/i18n.js"></script>
+</head>
+<body>
+<div id="tv-root" class="tv">
+  <header class="tv-head">
+    <img id="tv-logo" class="tv-logo hidden" alt="" />
+    <div class="tv-titles">
+      <h1 id="tv-title">MyAhlawy</h1>
+      <div id="tv-sub" class="tv-sub"></div>
+    </div>
+    <div class="tv-progress" id="tv-progress" hidden>
+      <div class="tv-progress-text" id="tv-progress-text"></div>
+      <div class="tv-bar"><span id="tv-bar-fill"></span></div>
+    </div>
+    <div class="tv-clock"><span class="tv-live-dot"></span><b id="tv-clock">--:--</b></div>
+  </header>
+  <main id="tv-main" class="tv-main"></main>
+  <div id="tv-note" class="tv-note" hidden></div>
+</div>
+<script src="/tv.js"></script>
+</body>
+</html>

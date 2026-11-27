@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Cairo:wght@600;700;800&family=Pacifico&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="card.css" />
 </head>
 <body>
 
@@ -474,6 +475,7 @@
     <div class="card hidden" id="mp-matches-card">
       <h2 data-i18n="psMyMatchesTitle">My matches</h2>
       <p id="mp-matches-intro" style="color:var(--muted);font-size:0.85rem;">Your tournament schedule, results and winners.</p>
+      <div id="mp-matches-hero" class="mp-hero hidden"></div>
       <div id="mp-matches-list" class="ps-list"></div>
     </div>
 
@@ -2115,6 +2117,7 @@
 <script src="awards.js"></script>
 <script src="sim.js"></script>
 <script src="runner.js"></script>
+<script src="card.js"></script>
 <script src="pscore.js"></script>
 </body>
 </html>

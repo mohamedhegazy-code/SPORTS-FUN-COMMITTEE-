@@ -116,6 +116,33 @@ function psRenderMine() {
   if (!PS.items.length) { list.innerHTML = ""; return; }
   list.innerHTML = PS.items.map(psMatchHtml).join("");
 }
+
+// ---- EA-style match card at the top of "My matches" (data from the public card endpoint) ----------------------
+let PS_HERO = { token: null, data: null, at: 0 };
+async function psRenderHero() {
+  const el = document.getElementById("mp-matches-hero");
+  if (!el) return;
+  const it = PS.items.find((x) => x.state !== "done") || PS.items[0];
+  if (!it || !it.cardToken || typeof pcMount !== "function") { el.classList.add("hidden"); return; }
+  try {
+    const res = await fetch("/api/public/card/" + encodeURIComponent(it.cardToken), { cache: "no-store" });
+    if (!res.ok) { el.classList.add("hidden"); return; }
+    const d = await res.json();
+    PS_HERO = { token: it.cardToken, data: d, at: Date.now() };
+    el.classList.remove("hidden");
+    el.innerHTML = `<div id="mp-hero-card"></div>
+      <div class="pc-actions"><button type="button" class="pc-primary" data-ps-hero="share">${escapeAttr(t("cardShare"))}</button><button type="button" data-ps-hero="copy">${escapeAttr(t("cardCopyLink"))}</button></div>
+      <div class="pc-msg" id="mp-hero-msg" aria-live="polite"></div>`;
+    pcMount(document.getElementById("mp-hero-card"), d);
+  } catch (e) { /* keep whatever was shown */ }
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-ps-hero]");
+  if (!b || !PS_HERO.data) return;
+  const msg = document.getElementById("mp-hero-msg");
+  if (b.dataset.psHero === "share") { const r = await pcShare(PS_HERO.data); if (msg) msg.textContent = r === "downloaded" ? t("cardSaved") : ""; }
+  else { const url = location.origin + "/card.html?c=" + encodeURIComponent(PS_HERO.token) + "&lang=" + currentLang; const ok = await pcCopy(url); if (msg) msg.textContent = ok ? t("cardLinkCopied") : url; }
+});
 async function psLoadMyMatches() {
   if (!(CURRENT_SESSION && CURRENT_SESSION.type === "member")) {
     PS.items = []; psRenderMine();
@@ -129,6 +156,7 @@ async function psLoadMyMatches() {
     const live = new Set(PS.items.filter((x) => x.state === "to_report").map(psKeyOf));
     for (const k of Object.keys(PS.drafts)) if (!live.has(k)) delete PS.drafts[k];
     psRenderMine();
+    psRenderHero();
   } catch (e) { /* the card just stays as it was */ }
 }
 async function psMemberCall(action, it, extra) {

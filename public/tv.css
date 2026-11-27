@@ -1,0 +1,126 @@
+/* MyAhlawy TV board. Everything is sized in vw/vh so it fills any TV (16:9 is the target). */
+:root { --red: #8b0000; --red-dark: #5c0000; --gold: #c9a227; --ink: #0e0709; --ink2: #170d10; --line: rgba(255,255,255,.10); --txt: #f6efe6; --mute: #b9aaa0; --good: #4ade80; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--ink); color: var(--txt); font-family: "Cairo", "Segoe UI", Tahoma, Arial, sans-serif; overflow: hidden; }
+body.idle { cursor: none; }
+.hidden { display: none !important; }
+.tv { height: 100vh; display: grid; grid-template-rows: auto 1fr; background:
+  radial-gradient(120vw 60vh at 85% -10%, color-mix(in srgb, var(--red) 55%, transparent), transparent 60%),
+  radial-gradient(90vw 50vh at 0% 110%, color-mix(in srgb, var(--gold) 14%, transparent), transparent 60%), var(--ink); }
+.tv-head { display: flex; align-items: center; gap: 1.6vw; padding: 1.6vh 2.4vw; border-bottom: 1px solid var(--line); }
+.tv-logo { height: 7vh; max-width: 9vw; object-fit: contain; }
+.tv-titles { flex: 1; min-width: 0; }
+.tv-titles h1 { margin: 0; font-size: 3.2vh; font-weight: 900; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-titles h1 span + span { margin-inline-start: 1.1vw; font-weight: 500; color: var(--mute); font-size: .68em; }
+.tv-titles h1 span + span::before { content: "· "; }
+.tv-sub { color: var(--mute); font-size: 1.9vh; }
+.tv-progress { width: 22vw; }
+.tv-progress-text { font-size: 1.7vh; color: var(--mute); margin-bottom: .6vh; }
+.tv-bar { height: 1vh; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; }
+.tv-bar span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--gold), #f2d676); border-radius: 99px; transition: width .8s ease; }
+.tv-clock { display: flex; align-items: center; gap: .7vw; font-size: 4vh; font-variant-numeric: tabular-nums; }
+.tv-live-dot { width: 1.3vh; height: 1.3vh; border-radius: 50%; background: var(--good); box-shadow: 0 0 1.2vh var(--good); animation: tvpulse 2s infinite; }
+@keyframes tvpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+.tv-main { min-height: 0; display: grid; grid-template-columns: 1.55fr 1fr; grid-template-rows: minmax(0, 1.55fr) minmax(0, 1fr); gap: 1.6vh 1.6vw; padding: 1.6vh 2.4vw 2vh; }
+.tv-box { min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: 1.6vh; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)); padding: 1.4vh 1.4vw; display: flex; flex-direction: column; overflow: hidden; }
+.tv-box h2 { margin: 0 0 1.1vh; font-size: 2.3vh; letter-spacing: .04em; text-transform: uppercase; color: var(--gold); display: flex; align-items: center; gap: .8vw; flex: none; }
+.tv-box h2 .tv-live-dot { background: #ff4d4d; box-shadow: 0 0 1.2vh #ff4d4d; }
+.tv-live { grid-row: 1; grid-column: 1; }
+.tv-next { grid-row: 1; grid-column: 2; }
+.tv-panel { grid-row: 2; grid-column: 1; }
+.tv-results { grid-row: 2; grid-column: 2; }
+
+/* live courts */
+.tv-courts { flex: 1; min-height: 0; display: grid; gap: 1.2vh 1vw; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); grid-auto-rows: 1fr; }
+.court { position: relative; border-radius: 1.4vh; padding: 1.2vh 1vw; background: var(--ink2); border: 1px solid var(--line); display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
+.court.live { border-color: color-mix(in srgb, var(--gold) 70%, transparent); background: linear-gradient(160deg, color-mix(in srgb, var(--red) 55%, var(--ink2)), var(--ink2) 70%); box-shadow: 0 0 2.4vh color-mix(in srgb, var(--red) 55%, transparent); }
+.court.idle { opacity: .55; }
+.court-top { display: flex; align-items: center; justify-content: space-between; gap: .6vw; }
+.court-no { display: inline-flex; align-items: center; gap: .6vw; font-weight: 900; font-size: 2.4vh; color: var(--gold); }
+.court-no i { font-style: normal; display: inline-grid; place-items: center; min-width: 4.4vh; height: 4.4vh; border-radius: 50%; background: var(--gold); color: #2b2200; font-size: 2.6vh; }
+.court-badge { font-size: 1.5vh; font-weight: 700; padding: .3vh .8vw; border-radius: 99px; background: rgba(255,255,255,.12); color: var(--mute); white-space: nowrap; }
+.court.live .court-badge { background: #d62828; color: #fff; display: inline-flex; align-items: center; gap: .4vw; }
+.court.live .court-badge::before { content: ""; width: .9vh; height: .9vh; border-radius: 50%; background: #fff; animation: tvpulse 1.4s infinite; }
+.court-stage { font-size: 1.6vh; color: var(--mute); margin-top: .4vh; }
+.court-sides { display: grid; gap: .5vh; margin: .6vh 0; flex: 1; align-content: center; }
+.side { font-weight: 900; font-size: 3.3vh; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side small { display: block; font-weight: 500; font-size: 1.5vh; color: var(--mute); overflow: hidden; text-overflow: ellipsis; }
+.vs { font-size: 1.6vh; color: var(--gold); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.court-foot { font-size: 1.7vh; color: var(--mute); font-variant-numeric: tabular-nums; }
+.court-empty { margin: auto; text-align: center; color: var(--mute); font-size: 2vh; }
+
+/* lists */
+.tv-list { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: .8vh; overflow: hidden; }
+.row { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .9vw; padding: .9vh .8vw; border-radius: 1.1vh; background: rgba(255,255,255,.05); min-width: 0; }
+.row .when { min-width: 6.4vw; text-align: center; font-weight: 900; font-size: 2.3vh; color: #2b2200; background: var(--gold); border-radius: .9vh; padding: .3vh .5vw; font-variant-numeric: tabular-nums; }
+.row .who { min-width: 0; font-size: 2.05vh; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .who em { font-style: normal; color: var(--gold); margin-inline: .5vw; font-size: .8em; }
+.row .meta { display: block; font-size: 1.45vh; font-weight: 500; color: var(--mute); }
+.row.res { grid-template-columns: 1fr auto 1fr; text-align: center; padding: .7vh .8vw; }
+.tv-list > .fit-hide { display: none; }
+.row.res .t { font-weight: 700; font-size: 1.95vh; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mute); }
+.row.res .t.a { text-align: end; } .row.res .t.b { text-align: start; }
+.row.res .t.w { color: var(--txt); font-weight: 900; }
+.row.res .t.w::after { content: " \2713"; color: var(--good); }
+.row.res .sc { font-weight: 900; font-size: 2.3vh; background: rgba(255,255,255,.1); border-radius: .8vh; padding: .2vh .8vw; min-width: 5vw; font-variant-numeric: tabular-nums; }
+.row.res .st { grid-column: 1 / -1; font-size: 1.35vh; color: var(--mute); margin-top: -.3vh; }
+.tv-empty { margin: auto; color: var(--mute); font-size: 2.1vh; text-align: center; padding: 2vh; }
+.tv-more { color: var(--mute); font-size: 1.6vh; text-align: center; flex: none; }
+
+/* rotating panel */
+.panel-head { display: flex; justify-content: space-between; align-items: center; flex: none; }
+.dots { display: flex; gap: .5vw; }
+.dots i { width: 1.1vh; height: 1.1vh; border-radius: 50%; background: rgba(255,255,255,.2); }
+.dots i.on { background: var(--gold); }
+.slide { flex: 1; min-height: 0; display: grid; gap: 1vh 1vw; animation: tvfade .6s ease; align-content: start; }
+@keyframes tvfade { from { opacity: 0; transform: translateY(1vh); } to { opacity: 1; transform: none; } }
+.slide.tables { grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
+.gt { background: rgba(255,255,255,.05); border-radius: 1.1vh; padding: .8vh .7vw; min-width: 0; }
+.gt h3 { margin: 0 0 .5vh; font-size: 1.8vh; color: var(--gold); }
+.gt table { width: 100%; border-collapse: collapse; font-size: 1.65vh; font-variant-numeric: tabular-nums; }
+.gt th { color: var(--mute); font-weight: 500; text-align: center; padding: .2vh .2vw; }
+.gt td { padding: .25vh .2vw; text-align: center; }
+.gt td.n { text-align: start; max-width: 14vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.gt tr.q td { background: color-mix(in srgb, var(--good) 14%, transparent); }
+.gt td.p { font-weight: 900; color: var(--gold); }
+.slide.bracket { grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); }
+.bcol h3 { margin: 0 0 .6vh; font-size: 1.6vh; color: var(--mute); text-transform: uppercase; letter-spacing: .06em; }
+.bm { background: rgba(255,255,255,.05); border-radius: 1vh; padding: .5vh .6vw; margin-bottom: .6vh; font-size: 1.55vh; min-width: 0; }
+.bm div { display: flex; justify-content: space-between; gap: .5vw; overflow: hidden; white-space: nowrap; }
+.bm div span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.bm .w { font-weight: 900; color: var(--gold); }
+.bm .l { color: var(--mute); }
+.slide.champ { place-items: center; text-align: center; align-content: center; }
+.champ-name { font-size: 6vh; font-weight: 900; color: var(--gold); text-shadow: 0 0 3vh color-mix(in srgb, var(--gold) 60%, transparent); }
+.champ-label { font-size: 2.4vh; letter-spacing: .25em; text-transform: uppercase; color: var(--mute); }
+.champ-trophy { font-size: 7vh; }
+.podium { display: flex; gap: 2vw; justify-content: center; margin-top: 1.4vh; font-size: 2.1vh; color: var(--mute); }
+.podium b { color: var(--txt); }
+
+/* picker + notes */
+.tv-pick { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; gap: 1.6vh; align-content: start; padding: 2vh 2vw; }
+.tv-pick h2 { color: var(--gold); margin: 0; font-size: 3vh; }
+.tv-pick a { display: block; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 1.4vh; padding: 1.8vh 1.6vw; color: var(--txt); text-decoration: none; font-size: 2.6vh; font-weight: 700; }
+.tv-pick a:hover, .tv-pick a:focus-visible { border-color: var(--gold); outline: none; }
+.tv-pick a small { display: block; color: var(--mute); font-weight: 500; font-size: 1.8vh; }
+.tv-fullmsg { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; place-items: center; text-align: center; color: var(--mute); font-size: 3vh; }
+.tv-fullmsg b { color: var(--gold); display: block; font-size: 5vh; margin-bottom: 1vh; }
+.tv-note { position: fixed; bottom: 1vh; inset-inline-start: 1.4vw; font-size: 1.5vh; color: var(--mute); background: rgba(0,0,0,.55); padding: .4vh .8vw; border-radius: 99px; }
+
+/* narrow screens (someone opened it on a phone): stack the boxes */
+@media (max-aspect-ratio: 1/1), (max-width: 800px) {
+  html, body { overflow: auto; }
+  .tv { height: auto; min-height: 100vh; }
+  .tv-main { grid-template-columns: 1fr; grid-template-rows: none; }
+  .tv-live, .tv-next, .tv-panel, .tv-results { grid-row: auto; grid-column: 1; }
+  .tv-courts { --cols: 1 !important; }
+  .tv-titles h1 { font-size: 2.4vh; white-space: normal; }
+  .tv-progress { display: none; }
+  .tv-clock { font-size: 3vh; }
+  .side { font-size: 2.4vh; } .court-no { font-size: 2.2vh; }
+  .row .who { font-size: 2vh; } .row .when { font-size: 2vh; min-width: 16vw; }
+  .row.res .t { font-size: 1.9vh; } .row.res .sc { min-width: 14vw; }
+  .gt table { font-size: 1.7vh; } .slide.tables, .slide.bracket { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
