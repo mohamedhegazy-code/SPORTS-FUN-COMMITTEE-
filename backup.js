@@ -18,6 +18,8 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const crypto = require("crypto");
+const { Readable } = require("stream");
+const { pipeline } = require("stream/promises");
 
 const FORMAT = "ahlawy-backup";
 const FORMAT_VERSION = 1;
@@ -488,4 +490,112 @@ function restoreBackup({ filePath, inspected, dataDir, dbPath, uploadsDir, backu
   }
 }
 
-module.exports = { buildBackup, inspectBackup, restoreBackup, countsOf, uploadsSummary, walk, zipWriter, zipReader, crc32, sha256, FORMAT_VERSION };
+
+// ------------------------------------------------------------------------------ S3 / Cloudflare R2 storage
+// A tiny S3-compatible client (AWS Signature V4, path-style URLs) - enough for off-server backups on
+// Cloudflare R2, Backblaze B2, Amazon S3, MinIO... No extra npm package needed.
+const hmac = (key, data) => crypto.createHmac("sha256", key).update(data).digest();
+const hex = (buf) => buf.toString("hex");
+const enc = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+
+// Builds the Authorization header value. `headers` is a lower-case-name -> value map of EVERY header to sign.
+function signV4({ method, canonicalUri, query = {}, headers, payloadHash, amzDate, region, service = "s3", accessKeyId, secretAccessKey }) {
+  const date = amzDate.slice(0, 8);
+  const names = Object.keys(headers).map((h) => h.toLowerCase()).sort();
+  const canonicalHeaders = names.map((n) => `${n}:${String(headers[n] !== undefined ? headers[n] : headers[Object.keys(headers).find((k) => k.toLowerCase() === n)]).trim().replace(/\s+/g, " ")}\n`).join("");
+  const canonicalQuery = Object.keys(query).sort().map((k) => `${enc(k)}=${enc(String(query[k]))}`).join("&");
+  const canonicalRequest = [method, canonicalUri, canonicalQuery, canonicalHeaders, names.join(";"), payloadHash].join("\n");
+  const scope = `${date}/${region}/${service}/aws4_request`;
+  const toSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256(Buffer.from(canonicalRequest))].join("\n");
+  const kSigning = hmac(hmac(hmac(hmac("AWS4" + secretAccessKey, date), region), service), "aws4_request");
+  const signature = hex(hmac(kSigning, toSign));
+  return `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${names.join(";")}, Signature=${signature}`;
+}
+
+function s3Client({ endpoint, region = "auto", accessKeyId, secretAccessKey, bucket, prefix = "" }) {
+  const base = new URL(endpoint);
+  const host = base.host;
+  const objectPath = (key) => `/${enc(bucket)}/${key.split("/").map(enc).join("/")}`;
+  async function call(method, key, { query = {}, body = null, size = 0, extraHeaders = {} } = {}) {
+    const amzDate = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const canonicalUri = key === null ? `/${enc(bucket)}` : objectPath(key);
+    const payloadHash = body ? "UNSIGNED-PAYLOAD" : sha256(Buffer.alloc(0));
+    const headers = { host, "x-amz-content-sha256": payloadHash, "x-amz-date": amzDate, ...extraHeaders };
+    const auth = signV4({ method, canonicalUri, query, headers, payloadHash, amzDate, region, accessKeyId, secretAccessKey });
+    const qs = Object.keys(query).sort().map((k) => `${enc(k)}=${enc(String(query[k]))}`).join("&");
+    const sendHeaders = { ...headers, Authorization: auth };
+    delete sendHeaders.host;
+    const init = { method, headers: sendHeaders };
+    if (body) { init.body = body; init.duplex = "half"; sendHeaders["content-length"] = String(size); }
+    return fetch(`${base.protocol}//${host}${canonicalUri}${qs ? "?" + qs : ""}`, init);
+  }
+  const fail = async (res, what) => {
+    const text = await res.text().catch(() => "");
+    const code = (/<Code>([^<]+)<\/Code>/.exec(text) || [])[1] || "";
+    const err = new Error(`${what} failed (HTTP ${res.status}${code ? " " + code : ""})`);
+    err.status = res.status; err.code = code;
+    throw err;
+  };
+  return {
+    prefix,
+    async put(key, filePath) {
+      const size = fs.statSync(filePath).size;
+      const res = await call("PUT", key, { body: Readable.toWeb(fs.createReadStream(filePath)), size, extraHeaders: { "content-type": "application/zip" } });
+      if (!res.ok) await fail(res, "Upload");
+      await res.arrayBuffer();
+      return size;
+    },
+    async putBuffer(key, buf) {
+      const tmp = path.join(require("os").tmpdir(), `s3put-${crypto.randomBytes(6).toString("hex")}`);
+      fs.writeFileSync(tmp, buf);
+      try { return await this.put(key, tmp); } finally { try { fs.unlinkSync(tmp); } catch (e) { /* gone */ } }
+    },
+    async head(key) {
+      const res = await call("HEAD", key);
+      if (res.status === 404) return null;
+      if (!res.ok) await fail(res, "Check");
+      return { size: Number(res.headers.get("content-length") || 0) };
+    },
+    async getToFile(key, destPath) {
+      const res = await call("GET", key);
+      if (!res.ok) await fail(res, "Download");
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(destPath));
+      return fs.statSync(destPath).size;
+    },
+    async getBuffer(key) {
+      const res = await call("GET", key);
+      if (!res.ok) await fail(res, "Download");
+      return Buffer.from(await res.arrayBuffer());
+    },
+    async stream(key) {
+      const res = await call("GET", key);
+      if (!res.ok) await fail(res, "Download");
+      return { body: Readable.fromWeb(res.body), size: Number(res.headers.get("content-length") || 0) };
+    },
+    async delete(key) {
+      const res = await call("DELETE", key);
+      if (!res.ok && res.status !== 404) await fail(res, "Delete");
+      await res.arrayBuffer();
+    },
+    async list(pfx) {
+      const out = [];
+      let token = null;
+      for (let page = 0; page < 20; page++) {
+        const query = { "list-type": "2", prefix: pfx };
+        if (token) query["continuation-token"] = token;
+        const res = await call("GET", null, { query });
+        if (!res.ok) await fail(res, "Listing");
+        const xml = await res.text();
+        for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+          const g = (tag) => ((new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(m[1]) || [])[1] || "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+          out.push({ key: g("Key"), size: Number(g("Size")), at: g("LastModified") });
+        }
+        const next = /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml);
+        if (/<IsTruncated>true<\/IsTruncated>/.test(xml) && next) token = next[1].replace(/&amp;/g, "&"); else break;
+      }
+      return out;
+    },
+  };
+}
+
+module.exports = { signV4, s3Client, buildBackup, inspectBackup, restoreBackup, countsOf, uploadsSummary, walk, zipWriter, zipReader, crc32, sha256, FORMAT_VERSION };

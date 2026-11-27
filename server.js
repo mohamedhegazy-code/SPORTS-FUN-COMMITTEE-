@@ -20,6 +20,7 @@ const Swiss = require("./swiss");
 const { renderSwissPrint } = require("./swiss_print");
 const { renderSchedulePrint } = require("./schedule_print");
 const backupLib = require("./backup");
+const cloudBackup = require("./cloud_backup");
 const os = require("os");
 const { renderEventSheet, renderAgeReport, renderCustomReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
 const AgeUtils = require("./age_utils");
@@ -228,7 +229,7 @@ app.use((req, res, next) => {
 // Server-side source files must never be downloadable, even if one is
 // uploaded into public/ by mistake (it happened once with server.js).
 app.use((req, res, next) => {
-  if (/^\/(server|swiss|swiss_print|schedule_print|backup|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+  if (/^\/(server|swiss|swiss_print|schedule_print|backup|cloud_backup|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
     return res.status(404).end();
   }
   next();
@@ -10666,6 +10667,104 @@ app.post("/api/admin/backup/restore", requireStaffRole("admin"), (req, res) => {
   res.json({ ok: true, ...result, counts: backupLib.countsOf(readDb()), staffStillExists: !!readDb().staffAccounts[req.staff.username] });
 });
 
+// ---- Automatic nightly backup to Cloudflare R2 (or any S3-compatible bucket) -------------------------------
+// The keys live ONLY in Railway environment variables (R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID,
+// R2_SECRET_ACCESS_KEY) - never in db.json, never in a backup, never sent to the browser.
+const cloudCtx = {
+  config: () => cloudBackup.readConfig(),
+  dbPath: DB_PATH, uploadsDir: BACKUP_UPLOADS_DIR,
+  qrFingerprint,
+  isBusy: () => backupBusy,
+  setBusy: (v) => { backupBusy = v; },
+};
+let cloudRunning = false;
+async function runAndRecordCloudBackup(trigger, staff) {
+  if (cloudRunning) return { ok: false, busy: true, error: "A cloud backup is already running" };
+  cloudRunning = true;
+  try {
+    const result = await cloudBackup.runCloudBackup(cloudCtx, { trigger, by: staff ? (staff.name || staff.username) : "" });
+    if (result.busy) return result;
+    const db = readDb();
+    db.settings = db.settings || {};
+    db.settings.autoBackup = cloudBackup.applyResult(db.settings.autoBackup, result);
+    logActivity(db, {
+      actorType: staff ? "staff" : "system", actorId: staff ? staff.username : "system", actorName: staff ? staff.name : "Automatic backup",
+      action: result.ok ? "cloud_backup" : "cloud_backup_failed",
+      details: result.ok
+        ? `Backup saved to the cloud bucket (${Math.round(result.bytes / 1024)} KB, ${result.prune.pruned} old copies removed, ${result.prune.kept} kept)${trigger === "auto" ? "" : " - started by an admin"}`
+        : `Cloud backup failed: ${String(result.error).slice(0, 300)}`,
+    });
+    writeDb(db);
+    if (!result.ok) console.error("Cloud backup failed:", result.error);
+    return result;
+  } catch (e) {
+    console.error("Cloud backup crashed:", e);
+    return { ok: false, error: e.message };
+  } finally {
+    cloudRunning = false;
+  }
+}
+function cloudStatusPayload(db) {
+  const cfg = cloudBackup.readConfig();
+  return { config: cloudBackup.publicConfig(cfg), status: (db.settings && db.settings.autoBackup) || null, running: cloudRunning };
+}
+app.get("/api/admin/backup/cloud", requireStaffRole("admin"), (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(cloudStatusPayload(req.db));
+});
+app.get("/api/admin/backup/cloud/list", requireStaffRole("admin"), async (req, res) => {
+  const cfg = cloudBackup.readConfig();
+  res.set("Cache-Control", "no-store");
+  if (!cfg.configured) return res.json({ ok: false, error: "Not set up yet", items: [] });
+  try { res.json({ ok: true, items: await cloudBackup.listRemote(cfg) }); }
+  catch (e) { res.json({ ok: false, error: cloudBackup.friendlyError(e), items: [] }); }
+});
+app.post("/api/admin/backup/cloud/test", requireStaffRole("admin"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(await cloudBackup.testConnection(cloudBackup.readConfig()));
+});
+app.post("/api/admin/backup/cloud/run", requireStaffRole("admin"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const cfg = cloudBackup.readConfig();
+  if (!cfg.configured) return res.status(400).json({ error: "Cloud backup is not set up yet - add the R2 settings in Railway first" });
+  const result = await runAndRecordCloudBackup("manual", req.staff);
+  if (result.busy) return res.status(409).json({ error: result.error });
+  const { counts, ...rest } = result;
+  res.json({ ...rest, status: cloudStatusPayload(readDb()).status });
+});
+app.get("/api/admin/backup/cloud/download/:name", requireStaffRole("admin"), async (req, res) => {
+  const name = String(req.params.name);
+  if (!cloudBackup.NAME_RE.test(name)) return res.status(400).json({ error: "Bad file name" });
+  const cfg = cloudBackup.readConfig();
+  if (!cfg.configured) return res.status(400).json({ error: "Cloud backup is not set up yet" });
+  try {
+    const { body, size } = await cloudBackup.clientFor(cfg).stream(cfg.prefix + name);
+    res.set({ "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" });
+    if (size) res.set("Content-Length", String(size));
+    body.on("error", () => res.destroy());
+    body.pipe(res);
+  } catch (e) {
+    res.status(e.status === 404 ? 404 : 502).json({ error: cloudBackup.friendlyError(e) });
+  }
+});
+// Checks every minute whether tonight's backup is due (after BACKUP_HOUR, Cairo time, none saved today).
+function startCloudBackupScheduler() {
+  const tick = () => {
+    try {
+      const cfg = cloudBackup.readConfig();
+      const db = readDb();
+      if (cloudRunning || backupBusy) return;
+      if (!cloudBackup.isDue(db.settings && db.settings.autoBackup, cfg)) return;
+      runAndRecordCloudBackup("auto", null).catch((e) => console.error("Cloud backup tick failed:", e.message));
+    } catch (e) { console.error("Cloud backup scheduler error:", e.message); }
+  };
+  const timer = setInterval(tick, 60 * 1000);
+  if (timer.unref) timer.unref();
+  setTimeout(tick, 20 * 1000).unref();
+  const cfg = cloudBackup.readConfig();
+  console.log(cfg.configured ? `Nightly cloud backup is ON (after ${String(cfg.hour).padStart(2, "0")}:00 Cairo time, keeping ${cfg.keep}).` : "Nightly cloud backup is OFF (R2 settings not added yet).");
+}
+
 // Turns multer upload errors (file too big, wrong type, etc.) into a JSON
 // error response instead of an HTML stack trace. Must have 4 args to be
 // recognized by Express as an error-handling middleware.
@@ -10687,4 +10786,5 @@ app.use((err, req, res, next) => {
 bootstrapAdmin();
 app.listen(PORT, () => {
   console.log(`MyAhlawy points system running at http://localhost:${PORT}`);
+  startCloudBackupScheduler();
 });
