@@ -173,9 +173,22 @@ function rnCourtChartHtml() {
     <p class="hint-note">${escapeAttr(t(even ? "rnCcEven" : "rnCcUneven"))}</p>
     <div class="tourn-table-scroll"><table class="cc-table"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
+// Print buttons for the schedule sheets (one page per court / all matches by time / a single court).
+function rnPrintHtml() {
+  const tn = TOURNAMENT_DATA;
+  if (!tn || tn.format === "swiss" || typeof TOURNAMENT_EVENT_ID === "undefined" || !TOURNAMENT_EVENT_ID) return "";
+  const courts = tn.schedule && tn.schedule.courts ? tn.schedule.courts : 0;
+  const base = `/admin/print/tournament/${TOURNAMENT_EVENT_ID}`;
+  const q = `&lang=${currentLang}${typeof SIM_ID !== "undefined" && SIM_ID ? "&sim=" + SIM_ID : ""}`;
+  const link = (view, label, extra) => `<a class="secondary small" href="${base}?view=${view}${q}${extra || ""}" target="_blank" rel="noopener">${escapeAttr(label)}</a>`;
+  const one = courts > 1 ? `<div class="rn-print-one"><span>${escapeAttr(t("rnPrintOne"))}</span>${Array.from({ length: courts }, (_, i) => link("courts", `${t("courtLabel")} ${i + 1}`, "&court=" + (i + 1))).join("")}</div>` : "";
+  return `<h4 class="rn-h">${escapeAttr(t("rnPrintTitle"))}</h4>
+    <div class="rn-print">${link("courts", t("rnPrintCourts"))}${link("time", t("rnPrintTime"))}</div>${one}
+    <p class="hint-note">${escapeAttr(t("rnPrintHint"))}</p>`;
+}
 function rnOverviewHtml() {
   const tn = TOURNAMENT_DATA;
-  let html = rnCourtChartHtml();
+  let html = rnCourtChartHtml() + rnPrintHtml();
   if (tn.groups) {
     html += `<h4 class="rn-h">${escapeAttr(t("rnTablesTitle"))}</h4><div class="rn-tables">` + tn.groups.map((g, gi) => `
       <div class="tourn-group"><h4>${escapeAttr(t("groupLabel"))} ${String.fromCharCode(65 + gi)}</h4>

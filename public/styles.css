@@ -1936,3 +1936,7 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .cc-table td small { display: block; font-size: .7rem; opacity: .7; }
 .cc-table .cc-zero { opacity: .35; }
 .cc-table td.cc-total, .cc-table tfoot td { font-weight: 700; background: var(--surface-2, #f6f3f0); }
+
+.rn-print, .rn-print-one { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.rn-print-one span { font-size: .85rem; color: var(--muted, #6b6b6b); }
+.rn-print a, .rn-print-one a { text-decoration: none; }
