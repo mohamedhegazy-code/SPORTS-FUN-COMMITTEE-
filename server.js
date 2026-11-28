@@ -4814,6 +4814,7 @@ app.post("/api/staff/registrations/:id/attendance-confirmation", requireStaffRol
   if (reg.checkedIn) return res.status(409).json({ error: "This person is already checked in" });
   const event = db.events.find((e) => e.id === reg.eventId);
   if (!event || eventEndDate(event) < todayStr()) return res.status(400).json({ error: "The event is over" });
+  if (!event.attendanceConfirmEnabled) return res.status(409).json({ error: "Attendance confirmation is switched off for this event", code: "attendance_confirmation_off" });
   if (status === "none") {
     delete reg.attendanceConfirm; delete reg.attendanceConfirmAt; delete reg.attendanceConfirmBy;
   } else {
@@ -4831,6 +4832,26 @@ app.post("/api/staff/registrations/:id/attendance-confirmation", requireStaffRol
   });
   writeDb(db);
   res.json({ success: true, registrationId: reg.id, attendanceConfirm: reg.attendanceConfirm || null, attendanceConfirmAt: reg.attendanceConfirmAt || null });
+});
+
+// Per-event switch for the "Will attend / Won't attend" column on the Check-in list and the
+// Event hub. Off by default; only Admin and the Tournament Manager of that event can change it.
+// Answers already recorded are kept when it is switched off (they show again if it is switched back on).
+app.put("/api/staff/events/:eventId/attendance-confirmation-setting", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const event = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!event) return res.status(404).json({ error: "Event not found" });
+  const enabled = req.body && (req.body.enabled === true || req.body.enabled === "true");
+  event.attendanceConfirmEnabled = !!enabled;
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "attendance_confirmation_switch",
+    details: `${event.nameEn} — attendance confirmation ${enabled ? "switched on" : "switched off"}`,
+  });
+  writeDb(db);
+  res.json({ success: true, eventId: event.id, attendanceConfirmEnabled: !!event.attendanceConfirmEnabled });
 });
 
 app.post("/api/checkin/undo", requireStaffRole("staff"), requireRegistrationAccess, (req, res) => {
@@ -6708,9 +6729,33 @@ function tournamentEntrantName(db, reg, forPublic) {
   if (!member) return "Member";
   return forPublic ? publicDisplayName(db, reg.membershipNumber) : member.name;
 }
+// "Only checked-in players play" mode (t.fromCheckin, set from the gate Check-in screen): the
+// players are whoever the gate has checked in. Until the draw is made that is read live; the
+// moment the draw is made the list is frozen (t.frozenRegIds) so a later undo / late check-in can
+// never change who is in the bracket. Swiss keeps accepting latecomers for later rounds. Practice
+// runs (simulations) have their own dummy players and ignore this mode.
+function checkinModeOn(db, t) {
+  return !!(t && t.fromCheckin && !(db && db.__sim));
+}
+// Present / absent / not_yet for one player. In check-in mode the gate decides: checked in = present.
+function tournamentAttendanceOf(db, t, regId) {
+  if (checkinModeOn(db, t)) {
+    const reg = db.registrations.find((r) => r.id === regId);
+    return reg && reg.checkedIn ? "present" : "absent";
+  }
+  return (t.attendance || {})[regId] || "not_yet";
+}
+function checkinAllowedRegIds(db, t) {
+  const frozen = Array.isArray(t.frozenRegIds) ? new Set(t.frozenRegIds) : null;
+  const inNow = new Set(db.registrations.filter((r) => r.eventId === t.eventId && !r.waitlisted && r.checkedIn).map((r) => r.id));
+  if (!frozen) return inNow;
+  if (t.format === "swiss") return new Set([...frozen, ...inNow]);
+  return frozen;
+}
 function tournamentEntrants(db, t, forPublic) {
   if (t.mode === "team") {
-    return t.teams.map((team) => ({
+    const allowed = checkinModeOn(db, t) ? checkinAllowedRegIds(db, t) : null;
+    return t.teams.filter((team) => !allowed || (team.memberIds.length && team.memberIds.every((id) => allowed.has(id)))).map((team) => ({
       id: team.id,
       label: team.name,
       registrationIds: team.memberIds,
@@ -6726,8 +6771,9 @@ function tournamentEntrants(db, t, forPublic) {
       }),
     }));
   }
+  const allowedReg = checkinModeOn(db, t) ? checkinAllowedRegIds(db, t) : null;
   return db.registrations
-    .filter((r) => r.eventId === t.eventId && !r.waitlisted)
+    .filter((r) => r.eventId === t.eventId && !r.waitlisted && (!allowedReg || allowedReg.has(r.id)))
     .map((r) => ({
       id: "reg" + r.id,
       label: tournamentEntrantName(db, r, forPublic),
@@ -7260,7 +7306,7 @@ function serializeSwiss(db, t, entrants, labelOf, forPublic) {
       women: !!(reg && reg.catWomen),
       junior: !!(reg && reg.catJunior),
       withdrawn: withdrawn.has(r.entrantId),
-      absent: !!(reg && (t.attendance || {})[reg.id] === "absent"),
+      absent: !!(reg && tournamentAttendanceOf(db, t, reg.id) === "absent"),
       points: r.points,
       games: r.games,
       recorded: r.recorded,
@@ -7354,7 +7400,7 @@ function generateSwissRound(db, t) {
   const entrants = reconcileSeedOrder(db, t);
   const withdrawn = new Set(sw.withdrawn);
   const activeIds = entrants
-    .filter((e) => !withdrawn.has(e.id) && (t.attendance || {})[e.registrationIds[0]] !== "absent")
+    .filter((e) => !withdrawn.has(e.id) && tournamentAttendanceOf(db, t, e.registrationIds[0]) !== "absent")
     .map((e) => e.id);
   if (activeIds.length < 2) return { error: "Need at least 2 active (not withdrawn / not absent) players to draw a round" };
   const made = Swiss.buildNextRound({
@@ -7515,7 +7561,7 @@ function serializeTournament(db, t, forPublic) {
         entrantId: e.id,
         entrantLabel: e.label,
         name,
-        status: (t.attendance || {})[regId] || "not_yet",
+        status: tournamentAttendanceOf(db, t, regId),
       };
     })
   );
@@ -7558,8 +7604,22 @@ function serializeTournament(db, t, forPublic) {
         }
       : null,
     attendance: attendanceList,
+    // Gate check-in mode ("only checked-in players play") - staff views only.
+    fromCheckin: forPublic ? undefined : checkinModeOn(db, t),
+    checkin: forPublic ? undefined : checkinSummary(db, t),
     awards: serializeAwards(db, t, entrants, forPublic),
   };
+}
+// Numbers shown on the Check-in screen's tournament panel.
+function checkinSummary(db, t) {
+  const regs = db.registrations.filter((r) => r.eventId === t.eventId && !r.waitlisted);
+  const inIds = new Set(regs.filter((r) => r.checkedIn).map((r) => r.id));
+  const out = { registered: regs.length, checkedIn: inIds.size, locked: Array.isArray(t.frozenRegIds), teamsTotal: null, teamsReady: null };
+  if (t.mode === "team") {
+    out.teamsTotal = (t.teams || []).length;
+    out.teamsReady = (t.teams || []).filter((team) => team.memberIds.length && team.memberIds.every((id) => inIds.has(id))).length;
+  }
+  return out;
 }
 
 // =========================================================================
@@ -7654,6 +7714,7 @@ function buildSimData(real, ev, p) {
     t.id = data.nextIds.tournament++;
     Object.assign(t, { teams: [], seedOrder: [], nextMatchId: 1, groups: null, knockout: null, standings: null, pointsAwardedAt: null, attendance: {}, awards: undefined, scorers: undefined, seasonSchedule: undefined, finalsPlan: undefined, estimatedFinishMinutes: undefined, lastGroupSlotEnd: undefined });
     delete t.awards; delete t.seasonSchedule; delete t.finalsPlan;
+    delete t.fromCheckin; delete t.frozenRegIds; // a practice run uses its own dummy players, not the gate
     if (t.format === "swiss" && t.swiss) t.swiss = { ...t.swiss, rounds: [], withdrawn: [], nextPairingId: 1 };
     if (t.mode === "team") {
       const size = Math.max(2, Number(p.teamSize) || (t0.teams.length ? Math.round(t0.teams.reduce((a, x) => a + x.memberIds.length, 0) / t0.teams.length) : 5));
@@ -8566,10 +8627,15 @@ function generateTournamentDraw(db, t) {
   if (t.format === "casual") return { error: "Fun sessions don't use a generated bracket - just track attendance" };
   if (tournamentIsGenerated(t)) return { error: "Already generated for this tournament" };
   const entrants = reconcileSeedOrder(db, t);
-  if (entrants.length < 2) return { error: "Need at least 2 entrants to generate a tournament" };
+  if (entrants.length < 2) {
+    return { error: checkinModeOn(db, t) ? "Need at least 2 checked-in players (or complete teams) to generate a tournament - check people in first on the Check-in screen" : "Need at least 2 entrants to generate a tournament" };
+  }
+  // Check-in mode: lock in exactly who was checked in at the moment of the draw.
+  const freezePlayers = () => { if (checkinModeOn(db, t)) t.frozenRegIds = entrants.flatMap((e) => e.registrationIds); };
   if (t.format === "swiss") {
     const made = generateSwissRound(db, t);
     if (made.error) return { error: made.error };
+    freezePlayers();
     return { warnings: made.warnings };
   }
   if (t.format === "groups") {
@@ -8583,6 +8649,7 @@ function generateTournamentDraw(db, t) {
   } else {
     buildKnockoutRounds(t, t.seedOrder);
   }
+  freezePlayers();
   return {};
 }
 app.post("/api/admin/tournaments/:eventId/generate", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
@@ -8634,6 +8701,7 @@ app.post("/api/admin/tournaments/:eventId/reseed", requireStaffRole(["tournament
   t.pointsAwardedAt = null;
   t.lastGroupSlotEnd = null;
   t.status = "seeding";
+  delete t.frozenRegIds; // check-in mode: the player list is read live again until the next draw
   reconcileSeedOrder(db, t);
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
@@ -8775,6 +8843,9 @@ app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole(["tournam
   if (!["present", "absent", "not_yet"].includes(status)) {
     return res.status(400).json({ error: "status must be 'present', 'absent' or 'not_yet'" });
   }
+  if (checkinModeOn(db, t)) {
+    return res.status(409).json({ error: "This tournament takes its players from the gate check-in - check the person in (or undo the check-in) on the Check-in screen instead", code: "attendance_from_checkin" });
+  }
   const entrants = tournamentEntrants(db, t);
   const validRegIds = new Set(entrants.flatMap((e) => e.registrationIds));
   const regId = Number(registrationId);
@@ -8784,6 +8855,52 @@ app.put("/api/admin/tournaments/:eventId/attendance", requireStaffRole(["tournam
   else t.attendance[regId] = status;
   writeDb(db);
   res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Switch "Only checked-in players play" for this tournament (set from the Check-in screen by Admin
+// or the event's Tournament Manager). Allowed until the draw is made; the draw then locks the list.
+app.put("/api/admin/tournaments/:eventId/checkin-mode", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.status(404).json({ error: "No tournament for this event" });
+  if (tournamentIsGenerated(t)) return res.status(409).json({ error: "The draw has already been made - the players are locked in", code: "already_generated" });
+  const enabled = req.body && (req.body.enabled === true || req.body.enabled === "true");
+  t.fromCheckin = !!enabled;
+  delete t.frozenRegIds;
+  reconcileSeedOrder(db, t);
+  const event = db.events.find((e) => e.id === t.eventId);
+  logActivity(db, {
+    actorType: "staff",
+    actorId: req.staff.username,
+    actorName: req.staff.name,
+    action: "tournament_checkin_mode",
+    details: `${event ? event.nameEn : "#" + t.eventId} — only checked-in players play: ${enabled ? "on" : "off"}`,
+  });
+  writeDb(db);
+  res.json({ tournament: serializeTournament(db, t) });
+});
+
+// Small read for the Check-in screen's "Tournament" panel (light enough to call after every check-in
+// tap, unlike the full tournament read). Not held back before the event day - the panel just says when
+// the real tournament opens for the manager.
+app.get("/api/admin/tournaments/:eventId/checkin-summary", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const t = findTournament(db, Number(req.params.eventId));
+  if (!t) return res.json({ exists: false });
+  const ev = db.events.find((e) => e.id === t.eventId);
+  const dayOpen = !(req.staff.role === "tournament" && ev && ev.date && cairoToday() < ev.date);
+  res.json({
+    exists: true,
+    mode: t.mode,
+    format: t.format,
+    finalsMode: t.finalsMode || null,
+    status: t.status,
+    generated: tournamentIsGenerated(t),
+    fromCheckin: checkinModeOn(db, t),
+    checkin: checkinSummary(db, t),
+    dayOpen,
+    opensOn: ev ? ev.date : null,
+  });
 });
 
 // Draws the knockout stage (or the table finals) from finished group tables. Returns { error } or {}.
