@@ -133,18 +133,41 @@ async function main() {
   ok(r.status === 409 && r.json.code === "exclusive_event", "child cannot take both", r.json);
   ok(r.json.attendeeName === "XC Kid", "refusal names the child", r.json);
 
-  section("Waiting list counts as registered");
+  section("Waiting list is not a place: it does not block the other event");
   r = await mkEvent(admin, "Tiny Amateurs", { exclusiveCode: "SMALL", maxCapacity: 1 });
   const S1 = r.json.id;
   r = await mkEvent(admin, "Tiny Pros", { exclusiveCode: "SMALL" });
   const S2 = r.json.id;
-  const m4 = await signup("4"), m5 = await signup("5");
+  const m4 = await signup("4"), m5 = await signup("5"), m7 = await signup("7");
   r = await api("/api/register", { method: "POST", jar: m4.jar, body: { eventId: S1 } });
-  ok(r.status === 201, "first player takes the only place");
+  ok(r.status === 201 && !r.json.waitlisted, "first player takes the only place");
   r = await api("/api/register", { method: "POST", jar: m5.jar, body: { eventId: S1, joinWaitlist: true } });
   ok(r.status === 201 && r.json.waitlisted === true, "second joins the waiting list", r.json);
+  const m5S1 = r.json.registration.id;
+  r = await api("/api/register", { method: "POST", jar: m7.jar, body: { eventId: S1, joinWaitlist: true } });
+  ok(r.status === 201 && r.json.waitlisted === true, "third joins the waiting list too");
+  const m7S1 = r.json.registration.id;
   r = await api("/api/register", { method: "POST", jar: m5.jar, body: { eventId: S2 } });
-  ok(r.status === 409 && r.json.code === "exclusive_event", "waiting-list player cannot also join the other event", r.json);
+  ok(r.status === 201 && !r.json.waitlisted, "waiting-list player may register in the other event", r.json);
+  const m5S2 = r.json.registration.id;
+  r = await api("/api/me/registrations", { jar: m5.jar });
+  ok(r.json.find((x) => x.id === m5S1).waitlisted === true, "and stays on the waiting list in the first");
+  r = await api("/api/register", { method: "POST", jar: m4.jar, body: { eventId: S2, joinWaitlist: true } });
+  ok(r.status === 409 && r.json.code === "exclusive_event", "a CONFIRMED player is still blocked from the other event", r.json);
+
+  section("Promotion respects the rule");
+  r = await api(`/api/admin/registrations/${m5S1}/promote`, { method: "POST", jar: admin });
+  ok(r.status === 409 && r.json.code === "exclusive_event", "admin cannot promote someone already confirmed in the other event", r.json);
+  r = await api(`/api/me/registrations/${(await api("/api/me/registrations", { jar: m4.jar })).json.find((x) => x.eventId === S1).id}`, { method: "DELETE", jar: m4.jar });
+  ok(r.status === 200 && r.json.promoted === true, "cancelling frees the place and promotes someone", r.json);
+  r = await api("/api/me/registrations", { jar: m5.jar });
+  ok(r.json.find((x) => x.id === m5S1).waitlisted === true, "automatic promotion skips the player confirmed elsewhere");
+  r = await api("/api/me/registrations", { jar: m7.jar });
+  ok(r.json.find((x) => x.id === m7S1).waitlisted === false, "and promotes the next eligible player instead");
+  r = await api(`/api/me/registrations/${m5S2}`, { method: "DELETE", jar: m5.jar });
+  ok(r.status === 200, "player drops the other event");
+  r = await api(`/api/admin/registrations/${m5S1}/promote`, { method: "POST", jar: admin, body: { force: true } });
+  ok(r.status === 200 && r.json.waitlisted === false, "now the admin can promote them", r.json);
 
   section("Admin invite skips people already in the other event");
   r = await api(`/api/admin/events/${A}/invite`, { method: "POST", jar: admin, body: { membershipNumbers: [m1.mn, m2.mn] } });

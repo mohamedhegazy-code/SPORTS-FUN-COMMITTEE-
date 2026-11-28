@@ -94,9 +94,58 @@ const prime = async (jar) => { await api("/", { jar }); return jar; };
   const rows2 = (await api(`/api/staff/events/${id2}/roster`, { jar: admin })).json;
   const w = rows2.find((x) => x.waitlisted);
   ok(!!w, "one waiting person");
-  const pr = await api(`/api/admin/registrations/${w.registrationId}/promote`, { method: "POST", jar: admin });
-  ok(pr.status === 200, "manual promote ok", pr.json);
-  ok((await api(`/api/staff/events/${id2}/roster`, { jar: admin })).json.every((x) => !x.waitlisted), "both confirmed after manual promote");
+  const pr0 = await api(`/api/admin/registrations/${w.registrationId}/promote`, { method: "POST", jar: admin });
+  ok(pr0.status === 409 && pr0.json.code === "over_capacity" && pr0.json.maxCapacity === 1 && pr0.json.confirmed === 1 && pr0.json.suggested === 2 && pr0.json.unit === "people", "full event: promote is warned, suggests 2", pr0.json);
+  ok((await api(`/api/staff/events/${id2}/roster`, { jar: admin })).json.some((x) => x.waitlisted), "nothing changed by the warning");
+  const prLow = await api(`/api/admin/registrations/${w.registrationId}/promote`, { method: "POST", jar: admin, body: { raiseCapacityTo: 1 } });
+  ok(prLow.status === 409, "raising to a number that still doesn't fit is refused", prLow.json);
+  // a manager who is not assigned to this event cannot promote or raise the capacity
+  const mgrName = "wprmgr" + stamp;
+  const cm = await api("/api/staff/accounts", { method: "POST", jar: admin, body: { username: mgrName, password: "Manager#1234", name: "WPR Mgr", role: "tournament" } });
+  ok(cm.status === 201, "tournament manager created", cm.json);
+  const mj = await prime({});
+  await api("/api/auth/staff-login", { method: "POST", jar: mj, body: { username: mgrName, password: "Manager#1234" } });
+  const mp = await api(`/api/admin/registrations/${w.registrationId}/promote`, { method: "POST", jar: mj, body: { raiseCapacityTo: 2 } });
+  ok(mp.status === 403, "a manager not assigned to the event is refused", mp.json);
+  const pr = await api(`/api/admin/registrations/${w.registrationId}/promote`, { method: "POST", jar: admin, body: { raiseCapacityTo: 2 } });
+  ok(pr.status === 200 && pr.json.capacityRaised && pr.json.capacityRaised.from === 1 && pr.json.capacityRaised.to === 2, "raise capacity to 2 and promote in one step", pr.json);
+  const evAfter = (await api("/api/events", { jar: admin })).json.find((e) => e.id === id2);
+  ok(evAfter && evAfter.maxCapacity === 2, "the event's capacity is now 2", evAfter && evAfter.maxCapacity);
+  ok((await api(`/api/staff/events/${id2}/roster`, { jar: admin })).json.every((x) => !x.waitlisted), "both confirmed after promote");
+  // under the limit: no warning at all
+  const ev3 = await mk("WPR Roomy", { maxCapacity: "5" });
+  const c = await signup("R"), d = await signup("R");
+  await register(c, ev3.json.id);
+  const ro3 = (await api(`/api/staff/events/${ev3.json.id}/roster`, { jar: admin })).json;
+  ok(ro3.length === 1 && !ro3[0].waitlisted, "roomy event has no waiting list");
+
+  section("Raising by more than one place through the promote warning: the next people fill the rest, in order");
+  const ev4 = await mk("WPR Multi", { maxCapacity: "1" });
+  const id4 = ev4.json.id;
+  const m4 = [];
+  for (let i = 0; i < 4; i++) { const p = await signup("X"); m4.push(p); await register(p, id4); await new Promise((r) => setTimeout(r, 15)); }
+  const rs4 = async () => (await api(`/api/staff/events/${id4}/roster`, { jar: admin })).json;
+  let r4 = await rs4();
+  ok(r4.map((x) => (x.waitlisted ? "W" : "C")).join("") === "CWWW", "C W W W to start");
+  const up = await api(`/api/admin/registrations/${r4[1].registrationId}/promote`, { method: "POST", jar: admin, body: { raiseCapacityTo: 3 } });
+  ok(up.status === 200 && up.json.alsoPromoted === 1, "promoted the chosen one and one more", up.json);
+  r4 = await rs4();
+  ok(r4.map((x) => (x.waitlisted ? "W" : "C")).join("") === "CCCW", "C C C W - never above the new limit of 3", r4.map((x) => x.waitlisted));
+
+  section("Cancelling never pushes the event over its CURRENT limit");
+  const ev5 = await mk("WPR Over", { maxCapacity: "2" });
+  const id5 = ev5.json.id;
+  for (let i = 0; i < 4; i++) { await register(await signup("O"), id5); await new Promise((r) => setTimeout(r, 15)); }
+  let r5 = (await api(`/api/staff/events/${id5}/roster`, { jar: admin })).json;
+  ok(r5.map((x) => (x.waitlisted ? "W" : "C")).join("") === "CCWW", "C C W W");
+  ok((await api(`/api/admin/registrations/${r5[2].registrationId}/promote`, { method: "POST", jar: admin, body: { force: true } })).status === 200, "forced over the limit: 3 of 2");
+  const cancel = (rid) => api(`/api/admin/registrations/${rid}/cancel`, { method: "POST", jar: admin, body: { reason: "test" } });
+  ok((await cancel(r5[0].registrationId)).status === 200, "one confirmed person cancels");
+  r5 = (await api(`/api/staff/events/${id5}/roster`, { jar: admin })).json;
+  ok(r5.filter((x) => !x.waitlisted).length === 2 && r5.filter((x) => x.waitlisted).length === 1, "still 2 of 2 - the waiting person is NOT promoted", r5.map((x) => x.waitlisted));
+  ok((await cancel(r5.find((x) => !x.waitlisted).registrationId)).status === 200, "another cancels");
+  r5 = (await api(`/api/staff/events/${id5}/roster`, { jar: admin })).json;
+  ok(r5.length === 2 && r5.every((x) => !x.waitlisted), "now there is room: the waiting person is confirmed", r5.map((x) => x.waitlisted));
 
   section("Team event: whole teams move when maxTeams is raised");
   const tev = await mk("WPR Teams", { teamRegistration: "true", teamMinPlayers: "1", teamMaxPlayers: "2", teamMaxTeams: "1" });
@@ -113,6 +162,10 @@ const prime = async (jar) => { await api("/", { jar }); return jar; };
   ok(q.status === 201 && q.json.registration.waitlisted, "Gamma waiting", q.json);
   q = await register(t[3], tid, { teamId: (await api(`/api/admin/events/${tid}/teams`, { jar: admin })).json.teams.find((x) => x.name.startsWith("Beta")).id });
   ok(q.status === 201 && q.json.registration.waitlisted, "teammate joins Beta (waiting)", q.json);
+  const tlist0 = (await api(`/api/admin/events/${tid}/teams`, { jar: admin })).json.teams;
+  const gammaId = tlist0.find((x) => x.name.startsWith("Gamma")).id;
+  const tw = await api(`/api/admin/event-teams/${gammaId}/promote`, { method: "POST", jar: admin });
+  ok(tw.status === 409 && tw.json.code === "over_capacity" && tw.json.unit === "teams" && tw.json.suggested === 2, "full team event: team promote is warned", tw.json);
   r = await edit(tid, "WPR Teams", { teamRegistration: "true", teamMinPlayers: "1", teamMaxPlayers: "2", teamMaxTeams: "2" });
   ok(r.status === 200 && r.json.promotedFromWaitlist.teams === 1 && r.json.promotedFromWaitlist.people === 0, "one team promoted", r.json);
   const tl = (await api(`/api/admin/events/${tid}/teams`, { jar: admin })).json.teams;
@@ -120,6 +173,9 @@ const prime = async (jar) => { await api("/", { jar }); return jar; };
   ok(!beta.waitlisted && gamma.waitlisted, "Beta (waiting longest) confirmed, Gamma still waiting", tl.map((x) => [x.name, x.waitlisted]));
   const trows = (await api(`/api/staff/events/${tid}/roster`, { jar: admin })).json;
   ok(trows.filter((x) => x.waitlisted).length === 1 && trows.every((x) => x.teamId), "roster: Beta's two players confirmed, Gamma's waiting, rows have teamId", trows.map((x) => [x.attendeeName, x.waitlisted, x.teamId]));
+
+  const tr = await api(`/api/admin/event-teams/${gammaId}/promote`, { method: "POST", jar: admin, body: { raiseCapacityTo: 3 } });
+  ok(tr.status === 200 && tr.json.capacityRaised && tr.json.capacityRaised.to === 3, "team promote with raised team limit", tr.json);
 
   console.log(`\nwaitlist_promote_e2e: ${passed} passed, ${failed} failed, server errors: ${serverErrors.length}`);
   if (serverErrors.length) console.log(serverErrors);

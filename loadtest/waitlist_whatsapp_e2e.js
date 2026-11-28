@@ -76,8 +76,10 @@ const prime = async (jar) => { await api("/", { jar }); return jar; };
   ok((await api(`/api/staff/registrations/999999/whatsapp-confirmed`, { method: "POST", jar: admin, body: {} })).status === 404, "unknown registration -> 404");
 
   section("Manual promote makes a waitlisted person eligible");
-  const pr = await api(`/api/admin/registrations/${idOf(2)}/promote`, { method: "POST", jar: admin });
-  ok(pr.status === 200, "promote", pr.json);
+  const warn = await api(`/api/admin/registrations/${idOf(2)}/promote`, { method: "POST", jar: admin });
+  ok(warn.status === 409 && warn.json.code === "over_capacity" && warn.json.suggested === 3, "full event: promote is warned first", warn.json);
+  const pr = await api(`/api/admin/registrations/${idOf(2)}/promote`, { method: "POST", jar: admin, body: { raiseCapacityTo: 3 } });
+  ok(pr.status === 200 && pr.json.capacityRaised && pr.json.capacityRaised.to === 3, "raise the capacity to 3 and promote", pr.json);
   ok((await api(`/api/staff/registrations/${idOf(2)}/whatsapp-confirmed`, { method: "POST", jar: admin, body: { type: "confirm" } })).status === 200, "after promotion confirm -> 200");
 
   section("Automatic promotion after a cancellation clears stale stamps and enables sending");
