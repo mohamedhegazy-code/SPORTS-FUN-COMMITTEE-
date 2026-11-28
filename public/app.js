@@ -91,6 +91,8 @@ async function api(path, opts = {}) {
     // showing the error text.
     const err = new Error(isSessionExpiry ? t("errSessionExpired") : data.error || t("errGeneric"));
     err.data = data;
+    // The platform now requires 2-step login for this account: open the set-up screen (users.js).
+    if (res.status === 403 && data.code === "2fa_setup_required" && typeof usOnTwoFaRequired === "function") usOnTwoFaRequired();
     err.sessionExpired = isSessionExpiry;
     if (isSessionExpiry) handleSessionExpired();
     throw err;
@@ -1317,6 +1319,14 @@ function updateSessionBadge() {
   }
 }
 
+
+// True when the signed-in staff account may open a platform module (see Users & access). Accounts without the
+// per-module data (older sessions, members) are treated as allowed - the server is the real gate.
+function staffCan(key) {
+  if (!CURRENT_SESSION || CURRENT_SESSION.type !== "staff") return false;
+  const eff = CURRENT_SESSION.staff && CURRENT_SESSION.staff.effectiveModules;
+  return !eff || eff[key] !== false;
+}
 function updateUIForSession() {
   updateSessionBadge();
   renderAgeReminder();
@@ -1428,8 +1438,20 @@ function updateUIForSession() {
   // role account has no use for event editing or the old per-event mini
   // dashboard, so it only ever sees the Management Dashboard tab.
   document.querySelectorAll(".evt-tab-only").forEach((el) => el.classList.toggle("hidden", (isManagementRole || isPartnerRole) && !isAdmin));
+  // Per-module access (Users & access): hide the tabs this person was not given. The server enforces the same
+  // switches on every request; this just stops the page from showing doors that are locked.
+  document.querySelectorAll("[data-module]").forEach((el) => {
+    if (isStaff && !staffCan(el.dataset.module)) el.classList.add("hidden");
+  });
+  const mcpRule = document.getElementById("mcp-staff-rule");
+  if (mcpRule) mcpRule.classList.toggle("hidden", !isStaff);
   if (isAdminAreaVisible) {
     initAdminTabs();
+    const activeTabEl = document.querySelector(".admin-tab.active");
+    if (activeTabEl && activeTabEl.classList.contains("hidden")) {
+      const firstOpen = Array.from(document.querySelectorAll(".admin-tab")).find((b) => !b.classList.contains("hidden"));
+      if (firstOpen) switchAdminTab(firstOpen.dataset.adminTab);
+    }
     // A Tournament Manager can't reach Members/Points/Content/Settings - if
     // the currently-active tab is one of those (remembered from an earlier
     // full-admin session in this same browser, or a mid-session role
@@ -1462,24 +1484,15 @@ function updateUIForSession() {
       updateAdminChatBadge();
     }
     if (isAdmin) {
-      loadManagementDashboard();
-      loadAdminOverview();
-      loadActivityLog(true);
-      loadAdminMembers();
-      loadAdminDirectory();
-      loadRedemptionsTable();
-      loadStaffAccountsTable();
-      populateStaffCommitteePicker();
-      loadRulesForEdit();
-      renderLadderEdit();
-      loadChatThreadsList();
-      loadInquiriesList();
-      updateAdminChatBadge();
-      loadNewsAdminList();
-      loadSpotlightAdminList();
-      loadCommitteeAdminList();
+      if (staffCan("management")) { loadManagementDashboard(); loadAdminOverview(); }
+      if (staffCan("security")) loadActivityLog(true);
+      if (staffCan("members")) { loadAdminMembers(); loadAdminDirectory(); }
+      if (staffCan("points")) loadRedemptionsTable();
+      if (staffCan("users")) { loadStaffAccountsTable(); populateStaffCommitteePicker(); }
+      if (staffCan("content")) { loadRulesForEdit(); renderLadderEdit(); loadNewsAdminList(); loadSpotlightAdminList(); loadCommitteeAdminList(); }
+      if (staffCan("messages")) { loadChatThreadsList(); loadInquiriesList(); updateAdminChatBadge(); }
       applySettingsToUI();
-      populateLandingAdminForms();
+      if (staffCan("landing")) populateLandingAdminForms();
       renderRecoveryPinStatus("staff-recovery-pin-status", CURRENT_SESSION.staff.hasRecoveryPin);
     }
   } else {
@@ -1488,6 +1501,7 @@ function updateUIForSession() {
 
   applyMaybeShowTermsGate();
   applyMaybeShowMustChangePasswordGate();
+  if (typeof usAfterSession === "function") usAfterSession();
   applyMaybeShowDetailsConfirmGate();
   applyMaybeShowBirthConfirmGate();
 
@@ -3870,10 +3884,19 @@ async function staffLogin(usernameId, passwordId, msgId) {
     return;
   }
   try {
-    const result = await api("/api/auth/staff-login", {
+    let result = await api("/api/auth/staff-login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
+    // 2-step login: the password was right, now ask for the 6-digit code (or a backup code).
+    if (result.twoFactor) {
+      document.getElementById(passwordId).value = "";
+      result = await usAskSecondFactor(result.challenge);
+      if (!result) {
+        msg.classList.remove("show");
+        return;
+      }
+    }
     CURRENT_SESSION = { type: "staff", staff: result.staff };
     SESSION_EXPIRY_HANDLED = false;
     document.getElementById(passwordId).value = "";
@@ -4122,6 +4145,8 @@ function switchAdminTab(tabKey) {
   if (tabKey === "reports") { loadReports(); rbEnsure().catch(() => {}); }
   if (tabKey === "links") mslLoad();
   if (tabKey === "backup") { bkLoad(); cbLoad(); }
+  if (tabKey === "users" && typeof usLoad === "function") usLoad();
+  if (tabKey === "security" && typeof scLoad === "function") scLoad();
   if (tabKey === "members") loadBirthdays();
   if (tabKey === "points") loadPointsStart();
   if (tabKey === "messages") {
@@ -11270,6 +11295,12 @@ document.getElementById("fp-submit").addEventListener("click", async () => {
         method: "POST",
         body: JSON.stringify({ username: id, pin, newPassword }),
       });
+      if (result.needsLogin) {
+        // The account uses 2-step login: the password is changed, but they sign in normally afterwards.
+        showMsg(msg, t("okPasswordReset"), true);
+        setTimeout(closeForgotPasswordModal, 1500);
+        return;
+      }
       CURRENT_SESSION = { type: "staff", staff: result.staff };
     } else {
       const result = await api("/api/auth/forgot-password", {

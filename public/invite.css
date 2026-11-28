@@ -1,0 +1,15 @@
+.iv-page { min-height: 100vh; background: linear-gradient(160deg, var(--red-dark), var(--red) 55%, #3a0000); }
+.iv-wrap { max-width: 440px; margin: 0 auto; padding: 28px 16px 40px; }
+.iv-lang { text-align: end; margin-bottom: 10px; }
+.iv-lang a { color: #ffe9a8; text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+.iv-card { background: #fff; border-radius: 14px; padding: 26px 22px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); }
+.iv-brand { color: var(--red); font-weight: 800; letter-spacing: 1px; font-size: 0.9rem; }
+.iv-card h1 { margin: 6px 0 8px; font-size: 1.35rem; }
+.iv-intro { color: var(--muted); font-size: 0.92rem; margin-top: 0; }
+.iv-meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
+.iv-meter i { height: 5px; border-radius: 3px; background: var(--border); display: block; }
+.iv-meter i.on1 { background: #b3261e; }
+.iv-meter i.on2 { background: #d98a00; }
+.iv-meter i.on3 { background: #7aa62b; }
+.iv-meter i.on4 { background: var(--green); }
+.iv-page input[readonly] { background: #f4f2ef; }

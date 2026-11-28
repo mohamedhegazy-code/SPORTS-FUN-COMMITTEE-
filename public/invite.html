@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MyAhlawy - Committee invitation</title>
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/invite.css" />
+<script src="/i18n.js"></script>
+</head>
+<body class="iv-page">
+<main class="iv-wrap">
+  <div class="iv-lang"><a id="iv-lang" href="#">EN</a></div>
+  <div class="iv-card">
+    <div class="iv-brand">MyAhlawy</div>
+    <h1 id="iv-title"></h1>
+    <p id="iv-intro" class="iv-intro"></p>
+    <form id="iv-form" class="hidden" autocomplete="off">
+      <label for="iv-user" id="iv-user-l"></label>
+      <input id="iv-user" readonly dir="ltr" />
+      <label for="iv-pw" id="iv-pw-l"></label>
+      <input id="iv-pw" type="password" autocomplete="new-password" dir="ltr" />
+      <div class="iv-meter" aria-hidden="true"><i id="iv-m1"></i><i id="iv-m2"></i><i id="iv-m3"></i><i id="iv-m4"></i></div>
+      <p class="hint-note" id="iv-rules"></p>
+      <label for="iv-pw2" id="iv-pw2-l"></label>
+      <input id="iv-pw2" type="password" autocomplete="new-password" dir="ltr" />
+      <button class="primary" type="submit" id="iv-go" style="margin-top:14px;width:100%;"></button>
+    </form>
+    <div class="msg" id="iv-msg" aria-live="polite"></div>
+  </div>
+</main>
+<script src="/invite.js"></script>
+</body>
+</html>
