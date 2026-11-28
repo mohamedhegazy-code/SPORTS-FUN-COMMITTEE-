@@ -611,11 +611,17 @@
         <p style="color:var(--muted);font-size:0.85rem;" data-i18n="scanIntro">Point the camera at the member's QR code. Points are awarded automatically the moment a code is confirmed.</p>
         <div id="scan-video-wrap" style="max-width:420px;margin:12px auto;border-radius:10px;overflow:hidden;border:1px solid var(--border);">
           <video id="scan-video" style="width:100%;display:block;" playsinline muted></video>
+          <div id="scan-flash" class="scan-flash hidden" role="status" aria-live="assertive">
+            <div class="sf-word" id="scan-flash-word"></div>
+            <div class="sf-name" id="scan-flash-name"></div>
+            <div class="sf-detail" id="scan-flash-detail"></div>
+          </div>
         </div>
         <canvas id="scan-canvas" class="hidden"></canvas>
         <div style="text-align:center;">
           <button class="secondary" id="scan-start" data-i18n="btnStartCamera">Start camera</button>
           <button class="secondary hidden" id="scan-stop" data-i18n="btnStopCamera">Stop camera</button>
+          <label class="att-switch scan-sound-switch"><input type="checkbox" id="scan-sound" checked /> <span data-i18n="scanSoundLabel">Sound and vibration</span></label>
         </div>
         <div class="msg" id="scan-result-msg" style="margin-top:16px;font-size:1rem;"></div>
       </div>

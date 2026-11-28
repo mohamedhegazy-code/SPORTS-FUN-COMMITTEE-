@@ -11266,21 +11266,100 @@ document.getElementById("fp-submit").addEventListener("click", async () => {
 // ---------------------------------------------------------- gate scanner --
 let SCAN_STREAM = null;
 let SCAN_RAF = null;
-let SCAN_BUSY = false; // true while a check-in request is in flight or result is showing
+let SCAN_BUSY = false; // true only while one check-in request is in flight (freed the moment the answer is back)
+let SCAN_LAST = { code: "", until: 0, retry: false }; // the QR just handled is not sent again while it stays in view
+const SCAN_SAME_MS = 2500; // how long after it leaves the view the same QR counts as new again
+let SCAN_DETECTOR = null; // the phone's own barcode reader, when the browser has one (much faster than jsQR)
+let SCAN_FRAME = 0;
+let SCAN_FLASH_TIMER = null;
+let SCAN_AUDIO = null;
 
 document.getElementById("scan-start").addEventListener("click", startScanner);
 document.getElementById("scan-stop").addEventListener("click", stopScanner);
 
+// ---- result feedback: a big word over the camera (PASS / TRY AGAIN / FAILED), a beep and a buzz ----
+function scanSoundOn() {
+  const cb = document.getElementById("scan-sound");
+  return !cb || cb.checked;
+}
+try { if (localStorage.getItem("scanSound") === "0") document.getElementById("scan-sound").checked = false; } catch (e) { /* storage blocked: default on */ }
+document.getElementById("scan-sound").addEventListener("change", (e) => {
+  try { localStorage.setItem("scanSound", e.target.checked ? "1" : "0"); } catch (err) { /* ignore */ }
+  if (e.target.checked) scanAudioCtx();
+});
+// Browsers only allow sound after a tap, so the audio context is created on "Start camera".
+function scanAudioCtx() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!SCAN_AUDIO) SCAN_AUDIO = new AC();
+    if (SCAN_AUDIO.state === "suspended") SCAN_AUDIO.resume();
+    return SCAN_AUDIO;
+  } catch (e) {
+    return null;
+  }
+}
+function scanFeedbackCue(kind) {
+  if (!scanSoundOn()) return;
+  try {
+    if (navigator.vibrate) navigator.vibrate(kind === "pass" ? [60] : kind === "retry" ? [80, 60, 80] : [260]);
+  } catch (e) { /* not supported */ }
+  const ac = scanAudioCtx();
+  if (!ac) return;
+  // pass = two quick rising notes, retry = two level notes, failed = one long low buzz
+  const notes = kind === "pass" ? [[880, 0.09], [1320, 0.13]] : kind === "retry" ? [[540, 0.1], [540, 0.1]] : [[190, 0.42]];
+  let at = ac.currentTime;
+  for (const [freq, dur] of notes) {
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = kind === "fail" ? "square" : "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.22, at + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(at);
+    osc.stop(at + dur + 0.02);
+    at += dur + 0.05;
+  }
+}
+// kind: "pass" | "retry" | "fail"
+function showScanFlash(kind, name, detail) {
+  const box = document.getElementById("scan-flash");
+  document.getElementById("scan-flash-word").textContent = t(kind === "pass" ? "scanWordPass" : kind === "retry" ? "scanWordRetry" : "scanWordFail");
+  document.getElementById("scan-flash-name").textContent = name || "";
+  document.getElementById("scan-flash-detail").textContent = detail || "";
+  box.className = "scan-flash " + kind;
+  box.dataset.kind = kind;
+  clearTimeout(SCAN_FLASH_TIMER);
+  SCAN_FLASH_TIMER = setTimeout(() => box.classList.add("hidden"), kind === "pass" ? 1300 : 2200);
+  scanFeedbackCue(kind);
+}
+
 async function startScanner() {
   const video = document.getElementById("scan-video");
   const resultMsg = document.getElementById("scan-result-msg");
+  scanAudioCtx();
   try {
-    SCAN_STREAM = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    // A sharper picture helps the small QR on a phone screen; "ideal" means a lesser camera still starts.
+    SCAN_STREAM = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+    });
+    try {
+      const track = SCAN_STREAM.getVideoTracks()[0];
+      const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+      if (caps.focusMode && caps.focusMode.includes("continuous")) await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+    } catch (e) { /* focus control not available: fine */ }
     video.srcObject = SCAN_STREAM;
     await video.play();
     document.getElementById("scan-start").classList.add("hidden");
     document.getElementById("scan-stop").classList.remove("hidden");
     resultMsg.className = "msg";
+    SCAN_DETECTOR = null;
+    if (typeof window.BarcodeDetector === "function") {
+      try { SCAN_DETECTOR = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { SCAN_DETECTOR = null; }
+    }
     scanLoop();
   } catch (e) {
     showMsg(resultMsg, t("cameraError"), false);
@@ -11293,6 +11372,33 @@ function stopScanner() {
   SCAN_STREAM = null;
   document.getElementById("scan-start").classList.remove("hidden");
   document.getElementById("scan-stop").classList.add("hidden");
+  const box = document.getElementById("scan-flash");
+  if (box) box.classList.add("hidden");
+}
+
+// Reads one frame: the phone's own detector when it exists, otherwise jsQR on a smaller copy of the
+// picture (a full-size frame every time is what made it slow). Every 4th frame also tries a light-on-dark code.
+async function scanDecode(video, canvas, ctx) {
+  if (SCAN_DETECTOR) {
+    const found = await SCAN_DETECTOR.detect(video);
+    return found && found[0] && found[0].rawValue ? found[0].rawValue : "";
+  }
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return "";
+  const scale = Math.min(1, 960 / Math.max(vw, vh));
+  const w = Math.round(vw * scale), h = Math.round(vh * scale);
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  ctx.drawImage(video, 0, 0, w, h);
+  const img = ctx.getImageData(0, 0, w, h);
+  SCAN_FRAME++;
+  const code = jsQR(img.data, w, h, { inversionAttempts: SCAN_FRAME % 4 === 0 ? "onlyInvert" : "dontInvert" });
+  return code && code.data ? code.data : "";
+}
+function scanAllowed(code, now) {
+  if (SCAN_LAST.code !== code || now >= SCAN_LAST.until) return true;
+  if (!SCAN_LAST.retry) SCAN_LAST.until = now + SCAN_SAME_MS; // still in view: keep holding it
+  return false;
 }
 
 function scanLoop() {
@@ -11300,17 +11406,13 @@ function scanLoop() {
   const canvas = document.getElementById("scan-canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-  function tick() {
+  async function tick() {
     if (!SCAN_STREAM) return;
     if (video.readyState === video.HAVE_ENOUGH_DATA && !SCAN_BUSY) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-      if (code && code.data) {
-        handleScannedCode(code.data);
-      }
+      let data = "";
+      try { data = await scanDecode(video, canvas, ctx); } catch (e) { /* a bad frame: try the next one */ }
+      if (!SCAN_STREAM) return;
+      if (data && !SCAN_BUSY && scanAllowed(data, Date.now())) handleScannedCode(data);
     }
     SCAN_RAF = requestAnimationFrame(tick);
   }
@@ -11319,6 +11421,7 @@ function scanLoop() {
 
 async function handleScannedCode(data) {
   SCAN_BUSY = true;
+  SCAN_LAST = { code: data, until: Date.now() + SCAN_SAME_MS, retry: false };
   const resultMsg = document.getElementById("scan-result-msg");
   try {
     const res = await fetch("/api/checkin", {
@@ -11327,28 +11430,37 @@ async function handleScannedCode(data) {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
       body: JSON.stringify({ code: data }),
     });
-    const result = await res.json();
-    if (res.status === 409) {
+    let result = {};
+    try { result = await res.json(); } catch (e) { /* no body */ }
+    const who = result.attendeeName || (result.member ? result.member.name : "");
+    if (res.ok) {
       const time = result.checkedInAt ? new Date(result.checkedInAt).toLocaleString() : "";
-      const who = result.attendeeName || (result.member ? result.member.name : "");
+      showMsg(resultMsg, `${result.attendeeName} — ${t("scanSuccess")} ${time} (+${fmt(result.pointsAwarded)} ${t("scanPointsAwarded")})`, true);
+      showScanFlash("pass", result.attendeeName, `+${fmt(result.pointsAwarded)} ${t("scanPointsAwarded")}`);
+    } else if (res.status === 409 && result.checkedInAt) {
+      const time = new Date(result.checkedInAt).toLocaleString();
       showMsg(resultMsg, `${who} — ${t("scanAlready")} ${time}`, false);
-    } else if (!res.ok) {
+      showScanFlash("fail", who, `${t("scanAlreadyShort")} · ${new Date(result.checkedInAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+    } else if (res.status === 409) {
       showMsg(resultMsg, result.error || t("scanInvalid"), false);
+      showScanFlash("fail", who, t("scanWaitlistDetail"));
+    } else if (res.status >= 500 || res.status === 429 || res.status === 408) {
+      // The scan did not get through: let the same QR be tried again in a moment.
+      SCAN_LAST = { code: data, until: Date.now() + 1500, retry: true };
+      showMsg(resultMsg, t("scanRetryDetail"), false);
+      showScanFlash("retry", "", t("scanRetryDetail"));
     } else {
-      const time = result.checkedInAt ? new Date(result.checkedInAt).toLocaleString() : "";
-      showMsg(
-        resultMsg,
-        `${result.attendeeName} — ${t("scanSuccess")} ${time} (+${fmt(result.pointsAwarded)} ${t("scanPointsAwarded")})`,
-        true
-      );
+      const why = res.status === 400 ? t("scanInvalid") : result.error || t("scanInvalid"); // 400 = not one of our codes
+      showMsg(resultMsg, why, false);
+      showScanFlash("fail", "", why);
     }
   } catch (e) {
-    showMsg(resultMsg, t("errGeneric"), false);
+    SCAN_LAST = { code: data, until: Date.now() + 1500, retry: true };
+    showMsg(resultMsg, t("scanRetryDetail"), false);
+    showScanFlash("retry", "", t("scanRetryDetail"));
+  } finally {
+    SCAN_BUSY = false; // the scanner reads the next QR straight away - no fixed waiting time
   }
-  // brief pause so the same code isn't re-scanned instantly, and staff can read the result
-  setTimeout(() => {
-    SCAN_BUSY = false;
-  }, 2500);
 }
 
 // --------------------------------------------------- manual check-in (gate) --
