@@ -7223,7 +7223,10 @@ document.getElementById("ev-edit-save").addEventListener("click", async () => {
   if (whatsappQrInput.files[0]) fd.append("whatsappQr", whatsappQrInput.files[0]);
   try {
     const saved = await api("/api/events/" + eventId, { method: "PUT", body: fd });
-    showMsg(msg, t("eventSaved"), true);
+    // A higher capacity moves people up from the waiting list by itself - say how many.
+    const pf = saved.promotedFromWaitlist || {};
+    const movedN = (pf.people || 0) + (pf.teams || 0);
+    showMsg(msg, movedN ? t("eventSavedPromoted").replace("{n}", fmt(movedN)) : t("eventSaved"), true);
     await loadEvents();
     await loadAdminDashboard();
     // Re-populate the edit form from the freshly-saved event (picks up the
@@ -11888,7 +11891,11 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
       let status, action;
       if (r.waitlisted) {
         status = `<span class="capacity-badge waitlist">${t("waitlistLabel")}</span>`;
-        action = "";
+        // Admin / the event's Tournament Manager can confirm a waiting-list person by hand (for example
+        // when a place frees up). Players of a team on the waiting list move with their whole team instead.
+        action = canManageEventSettings(ev) && !r.teamId
+          ? `<button class="roster-btn promote" data-promote-reg="${r.registrationId}" data-promote-name="${escapeAttr(r.attendeeName)}">${escapeAttr(t("btnPromote"))}</button>`
+          : "";
       } else if (r.checkedIn) {
         const time = r.checkInAt ? new Date(r.checkInAt).toLocaleString() : "";
         status = `<span class="badge Approved">${t("scanSuccess")}</span><br/><small style="color:var(--muted);">${escapeAttr(time)}</small>`;
@@ -12000,6 +12007,30 @@ document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => 
 document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-att-conf]");
   if (btn) attendanceConfirmClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
+});
+// "Promote to confirmed" on a waiting-list row (Check-in list and Event hub).
+async function promoteRowClick(btn, msgId, reload) {
+  const name = btn.dataset.promoteName || "";
+  if (!window.confirm(`${name}\n${t("confirmPromoteRow")}`)) return;
+  btn.disabled = true;
+  const msg = document.getElementById(msgId);
+  try {
+    await api(`/api/admin/registrations/${btn.dataset.promoteReg}/promote`, { method: "POST" });
+    showMsg(msg, `${name} — ${t("promoted")}`, true);
+    await reload();
+    try { await loadAdminDashboard(); } catch (e) { /* dashboard not open: fine */ }
+  } catch (err) {
+    showMsg(msg, err.message, false);
+    btn.disabled = false;
+  }
+}
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-promote-reg]");
+  if (btn) promoteRowClick(btn, "checkin-roster-msg", () => loadCheckinRoster(true));
+});
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-promote-reg]");
+  if (btn) promoteRowClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
 });
 // The per-event "Use attendance confirmation" switch in the roster toolbar (Admin and the event's
 // Tournament Manager). Saves on the server, then redraws the list with or without the column.

@@ -1996,3 +1996,5 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .bk-table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 6px 0; }
 .bk-table th, .bk-table td { text-align: start; padding: 6px 8px; border-bottom: 1px solid var(--border, #e4dfd8); }
 .bk-table td b { font-variant-numeric: tabular-nums; }
+.roster-table button.roster-btn.promote { background: #1e8e3e; border-color: #1e8e3e; color: #fff; font-weight: 600; }
+.roster-table button.roster-btn.promote:hover:not(:disabled) { background: #187a34; }
