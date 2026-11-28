@@ -496,6 +496,7 @@ function setLang(lang) {
   try {
     if (CHECKIN_ROSTER && CHECKIN_ROSTER.length) renderCheckinRoster();
     if (HUB_ROSTER && HUB_ROSTER.length && HUB_EVENT_ID) document.getElementById("hub-checkin-search").dispatchEvent(new Event("input"));
+    if (CHECKIN_TOURN) renderCheckinTournPanel();
   } catch (e) {
     /* roster not mounted yet */
   }
@@ -9212,6 +9213,7 @@ function updateRegCategoryVisibility() {
 function renderTournamentAttendance() {
   const list = TOURNAMENT_DATA.attendance || [];
   if (!list.length) return "";
+  const fromCheckin = !!TOURNAMENT_DATA.fromCheckin; // players come from the gate check-in: read-only here
   const allMatches = collectAllTournamentMatches(TOURNAMENT_DATA);
   const statusBtn = (regId, status, label, cls) =>
     `<button class="secondary small ${cls}" data-tourn-action="set-attendance" data-registration-id="${regId}" data-status="${status}">${label}</button>`;
@@ -9219,9 +9221,11 @@ function renderTournamentAttendance() {
     <div class="tourn-attendance-row tourn-att-${a.status}">
       <span class="tourn-attendance-name">${num != null ? `${num}. ` : ""}${escapeAttr(a.name)}</span>
       <span class="tourn-attendance-actions">
-        ${statusBtn(a.registrationId, "present", t("attStatusPresent"), a.status === "present" ? "active" : "")}
+        ${fromCheckin
+          ? `<span class="tourn-att-readonly ${a.status === "present" ? "present" : "absent"}">${escapeAttr(a.status === "present" ? t("attStatusPresent") : t("attStatusAbsent"))}</span>`
+          : `${statusBtn(a.registrationId, "present", t("attStatusPresent"), a.status === "present" ? "active" : "")}
         ${statusBtn(a.registrationId, "not_yet", t("attStatusNotYet"), a.status === "not_yet" ? "active" : "")}
-        ${statusBtn(a.registrationId, "absent", t("attStatusAbsent"), a.status === "absent" ? "active" : "")}
+        ${statusBtn(a.registrationId, "absent", t("attStatusAbsent"), a.status === "absent" ? "active" : "")}`}
       </span>
     </div>`;
   let body;
@@ -9244,6 +9248,7 @@ function renderTournamentAttendance() {
     body = list.map((a) => rowHtml(a) + matchesBlockHtml(allMatches, a.entrantId, TOURNAMENT_DATA.entrants)).join("");
   }
   const presentCount = list.filter((a) => a.status === "present").length;
+  if (fromCheckin) body = `<p class="hint-note">${escapeAttr(t("ctAttFromCheckin"))}</p>` + body;
   return tournCardHtml(
     TOURN_ICON.attendance,
     `${t("adminTournamentAttendance")} <span class="tourn-card-count">${presentCount}/${list.length}</span>`,
@@ -11370,12 +11375,14 @@ async function loadCheckinRoster(preserveMsg) {
   if (!eventId) {
     CHECKIN_ROSTER = [];
     wrap.innerHTML = "";
+    loadCheckinTournPanel();
     return;
   }
   wrap.innerHTML = `<p style="color:var(--muted);">${escapeAttr(t("loading"))}</p>`;
   try {
     CHECKIN_ROSTER = await api("/api/staff/events/" + eventId + "/roster");
     renderCheckinRoster();
+    loadCheckinTournPanel();
   } catch (e) {
     wrap.innerHTML = `<p class="msg err show">${escapeAttr(e.message)}</p>`;
   }
@@ -11712,8 +11719,19 @@ function rosterFilterMatch(r, f) {
   if (f === "noreply") return !r.waitlisted && !r.checkedIn && !r.attendanceConfirm;
   return true;
 }
+// "Will attend / Won't attend" is a per-event option (off by default). Admin and the event's own
+// Tournament Manager switch it on or off from the roster toolbar; the server enforces the same rule.
+function attendanceConfirmOn(ev) {
+  return !!(ev && ev.attendanceConfirmEnabled);
+}
+function canManageEventSettings(ev) {
+  if (!ev || !CURRENT_SESSION || CURRENT_SESSION.type !== "staff") return false;
+  if (CURRENT_SESSION.staff.role === "admin") return true;
+  return CURRENT_SESSION.staff.role === "tournament" && ev.managedByMe === true;
+}
 function rosterToolbarHtml(roster, ev) {
-  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ["conf", "rosterFilterConfirmed"], ["noreply", "rosterFilterNoReply"], ["decl", "rosterFilterDeclined"], ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
+  const attOn = attendanceConfirmOn(ev);
+  const defs = [["all", "rosterFilterAll"], ["pending", "rosterFilterPending"], ...(attOn ? [["conf", "rosterFilterConfirmed"], ["noreply", "rosterFilterNoReply"], ["decl", "rosterFilterDeclined"]] : []), ["in", "rosterFilterIn"], ["wait", "rosterFilterWait"]];
   const chips = defs
     .map(([key, label]) => {
       const n = roster.filter((r) => rosterFilterMatch(r, key)).length;
@@ -11721,9 +11739,15 @@ function rosterToolbarHtml(roster, ev) {
       return `<button type="button" class="roster-filter${ROSTER_FILTER === key ? " active" : ""}" data-roster-filter="${key}">${escapeAttr(t(label))} <b>${fmt(n)}</b></button>`;
     })
     .join("");
-  return `<div class="roster-toolbar"><div class="roster-filters">${chips}</div>${waBulkBarHtml(roster, ev)}</div>`;
+  const sw = canManageEventSettings(ev)
+    ? `<label class="att-switch" title="${escapeAttr(t("attSwitchHint"))}"><input type="checkbox" data-att-switch="${ev.id}"${attOn ? " checked" : ""} /> <span>${escapeAttr(t("attSwitchLabel"))}</span></label>`
+    : "";
+  return `<div class="roster-toolbar"><div class="roster-filters">${chips}</div>${sw}${waBulkBarHtml(roster, ev)}</div>`;
 }
 function rosterTableHtml(roster, query, eventId, showCancel) {
+  const attOn = attendanceConfirmOn(eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null);
+  if (!attOn && ["conf", "decl", "noreply"].includes(ROSTER_FILTER)) ROSTER_FILTER = "all";
+  if (!attOn && ROSTER_SORT.key === "confirm") ROSTER_SORT = { key: "", dir: 1 };
   let filtered = roster.filter(
     (r) =>
       rosterFilterMatch(r, ROSTER_FILTER) &&
@@ -11772,25 +11796,26 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         : "";
       const registeredAt = r.registeredAt ? new Date(r.registeredAt).toLocaleString() : "—";
       // "Will attend" / "Won't attend" answer recorded by staff; tapping the active one clears it.
-      const confCell =
-        r.waitlisted || r.checkedIn
-          ? `<small style="color:var(--muted);">—</small>`
-          : `<div class="att-conf">
+      const confCell = !attOn
+        ? ""
+        : r.waitlisted || r.checkedIn
+          ? `<td><small style="color:var(--muted);">—</small></td>`
+          : `<td><div class="att-conf">
               <button type="button" class="roster-btn conf-yes${r.attendanceConfirm === "yes" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "yes" ? "none" : "yes"}" data-att-reg="${r.registrationId}">\u2713 ${escapeAttr(t("attConfYes"))}</button>
               <button type="button" class="roster-btn conf-no${r.attendanceConfirm === "no" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "no" ? "none" : "no"}" data-att-reg="${r.registrationId}">\u2717 ${escapeAttr(t("attConfNo"))}</button>
-            </div>`;
+            </div></td>`;
       return `<tr>
         <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
         <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
-        <td>${confCell}</td>
+        ${confCell}
         <td>${rosterQrCellHtml(r.qrDataUrl, r.registrationId, true)}</td>
         <td><div class="roster-actions">${action}${cancelBtn}</div></td>
         <td class="wa-cell">${waStatusCellHtml(r, eventName, eventDate, ev)}</td>
       </tr>`;
     })
     .join("");
-  const headCells = ROSTER_SORT_COLS.map(([key, label]) => {
+  const headCells = ROSTER_SORT_COLS.filter(([key]) => attOn || key !== "confirm").map(([key, label]) => {
     const active = ROSTER_SORT.key === key;
     const arrow = active ? (ROSTER_SORT.dir === 1 ? " ▲" : " ▼") : " ↕";
     return `<th aria-sort="${active ? (ROSTER_SORT.dir === 1 ? "ascending" : "descending") : "none"}"><button type="button" class="roster-sort${active ? " active" : ""}" data-roster-sort="${key}">${t(label)}<span class="roster-sort-arrow">${arrow}</span></button></th>`;
@@ -11863,6 +11888,120 @@ document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => 
 document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-att-conf]");
   if (btn) attendanceConfirmClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
+});
+// The per-event "Use attendance confirmation" switch in the roster toolbar (Admin and the event's
+// Tournament Manager). Saves on the server, then redraws the list with or without the column.
+async function attendanceSwitchChange(cb, inHub) {
+  const eventId = Number(cb.dataset.attSwitch);
+  const want = cb.checked;
+  const msg = document.getElementById(inHub ? "hub-checkin-msg" : "checkin-roster-msg");
+  cb.disabled = true;
+  try {
+    const r = await api(`/api/staff/events/${eventId}/attendance-confirmation-setting`, { method: "PUT", body: JSON.stringify({ enabled: want }) });
+    const ev = EVENTS_DATA.find((x) => x.id === eventId);
+    if (ev) ev.attendanceConfirmEnabled = !!r.attendanceConfirmEnabled;
+    showMsg(msg, t(r.attendanceConfirmEnabled ? "attSwitchOnMsg" : "attSwitchOffMsg"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+  if (inHub) document.getElementById("hub-checkin-search").dispatchEvent(new Event("input"));
+  else renderCheckinRoster();
+}
+document.getElementById("checkin-roster-wrap").addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-att-switch]");
+  if (cb) attendanceSwitchChange(cb, false);
+});
+document.getElementById("hub-checkin-wrap").addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-att-switch]");
+  if (cb) attendanceSwitchChange(cb, true);
+});
+
+// ---- Check-in screen: "Tournament" panel (run the tournament from the gate list) ----
+// Shown to Admin and the event's Tournament Manager when the selected event has a tournament.
+// Gives the live check-in count, the "Only checked-in players play" switch, and a button that
+// opens the tournament screen (the match runner) for this event.
+let CHECKIN_TOURN = null; // { eventId, info }
+async function loadCheckinTournPanel() {
+  const box = document.getElementById("checkin-tourn-panel");
+  if (!box) return;
+  const eventId = document.getElementById("checkin-event-select").value;
+  const ev = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
+  if (!eventId || !canManageEventSettings(ev)) {
+    CHECKIN_TOURN = null;
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  try {
+    const info = await api(`/api/admin/tournaments/${eventId}/checkin-summary`);
+    if (document.getElementById("checkin-event-select").value !== eventId) return; // user moved on
+    CHECKIN_TOURN = { eventId: Number(eventId), info };
+    renderCheckinTournPanel();
+  } catch (e) {
+    CHECKIN_TOURN = null;
+    box.classList.add("hidden");
+    box.innerHTML = "";
+  }
+}
+function renderCheckinTournPanel() {
+  const box = document.getElementById("checkin-tourn-panel");
+  if (!box || !CHECKIN_TOURN) return;
+  const { eventId, info } = CHECKIN_TOURN;
+  box.classList.remove("hidden");
+  if (!info.exists) {
+    box.innerHTML = `<div class="ci-tourn-head"><strong>${escapeAttr(t("ctTitle"))}</strong></div>
+      <p class="hint-note">${escapeAttr(t("ctNone"))}</p>
+      <button type="button" class="secondary small" data-ci-run="${eventId}">${escapeAttr(t("ctSetup"))}</button>`;
+    return;
+  }
+  const c = info.checkin || {};
+  const stateLabel = info.status === "completed" ? t("tournStatusCompleted") : info.generated ? t("ctDrawn") : t("ctNotDrawn");
+  const counts = t("ctCounts").replace("{in}", fmt(c.checkedIn || 0)).replace("{reg}", fmt(c.registered || 0));
+  const teamCounts = c.teamsTotal != null ? ` · ${t("ctTeamCounts").replace("{ready}", fmt(c.teamsReady || 0)).replace("{total}", fmt(c.teamsTotal || 0))}` : "";
+  const casual = info.format === "casual";
+  const modeBox = casual
+    ? ""
+    : `<label class="att-switch ci-only-in"><input type="checkbox" data-ci-mode="${eventId}"${info.fromCheckin ? " checked" : ""}${info.generated ? " disabled" : ""} /> <span>${escapeAttr(t("ctOnlyIn"))}</span></label>
+       <p class="hint-note ci-hint">${escapeAttr(info.generated ? t("ctLocked") : t("ctOnlyInHint"))}</p>`;
+  const closed = info.dayOpen === false;
+  const notOpen = closed ? `<p class="hint-note ci-hint">${escapeAttr(t("ctNotOpen").replace("{date}", info.opensOn || ""))}</p>` : "";
+  box.innerHTML = `<div class="ci-tourn-head"><strong>${escapeAttr(t("ctTitle"))}</strong>
+      <span class="tourn-summary-badge">${escapeAttr(tournamentFormatLabel(info.format, info))}</span>
+      <span class="tourn-summary-badge">${escapeAttr(stateLabel)}</span></div>
+    <p class="ci-counts">${escapeAttr(counts)}${escapeAttr(teamCounts)}</p>
+    ${modeBox}${notOpen}
+    <button type="button" class="primary small ci-run" data-ci-run="${eventId}"${closed ? " disabled" : ""}>${escapeAttr(t("ctRun"))}</button>`;
+}
+document.getElementById("checkin-tourn-panel").addEventListener("click", (e) => {
+  const run = e.target.closest("[data-ci-run]");
+  if (!run || run.disabled) return;
+  runTournamentFromCheckin(Number(run.dataset.ciRun));
+});
+// Opens the Admin > Tournaments screen with this event's tournament loaded and scrolled into view.
+async function runTournamentFromCheckin(eventId) {
+  switchTab("admin");
+  switchAdminTab("tournaments");
+  const sel = document.getElementById("tourn-event-select");
+  if (sel && Array.from(sel.options).some((o) => o.value === String(eventId))) sel.value = String(eventId);
+  setSimMode(null);
+  await loadTournamentPanel(eventId);
+  document.querySelectorAll(".admin-tourn-row").forEach((r) => r.classList.toggle("active", r.dataset.eventId === String(eventId)));
+  const card = document.getElementById("tourn-manage-card");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+document.getElementById("checkin-tourn-panel").addEventListener("change", async (e) => {
+  const cb = e.target.closest("[data-ci-mode]");
+  if (!cb) return;
+  const eventId = Number(cb.dataset.ciMode);
+  const msg = document.getElementById("checkin-roster-msg");
+  cb.disabled = true;
+  try {
+    const r = await api(`/api/admin/tournaments/${eventId}/checkin-mode`, { method: "PUT", body: JSON.stringify({ enabled: cb.checked }) });
+    showMsg(msg, t(r.tournament.fromCheckin ? "ctModeOnMsg" : "ctModeOffMsg"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+  loadCheckinTournPanel();
 });
 
 

@@ -1765,6 +1765,19 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .roster-table button.roster-btn.conf-yes.on { background: #1e8e3e; color: #fff; }
 .roster-table button.roster-btn.conf-no.on { background: #c0392b; color: #fff; }
 
+/* Per-event "Use attendance confirmation" switch + the Check-in screen's Tournament panel */
+.att-switch { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+.att-switch input { width: auto; margin: 0; }
+.ci-tourn { margin: 12px 0 4px; padding: 12px 14px; border: 1px solid var(--border); border-inline-start: 4px solid var(--red); border-radius: 10px; background: #fff; }
+.ci-tourn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 4px; }
+.ci-tourn .ci-counts { margin: 4px 0 8px; font-size: 0.9rem; font-weight: 600; }
+.ci-tourn .ci-hint { margin: 4px 0 8px; }
+.ci-tourn .ci-run { margin-top: 6px; }
+.ci-tourn .ci-run:disabled { opacity: 0.55; cursor: not-allowed; }
+.tourn-att-readonly { padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; border: 1px solid var(--border); }
+.tourn-att-readonly.present { background: #e6f4ea; color: #1e8e3e; border-color: #1e8e3e; }
+.tourn-att-readonly.absent { background: #fdecea; color: #c0392b; border-color: #c0392b; }
+
 /* ---- tournament simulations (practice runs) ---- */
 .sim-event-line{margin:0 0 10px;font-size:.95rem}
 .sim-create{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 14px;align-items:end;margin-bottom:14px}
