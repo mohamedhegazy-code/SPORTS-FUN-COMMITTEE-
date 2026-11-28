@@ -2799,6 +2799,36 @@ function handleTeamRegistrationRemoved(db, event, reg) {
   return next;
 }
 
+// Brings people in from the waiting list while there is room, longest waiting first. Runs when an
+// admin raises or removes an event's capacity (the waiting list used to stay as it was). Someone who
+// is already confirmed in another event with the same event code is skipped, like the manual promote.
+// In a team event whole teams are moved, against the maximum number of teams.
+function autoPromoteWaitlist(db, event) {
+  const out = { people: [], teams: [] };
+  if (!event.teamRegistration) {
+    const max = event.maxCapacity;
+    const waiting = db.registrations
+      .filter((r) => r.eventId === event.id && r.waitlisted && !r.teamId)
+      .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)));
+    for (const r of waiting) {
+      if (max !== null && max !== undefined && confirmedRegistrationCount(db, event.id) >= max) break;
+      if (exclusiveConflict(db, event, r.membershipNumber, r.dependentId)) continue;
+      r.waitlisted = false;
+      r.whatsappConfirmedAt = null; r.whatsappReminderAt = null; r.whatsappDayOfAt = null; // only confirmed from now on
+      out.people.push(r);
+    }
+  } else {
+    const maxTeams = event.teamRegistration.maxTeams;
+    const waitingTeams = eventTeamsOf(db, event.id).filter((t) => t.waitlisted).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    for (const team of waitingTeams) {
+      if (maxTeams !== null && maxTeams !== undefined && confirmedTeamCount(db, event.id) >= maxTeams) break;
+      promoteTeam(db, team);
+      out.teams.push(team);
+    }
+  }
+  return out;
+}
+
 // ---- Event managers --------------------------------------------------------
 // A Tournament Manager (role "tournament") only works with the events an admin
 // assigned to them (event.managerUsernames, one or several managers per event;
@@ -3233,9 +3263,21 @@ app.put(
       action: "event_edited",
       details: `${nameEn} (${date})`,
     });
+    // More room now? Move the people waiting the longest into the free places.
+    const moved = autoPromoteWaitlist(db, event);
+    if (moved.people.length || moved.teams.length) {
+      logActivity(db, {
+        actorType: "staff",
+        actorId: req.staff.username,
+        actorName: req.staff.name,
+        action: "waitlist_auto_promoted",
+        details: `${nameEn} - ${moved.people.length ? moved.people.length + " from the waiting list" : ""}${moved.teams.length ? moved.teams.length + " team(s) from the waiting list" : ""} after the capacity changed`,
+      });
+    }
     writeDb(db);
     res.json({
       ...event,
+      promotedFromWaitlist: { people: moved.people.length, teams: moved.teams.length },
       confirmedCount: confirmedRegistrationCount(db, event.id),
       waitlistCount: waitlistedRegistrationCount(db, event.id),
       ...registrationFields(db, event),
@@ -4725,6 +4767,7 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), requireE
           checkedIn: !!r.checkedIn,
           checkInAt: r.checkInAt,
           waitlisted: !!r.waitlisted,
+          teamId: r.teamId || null,
           registeredAt: r.registeredAt || null,
           whatsappConfirmedAt: r.whatsappConfirmedAt || null,
           whatsappReminderAt: r.whatsappReminderAt || null,
