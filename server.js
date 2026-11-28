@@ -13,6 +13,7 @@ const crypto = require("crypto");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
 const QRCode = require("qrcode");
+const { PNG } = require("pngjs"); // already installed as a dependency of qrcode - used to print the event number above the QR
 const multer = require("multer");
 const XLSX = require("xlsx");
 const helmet = require("helmet");
@@ -1043,9 +1044,49 @@ function backupDbFile() {
 // invalid - the file on disk is always either the old complete version or
 // the new complete version, never a half-written one. Previously this was
 // a plain writeFileSync straight to db.json, which had no such guarantee.
+// ---- Short numbers ----------------------------------------------------------
+// Member ID ("uid"): one permanent 6-digit, non-sequential number per person (every member account and
+// every family member/dependent), unique across the platform. Event number ("eventNo"): a short number
+// per registration, unique inside its event (1, 2, 3 ... in registration order, never reused), printed
+// above the QR code and used to look someone up quickly. Both are filled in for anything that lacks one
+// every time the database is saved, so old data is back-filled once and every creation path is covered.
+function assignMissingIds(db) {
+  if (!db || db.__sim) return false;
+  let changed = false;
+  const used = new Set();
+  const people = [];
+  for (const m of Object.values(db.members || {})) {
+    people.push(m);
+    for (const d of m.dependents || []) people.push(d);
+  }
+  for (const p of people) if (p.uid) { if (used.has(p.uid)) p.uid = ""; else used.add(p.uid); }
+  for (const p of people) {
+    if (p.uid) continue;
+    let id;
+    do { id = String(crypto.randomInt(100000, 1000000)); } while (used.has(id));
+    used.add(id); p.uid = id; changed = true;
+  }
+  const byEvent = new Map();
+  for (const r of db.registrations || []) {
+    if (!byEvent.has(r.eventId)) byEvent.set(r.eventId, []);
+    byEvent.get(r.eventId).push(r);
+  }
+  for (const [eventId, regs] of byEvent) {
+    const ev = (db.events || []).find((e) => e.id === eventId);
+    regs.sort((a, b) => a.id - b.id);
+    const taken = new Set();
+    let max = 0;
+    for (const r of regs) { if (r.eventNo && !taken.has(r.eventNo)) { taken.add(r.eventNo); max = Math.max(max, r.eventNo); } else r.eventNo = 0; }
+    let next = Math.max(max + 1, (ev && ev.nextRegNo) || 1);
+    for (const r of regs) if (!r.eventNo) { r.eventNo = next++; changed = true; }
+    if (ev && ev.nextRegNo !== next) { ev.nextRegNo = next; changed = true; }
+  }
+  return changed;
+}
 function writeDb(db) {
   // A simulation's virtual db never touches the real collections - only its own sandbox is saved.
   if (db && db.__sim) return writeSimDb(db);
+  assignMissingIds(db);
   const json = JSON.stringify(db, null, 2);
   backupDbFile();
   const tmpPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
@@ -1242,8 +1283,59 @@ function signRegistration(reg) {
 function qrPayload(reg) {
   return `AHLAWY:${reg.id}:${signRegistration(reg)}`;
 }
+// The QR image carries the registration's short event number printed ABOVE the code (same image is
+// shown on screen, downloaded and sent over WhatsApp), so a player can read it out and staff can type it.
+const QR_DIGIT_GLYPHS = {
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+  "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+  "#": ["01010", "01010", "11111", "01010", "11111", "01010", "01010"],
+};
+const qrImageCache = new Map();
+function qrPngWithNumber(qrBuf, text) {
+  const src = PNG.sync.read(qrBuf);
+  const chars = String(text).split("").filter((c) => QR_DIGIT_GLYPHS[c]);
+  if (!chars.length) return qrBuf;
+  const scale = Math.max(2, Math.min(6, Math.floor((src.width - 20) / (6 * chars.length - 1))));
+  const textW = scale * (6 * chars.length - 1);
+  const strip = scale * 7 + 22;
+  const out = new PNG({ width: src.width, height: src.height + strip });
+  out.data.fill(255); // white, opaque
+  PNG.bitblt(src, out, 0, 0, src.width, src.height, 0, strip);
+  const x0 = Math.floor((src.width - textW) / 2), y0 = 10;
+  chars.forEach((c, ci) => {
+    QR_DIGIT_GLYPHS[c].forEach((row, ry) => {
+      for (let rx = 0; rx < 5; rx++) {
+        if (row[rx] !== "1") continue;
+        for (let dy = 0; dy < scale; dy++) {
+          for (let dx = 0; dx < scale; dx++) {
+            const px = x0 + ci * 6 * scale + rx * scale + dx, py = y0 + ry * scale + dy;
+            const i = (py * out.width + px) * 4;
+            out.data[i] = 0; out.data[i + 1] = 0; out.data[i + 2] = 0; out.data[i + 3] = 255;
+          }
+        }
+      }
+    });
+  });
+  return PNG.sync.write(out);
+}
 async function qrDataUrl(reg) {
-  return QRCode.toDataURL(qrPayload(reg), { margin: 1, width: 260 });
+  const payload = qrPayload(reg);
+  if (!reg.eventNo) return QRCode.toDataURL(payload, { margin: 1, width: 260 });
+  const key = `${payload}|${reg.eventNo}`;
+  if (qrImageCache.has(key)) return qrImageCache.get(key);
+  const buf = await QRCode.toBuffer(payload, { margin: 1, width: 260 });
+  const url = "data:image/png;base64," + qrPngWithNumber(buf, "#" + reg.eventNo).toString("base64");
+  if (qrImageCache.size > 3000) qrImageCache.clear();
+  qrImageCache.set(key, url);
+  return url;
 }
 function parseAndVerify(db, code) {
   const parts = String(code || "").trim().split(":");
@@ -4375,12 +4467,10 @@ app.delete("/api/me/registrations/:id", requireMember, (req, res) => {
   if (teamEvent && teamEvent.teamRegistration) {
     promotedTeam = handleTeamRegistrationRemoved(db, teamEvent, reg);
   } else if (!reg.waitlisted) {
-    promoted = db.registrations
-      .filter((r) => r.eventId === reg.eventId && r.waitlisted)
-      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))
-      // skip anyone already confirmed in another event with the same event code
-      .find((r) => !exclusiveConflict(db, db.events.find((e) => e.id === reg.eventId), r.membershipNumber, r.dependentId));
-    if (promoted) { promoted.waitlisted = false; promoted.whatsappConfirmedAt = null; promoted.whatsappReminderAt = null; promoted.whatsappDayOfAt = null; }
+    // The longest-waiting person moves up - but only while the event's CURRENT limit has room (an event that
+    // was pushed over its limit by hand stays put until enough places are free). Same function as when the
+    // capacity is raised, so it never exceeds the maximum.
+    promoted = autoPromoteWaitlist(db, teamEvent || db.events.find((e) => e.id === reg.eventId) || { id: reg.eventId, maxCapacity: null }).people[0] || null;
   }
   const event = db.events.find((e) => e.id === reg.eventId);
   logActivity(db, {
@@ -4761,6 +4851,8 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), requireE
           registrationId: r.id,
           attendeeName: r.dependentName || (member ? member.name : r.membershipNumber),
           membershipNumber: r.membershipNumber,
+          eventNo: r.eventNo || null,
+          memberUid: (dependent ? dependent.uid : member && member.uid) || null,
           // The Tournament Manager never receives mobile numbers.
           phone: req.staff.role === "tournament" ? "" : (dependent && dependent.phone) || (member ? member.phone : "") || "",
           hasPhone: !!((dependent && dependent.phone) || (member && member.phone)),
@@ -4768,6 +4860,7 @@ app.get("/api/staff/events/:eventId/roster", requireStaffRole("staff"), requireE
           checkInAt: r.checkInAt,
           waitlisted: !!r.waitlisted,
           teamId: r.teamId || null,
+          teamName: r.teamId ? ((db.eventTeams || []).find((x) => x.id === r.teamId) || {}).name || null : null,
           registeredAt: r.registeredAt || null,
           whatsappConfirmedAt: r.whatsappConfirmedAt || null,
           whatsappReminderAt: r.whatsappReminderAt || null,
@@ -5282,6 +5375,38 @@ app.get("/api/admin/events/:eventId/waitlist", requireStaffRole(["tournament"]),
 // re-check maxCapacity - if the admin is promoting someone, it's because
 // they know there's room (a spot freed up, or they raised the cap), and
 // this is the manual override for that judgment call.
+// Manual promote from the waiting list is allowed even when the event is full, but never silently: the
+// first call is answered with 409 "over_capacity" (limit, how many are confirmed, the number that would fit
+// everyone). The staff member then either raises the limit in the same step (raiseCapacityTo) or confirms
+// going over it (force). Applies to people (maxCapacity) and to whole teams (maxTeams).
+function capacityGateForPromote(db, event, isTeam, body, staff) {
+  const cfg = isTeam ? (event.teamRegistration || {}) : event;
+  const max = isTeam ? cfg.maxTeams : cfg.maxCapacity;
+  if (max === null || max === undefined) return { ok: true };
+  const confirmed = isTeam ? confirmedTeamCount(db, event.id) : confirmedRegistrationCount(db, event.id);
+  if (confirmed < max) return { ok: true };
+  const need = confirmed + 1;
+  const raiseTo = body && body.raiseCapacityTo !== undefined ? Number(body.raiseCapacityTo) : NaN;
+  const who = { actorType: "staff", actorId: staff.username, actorName: staff.name };
+  if (Number.isFinite(raiseTo) && raiseTo >= need && raiseTo <= 100000) {
+    if (isTeam) event.teamRegistration.maxTeams = Math.floor(raiseTo); else event.maxCapacity = Math.floor(raiseTo);
+    logActivity(db, { ...who, action: "event_capacity_raised", details: `${event.nameEn} - ${isTeam ? "teams" : "places"} ${max} -> ${Math.floor(raiseTo)} (while promoting from the waiting list)` });
+    return { ok: true, raised: { from: max, to: Math.floor(raiseTo) } };
+  }
+  if (body && body.force === true) {
+    logActivity(db, { ...who, action: "waitlist_promoted_over_capacity", details: `${event.nameEn} - ${confirmed + 1} confirmed against a limit of ${max}` });
+    return { ok: true, over: true };
+  }
+  return {
+    ok: false,
+    payload: {
+      code: "over_capacity",
+      error: `The event is full (${confirmed} of ${max} ${isTeam ? "teams" : "places"}). Confirming this ${isTeam ? "team" : "person"} goes over the limit - raise the capacity to ${need} first.`,
+      maxCapacity: max, confirmed, suggested: need, unit: isTeam ? "teams" : "people", eventId: event.id,
+    },
+  };
+}
+
 app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]), requireRegistrationAccess, (req, res) => {
   const db = req.db;
   const id = Number(req.params.id);
@@ -5298,12 +5423,17 @@ app.post("/api/admin/registrations/:id/promote", requireStaffRole(["tournament"]
       });
     }
   }
+  const promoEvent = db.events.find((e) => e.id === reg.eventId);
+  const gate = promoEvent ? capacityGateForPromote(db, promoEvent, false, req.body, req.staff) : { ok: true };
+  if (!gate.ok) return res.status(409).json(gate.payload);
   reg.waitlisted = false;
   // Any WhatsApp stamp from before the promotion no longer counts as a real
   // confirmation - the person is only confirmed from now on.
   reg.whatsappConfirmedAt = null; reg.whatsappReminderAt = null; reg.whatsappDayOfAt = null;
+  // If the capacity was raised by more than this one place, the next people in line fill the rest.
+  const alsoMoved = gate.raised && promoEvent ? autoPromoteWaitlist(db, promoEvent) : { people: [], teams: [] };
   writeDb(db);
-  res.json(reg);
+  res.json({ ...reg, capacityRaised: gate.raised || null, overCapacity: !!gate.over, alsoPromoted: alsoMoved.people.length });
 });
 
 // Staff-side cancellation of a member's registration - same underlying
@@ -5337,12 +5467,10 @@ app.post("/api/admin/registrations/:id/cancel", requireStaffRole(["tournament"])
   if (teamEvent && teamEvent.teamRegistration) {
     promotedTeam = handleTeamRegistrationRemoved(db, teamEvent, reg);
   } else if (!reg.waitlisted) {
-    promoted = db.registrations
-      .filter((r) => r.eventId === reg.eventId && r.waitlisted)
-      .sort((a, b) => a.registeredAt.localeCompare(b.registeredAt))
-      // skip anyone already confirmed in another event with the same event code
-      .find((r) => !exclusiveConflict(db, db.events.find((e) => e.id === reg.eventId), r.membershipNumber, r.dependentId));
-    if (promoted) { promoted.waitlisted = false; promoted.whatsappConfirmedAt = null; promoted.whatsappReminderAt = null; promoted.whatsappDayOfAt = null; }
+    // The longest-waiting person moves up - but only while the event's CURRENT limit has room (an event that
+    // was pushed over its limit by hand stays put until enough places are free). Same function as when the
+    // capacity is raised, so it never exceeds the maximum.
+    promoted = autoPromoteWaitlist(db, teamEvent || db.events.find((e) => e.id === reg.eventId) || { id: reg.eventId, maxCapacity: null }).people[0] || null;
   }
   const event = db.events.find((e) => e.id === reg.eventId);
   logActivity(db, {
@@ -5374,6 +5502,8 @@ app.get("/api/admin/members", requireStaffRole("admin"), (req, res) => {
       name: m.name,
       phone: m.phone || "",
       familyGroup: m.familyGroup || "",
+      uid: m.uid || "",
+      dependentUids: (m.dependents || []).map((d) => d.uid).filter(Boolean),
       ageGroup: m.ageGroup || "",
       ...ageFields(m),
       hasLoggedInAccount: !!m.passwordHash,
@@ -8334,11 +8464,11 @@ function verifyCard(token) {
   } catch (e) { return null; }
 }
 // Everything the card page needs for one entrant, from the already-public tournament view.
-function buildPlayerCard(db, eventId, entrantId) {
+function buildPlayerCard(db, eventId, entrantId, tnIn) {
   const t = findTournament(db, eventId);
   const ev = db.events.find((e) => e.id === eventId);
   if (!t || !ev) return null;
-  const tn = serializeTournament(db, t, true);
+  const tn = tnIn || serializeTournament(db, t, true);
   const me = (tn.entrants || []).find((e) => e.id === entrantId);
   if (!me) return null;
   const labelOf = (id) => { const e = (tn.entrants || []).find((x) => x.id === id); return e ? e.label : ""; };
@@ -8346,7 +8476,7 @@ function buildPlayerCard(db, eventId, entrantId) {
   const push = (stage, m, extra) => {
     const isA = m.a === entrantId, isB = m.b === entrantId;
     if (!isA && !isB) return;
-    mine.push({ stage, ...extra, court: m.court || null, time: m.time || null, date: m.date || null, oppId: isA ? m.b : m.a, opponent: m.a && m.b ? labelOf(isA ? m.b : m.a) : "", opponentKnown: !!(m.a && m.b), decided: !!extra.decided, decidedAt: m.decidedAt || null });
+    mine.push({ stage, ...extra, court: m.court || null, time: m.time || null, date: m.date || null, oppId: isA ? m.b : m.a, opponent: m.a && m.b ? labelOf(isA ? m.b : m.a) : "", opponentKnown: !!(m.a && m.b), decided: !!extra.decided, decidedAt: m.decidedAt || null, hint: extra.hint || null });
   };
   (tn.groups || []).forEach((g, gi) => g.matches.forEach((m) => {
     const r = m.result;
@@ -8355,11 +8485,17 @@ function buildPlayerCard(db, eventId, entrantId) {
   }));
   if (tn.knockout) {
     const total = tn.knockout.rounds.length;
-    tn.knockout.rounds.forEach((round, ri) => round.forEach((m) => {
+    tn.knockout.rounds.forEach((round, ri) => round.forEach((m, mi) => {
       if (m.bye) return;
       const isA = m.a === entrantId;
       const has = m.scoreA != null && m.scoreB != null;
-      push({ type: "ko", roundIndex: ri, totalRounds: total, place: m.place || null }, m, { decided: !!m.winnerId, scoreFor: has ? (isA ? m.scoreA : m.scoreB) : null, scoreAgainst: has ? (isA ? m.scoreB : m.scoreA) : null, won: m.winnerId ? m.winnerId === entrantId : null });
+      // Opponent not known yet: which earlier match decides it (for "winner of A v B").
+      let hint = null;
+      if (ri > 0 && ((isA && !m.b) || (!isA && !m.a))) {
+        const f = tn.knockout.rounds[ri - 1][mi * 2 + (isA ? 1 : 0)];
+        if (f && !f.bye) hint = { a: f.a ? labelOf(f.a) : null, b: f.b ? labelOf(f.b) : null, court: f.court || null, time: f.time || null };
+      }
+      push({ type: "ko", roundIndex: ri, totalRounds: total, place: m.place || null }, m, { decided: !!m.winnerId, scoreFor: has ? (isA ? m.scoreA : m.scoreB) : null, scoreAgainst: has ? (isA ? m.scoreB : m.scoreA) : null, won: m.winnerId ? m.winnerId === entrantId : null, hint, koPos: { ri, mi } });
     }));
   }
   let swissInfo = null;
@@ -8397,6 +8533,33 @@ function buildPlayerCard(db, eventId, entrantId) {
     player: { label: me.label, players: me.players || null },
     next: next ? { stage: next.stage, court: next.court, time: next.time, date: next.date, opponent: next.opponent, opponentKnown: next.opponentKnown } : null,
     played: played.map((m) => ({ stage: m.stage, opponent: m.opponent, scoreFor: m.scoreFor, scoreAgainst: m.scoreAgainst, won: m.won, draw: !!m.draw })),
+    // Every match this entrant has, in order, from the first one up to the first whose opponent is still open.
+    path: (() => {
+      const out = [];
+      for (const m of mine) {
+        out.push({ stage: m.stage, court: m.court, time: m.time, date: m.date || null, opponent: m.opponent, opponentKnown: m.opponentKnown, hint: m.hint || null, decided: !!m.decided, scoreFor: m.scoreFor == null ? null : m.scoreFor, scoreAgainst: m.scoreAgainst == null ? null : m.scoreAgainst, won: m.won == null ? null : m.won, draw: !!m.draw });
+        if (!m.decided && !m.opponentKnown) break;
+        // A knockout match still to be played: show the match that follows it ("if you win") with whoever
+        // is already through from the neighbouring match, or "winner of A vs B" while that is still open.
+        if (!m.decided && m.koPos && tn.knockout && !(m.stage && m.stage.place)) {
+          const { ri, mi } = m.koPos;
+          const nextMatch = (tn.knockout.rounds[ri + 1] || [])[mi >> 1];
+          const sib = tn.knockout.rounds[ri][mi ^ 1];
+          if (nextMatch && sib) {
+            const sibWinner = sib.winnerId || (sib.bye ? sib.a || sib.b : null);
+            out.push({
+              stage: { type: "ko", roundIndex: ri + 1, totalRounds: tn.knockout.rounds.length, place: nextMatch.place || null },
+              court: nextMatch.court || null, time: nextMatch.time || null, date: nextMatch.date || null,
+              opponent: sibWinner ? labelOf(sibWinner) : "", opponentKnown: !!sibWinner,
+              hint: sibWinner ? null : { a: sib.a ? labelOf(sib.a) : null, b: sib.b ? labelOf(sib.b) : null, court: sib.court || null, time: sib.time || null },
+              decided: false, projected: true, scoreFor: null, scoreAgainst: null, won: null, draw: false,
+            });
+            if (!sibWinner) break;
+          }
+        }
+      }
+      return out;
+    })(),
     journey: { groupInfo, swissInfo, inKnockout: mine.some((m) => m.stage.type === "ko"), koRounds, lostAtRound: lostKo ? lostKo.stage.roundIndex : null, champion: finished && standing === 0, finalPlace: finished && standing >= 0 ? standing + 1 : null, finished },
   };
 }
@@ -8408,6 +8571,144 @@ app.get("/api/public/card/:token", (req, res) => {
   if (!card) return res.status(404).json({ error: "This card is no longer available" });
   res.json(card);
 });
+
+// ---- Member event page: a player types the short number printed above the QR code and sees where he stands ----
+// Public, no sign-in. Off unless Admin / the event's Tournament Manager switch it on for that event, and it only
+// answers on the days the event is running. It shows a first name plus the initial of the last name, the
+// registration and check-in status and the tournament path with public names - nothing else about the member.
+const memberLookupMisses = new Map(); // ip -> { count, first }
+const MEMBER_LOOKUP_MAX_MISSES = 40, MEMBER_LOOKUP_WINDOW_MS = 10 * 60 * 1000;
+function memberLookupBlocked(ip) {
+  const rec = memberLookupMisses.get(ip);
+  if (!rec) return false;
+  if (Date.now() - rec.first > MEMBER_LOOKUP_WINDOW_MS) { memberLookupMisses.delete(ip); return false; }
+  return rec.count >= MEMBER_LOOKUP_MAX_MISSES;
+}
+function memberLookupMiss(ip) {
+  const rec = memberLookupMisses.get(ip);
+  if (!rec || Date.now() - rec.first > MEMBER_LOOKUP_WINDOW_MS) memberLookupMisses.set(ip, { count: 1, first: Date.now() });
+  else rec.count++;
+}
+function shortPublicName(full) {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return parts.length > 1 ? `${parts[0]} ${Array.from(parts[parts.length - 1])[0]}.` : parts[0];
+}
+function cairoNowParts() {
+  const d = new Date();
+  const date = d.toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
+  const [h, m] = d.toLocaleTimeString("en-GB", { timeZone: "Africa/Cairo", hour12: false }).split(":").map(Number);
+  return { date, minutes: h * 60 + m };
+}
+function hhmmToMinutes(str) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(str || ""));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+function minutesToHhmm(min) {
+  const x = ((Math.round(min) % 1440) + 1440) % 1440;
+  return String(Math.floor(x / 60)).padStart(2, "0") + ":" + String(x % 60).padStart(2, "0");
+}
+// How long until this player's next match. Starts from the scheduled time and adds however far behind the day
+// is running: the earliest still-undecided match that should already have finished (its start + one match
+// length) shows the delay. An estimate only - kinds: "unknown" (no time), "later" (another day), "due" (go now),
+// "waiting" (time passed but the opponent is not decided yet), "soon" (minutes + expected start).
+function estimateNextMatch(t, tn, ev, next, now) {
+  if (!next || !next.time) return { kind: "unknown" };
+  const S = hhmmToMinutes(next.time);
+  const date = next.date || ev.date || now.date;
+  if (S == null) return { kind: "unknown" };
+  if (date > now.date) return { kind: "later", date, time: next.time };
+  const M = Number(t.matchMinutes) || 20;
+  if (date < now.date || S <= now.minutes) {
+    return next.opponentKnown ? { kind: "due", time: next.time } : { kind: "waiting", time: next.time };
+  }
+  // lateness of the day
+  let oldest = null;
+  const consider = (m, a, b, decided) => {
+    if (decided || !a || !b || !m.time) return;
+    if ((m.date || ev.date || now.date) !== now.date) return;
+    const st = hhmmToMinutes(m.time);
+    if (st == null || st > now.minutes) return;
+    if (oldest == null || st < oldest) oldest = st;
+  };
+  (tn.groups || []).forEach((g) => g.matches.forEach((m) => consider(m, m.a, m.b, !!m.result)));
+  if (tn.knockout) tn.knockout.rounds.forEach((r) => r.forEach((m) => { if (!m.bye) consider(m, m.a, m.b, !!m.winnerId); }));
+  if (tn.swiss) tn.swiss.rounds.forEach((r) => r.pairings.forEach((p) => { if (p.b != null) consider({ time: p.time || r.time, date: null }, p.a, p.b, p.result != null); }));
+  const delay = oldest == null ? 0 : Math.min(240, Math.max(0, now.minutes - (oldest + M)));
+  const start = S + delay;
+  return { kind: "soon", minutes: Math.max(1, start - now.minutes), startAt: minutesToHhmm(start), scheduled: next.time, delayMinutes: delay, opponentKnown: !!next.opponentKnown };
+}
+const memberViewCache = new Map(); // "eventId:no" -> { at, body, status }
+function buildMemberView(db, ev, reg) {
+  const member = db.members[reg.membershipNumber];
+  const dep = reg.dependentId && member ? (member.dependents || []).find((d) => d.id === reg.dependentId) : null;
+  const fullName = reg.dependentName || (dep && dep.name) || (member && member.name) || "";
+  const now = cairoNowParts();
+  const t = findTournament(db, ev.id);
+  const out = {
+    state: "ok",
+    now: { date: now.date, time: minutesToHhmm(now.minutes) },
+    event: { id: ev.id, nameEn: ev.nameEn, nameAr: ev.nameAr, date: ev.date || "", endDate: ev.endDate || null, sport: ev.sport || "" },
+    player: {
+      name: shortPublicName(fullName), eventNo: reg.eventNo,
+      waitlisted: !!reg.waitlisted, checkedIn: !!reg.checkedIn, checkedInAt: reg.checkedIn ? reg.checkInAt || null : null,
+      teamName: reg.teamId ? ((db.eventTeams || []).find((x) => x.id === reg.teamId) || {}).name || null : null,
+    },
+    tournament: null, card: null, estimate: null,
+  };
+  if (!t) return out;
+  const generated = tournamentIsGenerated(t);
+  out.tournament = { format: t.format, status: t.status, generated, hasSchedule: hasSchedule(t), fromCheckin: !!t.fromCheckin, inDraw: false };
+  if (!generated || reg.waitlisted) return out;
+  const ent = tournamentEntrants(db, t, false).find((e) => (e.registrationIds || []).includes(reg.id));
+  if (!ent) return out;
+  const tn = serializeTournament(db, t, true);
+  const card = buildPlayerCard(db, ev.id, ent.id, tn);
+  if (!card) return out;
+  // In the draw = has a match, a result, a group or a Swiss ranking. A player who registered after the draw has none.
+  out.tournament.inDraw = !!(card.path.length || card.played.length || (card.journey && (card.journey.groupInfo || (card.journey.swissInfo && card.journey.swissInfo.rank != null))));
+  if (!out.tournament.inDraw) return out;
+  out.card = { player: card.player, next: card.next, path: card.path, journey: card.journey, tournament: card.tournament };
+  out.estimate = estimateNextMatch(t, tn, ev, card.next, now);
+  return out;
+}
+app.get("/api/public/me", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const eventId = Number(req.query.event);
+  const digits = String(req.query.no || "").replace(/\D/g, "");
+  if (!Number.isInteger(eventId) || digits.length > 6) return res.status(400).json({ state: "bad_request", error: "Enter the number printed above your QR code" });
+  if (digits && memberLookupBlocked(req.ip)) return res.status(429).json({ state: "blocked", error: "Too many wrong numbers. Please wait a few minutes and try again." });
+  const no = Number(digits);
+  const key = `${eventId}:${no}`;
+  const hit = memberViewCache.get(key);
+  if (hit && Date.now() - hit.at < 5000) return res.status(hit.status).json(hit.body);
+  const reply = (status, body, cache) => { if (cache) { if (memberViewCache.size > 5000) memberViewCache.clear(); memberViewCache.set(key, { at: Date.now(), body, status }); } return res.status(status).json(body); };
+  const db = readDb();
+  const ev = db.events.find((e) => e.id === eventId);
+  if (!ev) { memberLookupMiss(req.ip); return res.status(404).json({ state: "no_event", error: "This event was not found" }); }
+  const evInfo = { id: ev.id, nameEn: ev.nameEn, nameAr: ev.nameAr, date: ev.date || "" };
+  if (!ev.memberPageEnabled) return res.status(200).json({ state: "off", event: evInfo });
+  const today = cairoToday();
+  if (ev.date && today < ev.date) return res.status(200).json({ state: "not_started", event: evInfo });
+  if (today > (ev.endDate || ev.date || today)) return res.status(200).json({ state: "ended", event: evInfo });
+  if (!digits) return res.status(200).json({ state: "ready", event: evInfo }); // the page's first call: is it open?
+  const reg = db.registrations.find((r) => r.eventId === ev.id && r.eventNo === no);
+  if (!reg) { memberLookupMiss(req.ip); return res.status(404).json({ state: "no_such_number", event: evInfo, error: "No registration has this number in this event" }); }
+  return reply(200, buildMemberView(db, ev, reg), true);
+});
+// Per-event switch (Admin and the event's Tournament Manager). Off by default.
+app.put("/api/staff/events/:eventId/member-page-setting", requireStaffRole(["tournament"]), requireEventAccess, (req, res) => {
+  const db = req.db;
+  const event = db.events.find((e) => e.id === Number(req.params.eventId));
+  if (!event) return res.status(404).json({ error: "Event not found" });
+  const enabled = req.body && (req.body.enabled === true || req.body.enabled === "true");
+  event.memberPageEnabled = !!enabled;
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "member_page_switch", details: `${event.nameEn} - member page ${enabled ? "switched on" : "switched off"}` });
+  writeDb(db);
+  memberViewCache.clear();
+  res.json({ success: true, eventId: event.id, memberPageEnabled: !!event.memberPageEnabled });
+});
+
 
 app.get("/api/admin/tournaments/:eventId", requireStaffRole(["tournament"]), requireTournamentDayAccess, (req, res) => {
   const db = req.db;
@@ -9454,9 +9755,13 @@ app.post("/api/admin/event-teams/:id/promote", requireStaffRole(["tournament"]),
   const team = teamForStaff(req, res);
   if (!team) return;
   if (!team.waitlisted) return res.status(400).json({ error: "This team isn't on the waiting list" });
+  const teamEvent = req.db.events.find((e) => e.id === team.eventId);
+  const gate = teamEvent && teamEvent.teamRegistration ? capacityGateForPromote(req.db, teamEvent, true, req.body, req.staff) : { ok: true };
+  if (!gate.ok) return res.status(409).json(gate.payload);
   promoteTeam(req.db, team);
+  const alsoMovedTeams = gate.raised && teamEvent ? autoPromoteWaitlist(req.db, teamEvent) : { people: [], teams: [] };
   writeDb(req.db);
-  res.json({ ok: true, team });
+  res.json({ ok: true, team, capacityRaised: gate.raised || null, overCapacity: !!gate.over, alsoPromoted: alsoMovedTeams.teams.length });
 });
 
 app.post("/api/admin/event-teams/:id/remove", requireStaffRole(["tournament"]), (req, res) => {
@@ -11041,6 +11346,7 @@ app.use((err, req, res, next) => {
 });
 
 bootstrapAdmin();
+try { const bootDb = readDb(); if (assignMissingIds(bootDb)) { writeDb(bootDb); console.log("Assigned member IDs and event numbers to existing records."); } } catch (e) { console.error("ID backfill failed:", e.message); }
 app.listen(PORT, () => {
   console.log(`MyAhlawy points system running at http://localhost:${PORT}`);
   startCloudBackupScheduler();
