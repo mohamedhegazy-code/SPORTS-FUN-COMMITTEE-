@@ -35,6 +35,9 @@ const iso = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10
     await inputs[0].fill("e2eadmin"); await inputs[1].fill("E2ETest!2026xyz");
     await page.click("#scan-unlock"); await page.waitForTimeout(1200);
     await page.selectOption("#checkin-event-select", String(ev.id)); await page.waitForTimeout(800);
+    // Attendance confirmation is a per-event option, off by default: switch it on first.
+    ok(await page.locator("#checkin-roster-wrap [data-att-conf]").count() === 0, "column hidden until switched on");
+    await page.locator("#checkin-roster-wrap [data-att-switch]").click(); await page.waitForTimeout(900);
     ok(await page.locator("#checkin-roster-wrap [data-att-conf]").count() === 4, "two buttons per member");
     const chip = async (k) => Number(await page.locator('[data-roster-filter="' + k + '"] b').first().innerText());
     ok(await chip("noreply") === 2, "2 no answer at start");
@@ -62,6 +65,7 @@ const iso = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10
     ok(bad.status() === 400, "invalid status rejected");
     const nf = await ar.post(BASE + "/api/staff/registrations/99999/attendance-confirmation", { data: { status: "yes" }, headers: { "X-CSRF-Token": await tok(actx) } });
     ok(nf.status() === 404, "unknown registration 404");
+    await ar.put(BASE + "/api/staff/events/" + ev.id + "/attendance-confirmation-setting", { data: { enabled: true }, headers: { "X-CSRF-Token": await tok(actx) } });
     const ci = await ar.post(BASE + "/api/checkin/manual", { data: { registrationId: r0.registrationId }, headers: { "X-CSRF-Token": await tok(actx) } });
     const after = await ar.post(BASE + "/api/staff/registrations/" + r0.registrationId + "/attendance-confirmation", { data: { status: "yes" }, headers: { "X-CSRF-Token": await tok(actx) } });
     ok(ci.ok() && after.status() === 409, "checked-in person can't be confirmed", [ci.status(), after.status()]);
