@@ -26,6 +26,7 @@ const os = require("os");
 const { renderEventSheet, renderAgeReport, renderCustomReport, AGE_KEYS: REPORT_AGE_KEYS } = require("./report_print");
 const AgeUtils = require("./age_utils");
 const CustomReport = require("./custom_report");
+const Sec = require("./security");
 const {
   Document,
   Packer,
@@ -215,6 +216,12 @@ app.use((req, res, next) => {
   next();
 });
 
+// Nothing under the account, admin or staff APIs is ever worth keeping in a browser or proxy cache.
+app.use(["/api/admin", "/api/auth", "/api/staff"], (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
 // no-store (not just no-cache) so a redeployed app.js/index.html/etc. is
 // never served stale from the browser's disk cache after an update -
 // Express's default static headers (ETag only, no explicit Cache-Control)
@@ -230,7 +237,7 @@ app.use((req, res, next) => {
 // Server-side source files must never be downloadable, even if one is
 // uploaded into public/ by mistake (it happened once with server.js).
 app.use((req, res, next) => {
-  if (/^\/(server|swiss|swiss_print|schedule_print|backup|cloud_backup|report_print|age_utils|custom_report)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
+  if (/^\/(server|swiss|swiss_print|schedule_print|backup|cloud_backup|report_print|age_utils|custom_report|security)\.js$/i.test(req.path) || /^\/(package(-lock)?\.json|\.env)$/i.test(req.path)) {
     return res.status(404).end();
   }
   next();
@@ -958,6 +965,10 @@ function readDb() {
     db.termsAndConditions.updatedAt = new Date().toISOString();
   }
   db.activityLog = db.activityLog || [];
+  db.securityLog = db.securityLog || [];
+  db.auditHeads = db.auditHeads || {};
+  db.staffInvites = db.staffInvites || {};
+  db.security = db.security || {};
   return db;
 }
 // Platform-wide activity log, admin-only report (see GET /api/admin/activity-log
@@ -978,9 +989,13 @@ function readDb() {
 // the action it's logging) persists the new entry as part of that same
 // write, with no extra disk I/O per log line.
 const ACTIVITY_LOG_MAX = 5000;
+// Audit trail and security log are tamper-evident: every entry carries seq/prev/hash (an HMAC chain keyed
+// by the server secret), so an edited, inserted or removed row shows up in Security centre > Audit trail.
+const AUDIT_KEY = crypto.createHash("sha256").update("audit-chain|" + QR_SECRET).digest();
 function logActivity(db, { actorType, actorId, actorName, action, details }) {
   try {
-    db.activityLog.push({
+    db.auditHeads = db.auditHeads || {};
+    const entry = {
       id: db.activityLog.length ? db.activityLog[db.activityLog.length - 1].id + 1 : 1,
       at: new Date().toISOString(),
       actorType,
@@ -988,7 +1003,8 @@ function logActivity(db, { actorType, actorId, actorName, action, details }) {
       actorName: actorName || "",
       action,
       details: details || "",
-    });
+    };
+    Sec.chainAppend(db.activityLog, db.auditHeads, "activity", AUDIT_KEY, entry);
     if (db.activityLog.length > ACTIVITY_LOG_MAX) {
       db.activityLog.splice(0, db.activityLog.length - ACTIVITY_LOG_MAX);
     }
@@ -997,6 +1013,48 @@ function logActivity(db, { actorType, actorId, actorName, action, details }) {
     console.error("logActivity failed:", e.message);
   }
 }
+// Sign-in and security events (successful/failed logins, lockouts, 2-step codes, permission changes...).
+// Same chain, separate list, with the network details the plain activity feed does not carry.
+const SECURITY_LOG_MAX = 10000;
+function clientInfo(req) {
+  return { ip: String((req && req.ip) || "").slice(0, 60), ua: String((req && req.get && req.get("user-agent")) || "").slice(0, 200) };
+}
+function secLog(db, req, { type, username, severity, details }) {
+  try {
+    db.securityLog = db.securityLog || [];
+    db.auditHeads = db.auditHeads || {};
+    const last = db.securityLog[db.securityLog.length - 1];
+    const ci = clientInfo(req);
+    const entry = {
+      id: last ? last.id + 1 : 1,
+      at: new Date().toISOString(),
+      type,
+      username: username || "",
+      severity: severity || "info",
+      ip: ci.ip,
+      ua: ci.ua,
+      details: details || "",
+    };
+    Sec.chainAppend(db.securityLog, db.auditHeads, "security", AUDIT_KEY, entry);
+    if (db.securityLog.length > SECURITY_LOG_MAX) db.securityLog.splice(0, db.securityLog.length - SECURITY_LOG_MAX);
+  } catch (e) {
+    console.error("secLog failed:", e.message);
+  }
+}
+// Platform security settings (Security centre). Cached in memory so getSession() can apply the idle
+// sign-out without reading the database; refreshed on every staff request and every save.
+const SECURITY_DEFAULTS = { require2fa: "off", idleMinutes: 120, lockoutThreshold: 5, lockoutMinutes: 15 };
+function normalizeSecurity(raw) {
+  const r = raw && typeof raw === "object" ? raw : {};
+  const num = (v, min, max, d) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(max, Math.max(min, Math.round(Number(v)))) : d);
+  return {
+    require2fa: ["off", "admin", "all"].includes(r.require2fa) ? r.require2fa : SECURITY_DEFAULTS.require2fa,
+    idleMinutes: num(r.idleMinutes, 0, 1440, SECURITY_DEFAULTS.idleMinutes),
+    lockoutThreshold: num(r.lockoutThreshold, 3, 20, SECURITY_DEFAULTS.lockoutThreshold),
+    lockoutMinutes: num(r.lockoutMinutes, 1, 1440, SECURITY_DEFAULTS.lockoutMinutes),
+  };
+}
+let SECURITY_CFG = normalizeSecurity(null);
 // Where rolling safety-net snapshots of db.json are kept - see backupDbFile()
 // below. Same volume as db.json itself (data/), so it survives redeploys.
 const DB_BACKUP_DIR = path.join(__dirname, "data", "backups");
@@ -1099,10 +1157,27 @@ function publicMember(m) {
   const { passwordHash, recoveryPinHash, claimCodeHash, ...rest } = m;
   return { ...rest, hasRecoveryPin: !!recoveryPinHash, hasClaimCode: !!claimCodeHash };
 }
-function publicStaff(s) {
+function publicStaff(s, db) {
   if (!s) return s;
-  const { passwordHash, recoveryPinHash, ...rest } = s;
-  return { ...rest, hasRecoveryPin: !!recoveryPinHash };
+  const { passwordHash, recoveryPinHash, totp, totpPending, backupCodes, failedLogins, ...rest } = s;
+  const out = {
+    ...rest,
+    hasRecoveryPin: !!recoveryPinHash,
+    hasPassword: !!passwordHash,
+    effectiveModules: Sec.effectiveModules(s),
+    twoFactorEnabled: !!(totp && totp.enabled),
+    backupCodesLeft: Array.isArray(backupCodes) ? backupCodes.filter((c) => !c.used).length : 0,
+  };
+  if (db) out.mustSetup2fa = needs2faSetup(s, normalizeSecurity(db.security));
+  return out;
+}
+// True when the platform requires 2-step login for this account and it has not set it up yet.
+function needs2faSetup(staff, cfg) {
+  if (!staff) return false;
+  if (staff.totp && staff.totp.enabled) return false;
+  if (cfg.require2fa === "all") return true;
+  if (cfg.require2fa === "admin") return staff.role === "admin";
+  return false;
 }
 
 // ------------------------------------------------------------- sessions ---
@@ -1135,6 +1210,7 @@ function persistSessions() {
     let restored = 0;
     for (const [token, session] of Object.entries(db.sessions || {})) {
       if (session && session.expiresAt > now) {
+        session.lastSeen = now; // a restart must not count as idle time
         sessions.set(token, session);
         restored++;
       }
@@ -1145,9 +1221,11 @@ function persistSessions() {
   }
 })();
 
-function createSession(type, id, role) {
+function createSession(type, id, role, req) {
   const token = crypto.randomBytes(24).toString("hex");
-  sessions.set(token, { type, id, role, expiresAt: Date.now() + SESSION_TTL_MS });
+  const ci = clientInfo(req);
+  const now = Date.now();
+  sessions.set(token, { type, id, role, expiresAt: now + SESSION_TTL_MS, createdAt: now, lastSeen: now, ip: ci.ip, ua: ci.ua });
   persistSessions();
   return token;
 }
@@ -1156,9 +1234,19 @@ function getSession(req) {
   if (!token) return null;
   const session = sessions.get(token);
   if (!session) return null;
-  if (session.expiresAt < Date.now()) {
+  const now = Date.now();
+  if (session.expiresAt < now) {
     sessions.delete(token);
     return null;
+  }
+  if (session.type === "staff") {
+    // Idle sign-out (Security centre setting): a staff session nobody has touched for N minutes is closed.
+    const idleMs = SECURITY_CFG.idleMinutes * 60 * 1000;
+    if (idleMs > 0 && now - (session.lastSeen || session.createdAt || now) > idleMs) {
+      sessions.delete(token);
+      return null;
+    }
+    session.lastSeen = now;
   }
   return session;
 }
@@ -1205,21 +1293,44 @@ function requireStaffRole(role) {
   return (req, res, next) => {
     const session = getSession(req);
     if (!session || session.type !== "staff") return res.status(401).json({ error: "Please sign in" });
-    if (session.role !== "admin") {
+    const db = readDb();
+    const staff = db.staffAccounts[session.id];
+    if (!staff) return res.status(401).json({ error: "Please sign in" });
+    // The account on file is the authority (not the role remembered in the session cookie's record), so
+    // a role/permission change or a disabled account takes effect on the very next request.
+    if (staff.disabled) {
+      if (sessions.delete(getSessionToken(req))) persistSessions();
+      return res.status(401).json({ error: "This account is disabled", code: "disabled" });
+    }
+    SECURITY_CFG = normalizeSecurity(db.security);
+    const acctRole = staff.role;
+    if (acctRole !== "admin") {
       if (allowList) {
-        if (!allowList.includes(session.role)) return res.status(403).json({ error: "Admin access required" });
+        if (!allowList.includes(acctRole)) return res.status(403).json({ error: "Admin access required" });
       } else if (role === "admin") {
         return res.status(403).json({ error: "Admin access required" });
-      } else if (session.role === "partner") {
+      } else if (acctRole === "partner") {
         // A Partner account is a read-only view of who attended the events
         // it was assigned; it must never reach the gate / roster endpoints
         // (those carry phone numbers and can change data).
         return res.status(403).json({ error: "Not allowed for this account" });
       }
     }
-    const db = readDb();
-    const staff = db.staffAccounts[session.id];
-    if (!staff) return res.status(401).json({ error: "Please sign in" });
+    // Per-module switches (Users & permissions). Only consulted for accounts that have them or a role
+    // base that does not cover the module; an untouched full admin passes straight through.
+    const pathname = String(req.originalUrl || req.url || "").split("?")[0];
+    let mod = Sec.moduleForPath(pathname);
+    if (!mod && role === "admin") mod = "settings"; // an admin-only route nobody mapped = Settings
+    if (mod) {
+      const eff = Sec.effectiveModules(staff);
+      if (!eff[mod]) {
+        return res.status(403).json({ error: "You do not have access to this part of the platform", code: "module_denied", module: mod });
+      }
+    }
+    if (needs2faSetup(staff, SECURITY_CFG)) {
+      return res.status(403).json({ error: "Two-step login must be set up before you can continue", code: "2fa_setup_required" });
+    }
+    session.role = acctRole;
     req.staff = staff;
     if (req.simId) {
       // Simulation request (rewritten from /api/sim/:id/admin/tournaments/...): run the very same
@@ -1233,6 +1344,9 @@ function requireStaffRole(role) {
     }
     next();
   };
+}
+function getSessionToken(req) {
+  return req.cookies && req.cookies[SESSION_COOKIE];
 }
 
 // The very first time the app runs with no staff accounts at all, seed one
@@ -1699,7 +1813,7 @@ app.post("/api/auth/signup", async (req, res) => {
   });
   writeDb(db);
 
-  const token = createSession("member", accountId);
+  const token = createSession("member", accountId, undefined, req);
   setSessionCookie(req, res, token);
   res.status(201).json({
     member: publicMember(db.members[accountId]),
@@ -1739,19 +1853,89 @@ app.post("/api/auth/login", async (req, res) => {
   }
   logActivity(freshDb, { actorType: "member", actorId: membershipNumber, actorName: freshMember.name, action: "member_login" });
   writeDb(freshDb);
-  const token = createSession("member", membershipNumber);
+  const token = createSession("member", membershipNumber, undefined, req);
   setSessionCookie(req, res, token);
   res.json({ member: publicMember(freshMember) });
 });
 
+// ---------------------------------------------------------- staff sign-in ----
+// Wrong passwords are counted per ACCOUNT as well as per IP: after the Security-centre threshold (default 5)
+// the account is locked for a while, whoever is trying. A correct password for an account with 2-step
+// login on only yields a short-lived challenge; the session starts when the authenticator (or a backup)
+// code is accepted. Unknown usernames are counted per IP only and kept in memory (no disk write per guess).
+const DUMMY_HASH = bcrypt.hashSync("not-a-real-password-just-for-timing", 10);
+const twoFaChallenges = new Map(); // token -> { username, expiresAt, attempts }
+const unknownLoginFailures = []; // timestamps of failed logins for usernames that do not exist (alerts only)
+function staffLockedMinutes(staff) {
+  const f = staff && staff.failedLogins;
+  if (!f || !f.lockedUntil || f.lockedUntil <= Date.now()) return 0;
+  return Math.max(1, Math.ceil((f.lockedUntil - Date.now()) / 60000));
+}
+function registerStaffFailure(db, staff, req, type, details) {
+  const now = Date.now();
+  const f = (staff.failedLogins = staff.failedLogins || { count: 0, last: 0, lockedUntil: 0 });
+  if (f.lockedUntil && f.lockedUntil <= now) { f.count = 0; f.lockedUntil = 0; }
+  if (now - (f.last || 0) > 30 * 60 * 1000) f.count = 0;
+  f.count++;
+  f.last = now;
+  if (f.count >= SECURITY_CFG.lockoutThreshold) {
+    f.lockedUntil = now + SECURITY_CFG.lockoutMinutes * 60 * 1000;
+    secLog(db, req, { type: "account_locked", username: staff.username, severity: "high", details: `${f.count} failed attempts - locked for ${SECURITY_CFG.lockoutMinutes} min` });
+    return true;
+  }
+  secLog(db, req, { type, username: staff.username, severity: "warn", details: details || `attempt ${f.count} of ${SECURITY_CFG.lockoutThreshold}` });
+  return false;
+}
+function lockedResponse(res, staff) {
+  const m = staffLockedMinutes(staff);
+  return res.status(429).json({
+    error: `This account is temporarily locked after too many wrong attempts. Try again in about ${m} minute(s), or ask an admin to unlock it.`,
+    code: "account_locked",
+    minutes: m,
+  });
+}
+// Completes a sign-in: resets the failure counter, notes where it came from, opens the session.
+function finishStaffLogin(req, res, db, staff) {
+  const ci = clientInfo(req);
+  staff.failedLogins = { count: 0, last: 0, lockedUntil: 0 };
+  staff.lastLoginAt = new Date().toISOString();
+  staff.lastLoginIp = ci.ip;
+  const known = Array.isArray(staff.knownIps) ? staff.knownIps : [];
+  if (known.length && !known.includes(ci.ip)) {
+    secLog(db, req, { type: "login_new_ip", username: staff.username, severity: "warn", details: `first sign-in from ${ci.ip}` });
+  }
+  staff.knownIps = [ci.ip, ...known.filter((x) => x !== ci.ip)].slice(0, 10);
+  secLog(db, req, { type: "login_success", username: staff.username, severity: "info", details: staff.totp && staff.totp.enabled ? "with 2-step code" : "" });
+  logActivity(db, { actorType: "staff", actorId: staff.username, actorName: staff.name, action: "staff_login", details: staff.role });
+  writeDb(db);
+  const token = createSession("staff", staff.username, staff.role, req);
+  setSessionCookie(req, res, token);
+  res.json({ staff: publicStaff(staff, db) });
+}
 app.post("/api/auth/staff-login", async (req, res) => {
   if (loginRateLimitCheck(req, res)) return;
-  const { username, password } = req.body;
+  const body = req.body || {};
+  const username = typeof body.username === "string" ? body.username : "";
+  const password = typeof body.password === "string" ? body.password : "";
   const db = readDb();
-  const staff = db.staffAccounts[username];
-  const passwordOk = staff && staff.passwordHash && (await bcrypt.compare(password || "", staff.passwordHash));
+  SECURITY_CFG = normalizeSecurity(db.security);
+  const staff = username && Object.prototype.hasOwnProperty.call(db.staffAccounts, username) ? db.staffAccounts[username] : null;
+  if (staff && staffLockedMinutes(staff)) return lockedResponse(res, staff);
+  const passwordOk = (await bcrypt.compare(password, staff && staff.passwordHash ? staff.passwordHash : DUMMY_HASH)) && !!(staff && staff.passwordHash);
   if (!passwordOk) {
     recordLoginFailure(req.ip);
+    if (staff) {
+      const fresh = readDb();
+      const f = fresh.staffAccounts[username];
+      if (f) {
+        const locked = registerStaffFailure(fresh, f, req, "login_failed");
+        writeDb(fresh);
+        if (locked) return lockedResponse(res, f);
+      }
+    } else {
+      unknownLoginFailures.push(Date.now());
+      if (unknownLoginFailures.length > 500) unknownLoginFailures.splice(0, unknownLoginFailures.length - 500);
+    }
     return res.status(401).json({ error: "Incorrect username or password" });
   }
   // Re-read right before the write - see the comment in POST /api/auth/login.
@@ -1761,11 +1945,67 @@ app.post("/api/auth/staff-login", async (req, res) => {
     recordLoginFailure(req.ip);
     return res.status(401).json({ error: "Incorrect username or password" });
   }
-  logActivity(freshDb, { actorType: "staff", actorId: username, actorName: freshStaff.name, action: "staff_login", details: freshStaff.role });
-  writeDb(freshDb);
-  const token = createSession("staff", username, freshStaff.role);
-  setSessionCookie(req, res, token);
-  res.json({ staff: publicStaff(freshStaff) });
+  if (freshStaff.disabled) {
+    secLog(freshDb, req, { type: "login_blocked_disabled", username, severity: "warn", details: "correct password, account disabled" });
+    writeDb(freshDb);
+    return res.status(403).json({ error: "This account has been disabled. Please contact the committee.", code: "disabled" });
+  }
+  if (freshStaff.totp && freshStaff.totp.enabled) {
+    const challenge = Sec.randomToken(24);
+    twoFaChallenges.set(challenge, { username, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 });
+    for (const [k, v] of twoFaChallenges) if (v.expiresAt < Date.now()) twoFaChallenges.delete(k);
+    return res.json({ twoFactor: true, challenge, name: freshStaff.name });
+  }
+  finishStaffLogin(req, res, freshDb, freshStaff);
+});
+
+// Step two: the 6-digit authenticator code (or one of the one-time backup codes).
+function checkSecondFactor(staff, code) {
+  const secret = Sec.decryptSecret(staff.totp && staff.totp.secretEnc, QR_SECRET);
+  const raw = String(code || "").trim();
+  if (secret && /^\d{3}\s?\d{3}$/.test(raw)) {
+    const step = Sec.verifyTotp(secret, raw, { lastStep: staff.totp.lastStep == null ? -1 : staff.totp.lastStep });
+    if (step !== null) return { ok: true, kind: "totp", step };
+    return { ok: false };
+  }
+  const h = Sec.hashBackupCode(raw, QR_SECRET);
+  const entry = (staff.backupCodes || []).find((c) => !c.used && c.h === h);
+  if (entry && Sec.normalizeBackupCode(raw).length === 10) return { ok: true, kind: "backup", entry };
+  return { ok: false };
+}
+app.post("/api/auth/staff-login/2fa", (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
+  const body = req.body || {};
+  const ch = twoFaChallenges.get(String(body.challenge || ""));
+  if (!ch || ch.expiresAt < Date.now()) {
+    return res.status(401).json({ error: "This sign-in expired. Please enter your password again.", code: "challenge_expired" });
+  }
+  const db = readDb();
+  SECURITY_CFG = normalizeSecurity(db.security);
+  const staff = db.staffAccounts[ch.username];
+  if (!staff || staff.disabled || !(staff.totp && staff.totp.enabled)) {
+    twoFaChallenges.delete(String(body.challenge));
+    return res.status(401).json({ error: "Please sign in again", code: "challenge_expired" });
+  }
+  if (staffLockedMinutes(staff)) return lockedResponse(res, staff);
+  const r = checkSecondFactor(staff, body.code);
+  if (!r.ok) {
+    ch.attempts++;
+    recordLoginFailure(req.ip);
+    const locked = registerStaffFailure(db, staff, req, "login_2fa_failed", "wrong 2-step code");
+    writeDb(db);
+    if (ch.attempts >= 5 || locked) twoFaChallenges.delete(String(body.challenge));
+    if (locked) return lockedResponse(res, staff);
+    return res.status(401).json({ error: "That code is not correct", code: "bad_code" });
+  }
+  twoFaChallenges.delete(String(body.challenge));
+  if (r.kind === "totp") staff.totp.lastStep = r.step;
+  else {
+    r.entry.used = true;
+    r.entry.usedAt = new Date().toISOString();
+    secLog(db, req, { type: "backup_code_used", username: staff.username, severity: "warn", details: `${staff.backupCodes.filter((c) => !c.used).length} backup code(s) left` });
+  }
+  finishStaffLogin(req, res, db, staff);
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -1800,8 +2040,9 @@ app.get("/api/auth/me", (req, res) => {
     return res.json({ type: "member", member: publicMember(member) });
   }
   const staff = db.staffAccounts[session.id];
-  if (!staff) return res.status(401).json({ error: "Not signed in" });
-  res.json({ type: "staff", staff: publicStaff(staff) });
+  if (!staff || staff.disabled) return res.status(401).json({ error: "Not signed in" });
+  SECURITY_CFG = normalizeSecurity(db.security);
+  res.json({ type: "staff", staff: publicStaff(staff, db) });
 });
 
 app.post("/api/auth/change-password", async (req, res) => {
@@ -1816,12 +2057,28 @@ app.post("/api/auth/change-password", async (req, res) => {
   if (!account || !(await bcrypt.compare(oldPassword || "", account.passwordHash))) {
     return res.status(401).json({ error: "Current password is incorrect" });
   }
+  if (session.type === "staff") {
+    const pol = Sec.checkPasswordPolicy(newPassword, { username: session.id });
+    if (!pol.ok) return res.status(400).json({ error: Sec.policyMessage(pol.problems), problems: pol.problems });
+    if (await bcrypt.compare(String(newPassword), account.passwordHash)) {
+      return res.status(400).json({ error: "Choose a password you have not used just now" });
+    }
+  }
   const newPasswordHash = await bcrypt.hash(newPassword, 10);
   // Re-read right before the write - see the comment in POST /api/auth/login.
   const freshDb = readDb();
   const freshAccount = session.type === "member" ? freshDb.members[session.id] : freshDb.staffAccounts[session.id];
   if (!freshAccount) return res.status(401).json({ error: "Please sign in" });
   freshAccount.passwordHash = newPasswordHash;
+  if (session.type === "staff") {
+    freshAccount.passwordChangedAt = new Date().toISOString();
+    secLog(freshDb, req, { type: "password_changed", username: session.id, severity: "info", details: "by the account owner" });
+    // every OTHER open session of this account is closed
+    const keep = getSessionToken(req);
+    let dropped = false;
+    for (const [tok, sess] of sessions) if (sess.type === "staff" && sess.id === session.id && tok !== keep) { sessions.delete(tok); dropped = true; }
+    if (dropped) setImmediate(persistSessions);
+  }
   // A staff account created with a committee-chosen starting password (see
   // POST /api/staff/accounts) is required to set its own before it can do
   // anything else - this is the moment that requirement is satisfied.
@@ -1831,7 +2088,7 @@ app.post("/api/auth/change-password", async (req, res) => {
   writeDb(freshDb);
   res.json({
     ok: true,
-    staff: session.type === "staff" ? publicStaff(freshAccount) : undefined,
+    staff: session.type === "staff" ? publicStaff(freshAccount, freshDb) : undefined,
     member: session.type === "member" ? publicMember(freshAccount) : undefined,
   });
 });
@@ -1855,11 +2112,15 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
   if (!username || !password || !name || !["admin", "staff", "tournament", "management", "partner"].includes(role)) {
     return res.status(400).json({ error: "username, password, name, and a valid role are required" });
   }
-  if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+  if (role === "admin" && !Sec.isFullAdmin(req.staff)) return res.status(403).json({ error: "Only a full administrator can create another administrator", code: "beyond_actor" });
+  if (!withinActor(req.staff, Sec.effectiveModules({ role }))) return res.status(403).json({ error: "You can only give access that you have yourself", code: "beyond_actor" });
+  const pol = Sec.checkPasswordPolicy(password, { username });
+  if (!pol.ok) return res.status(400).json({ error: Sec.policyMessage(pol.problems), problems: pol.problems });
+  if (!/^[A-Za-z0-9._-]{3,32}$/.test(String(username))) return res.status(400).json({ error: "Username: 3-32 letters, numbers, dot, dash or underscore" });
   // Hash before reading db - see the comment above POST /api/auth/signup.
   const passwordHash = await bcrypt.hash(password, 10);
   const db = readDb();
-  if (db.staffAccounts[username]) return res.status(409).json({ error: "That username is already taken" });
+  if (Object.prototype.hasOwnProperty.call(db.staffAccounts, username)) return res.status(409).json({ error: "That username is already taken" });
   db.staffAccounts[username] = {
     username,
     name,
@@ -1867,6 +2128,8 @@ app.post("/api/staff/accounts", requireStaffRole("admin"), async (req, res) => {
     phone,
     passwordHash,
     mustChangePassword: true,
+    createdAt: new Date().toISOString(),
+    createdBy: req.staff.username,
     // Event heads: a Tournament Manager may create new events only when the
     // admin ticks this (otherwise they only run the events assigned to them).
     ...(role === "tournament" ? { canCreateEvents: req.body.canCreateEvents === true } : {}),
@@ -2025,6 +2288,7 @@ app.post("/api/staff/accounts/:username/send-credentials", requireStaffRole("adm
   const peek = req.db.staffAccounts[username];
   if (!peek) return res.status(404).json({ error: "Account not found" });
   if (username === req.staff.username) return res.status(400).json({ error: "You can't reset your own account this way" });
+  if (!canManageAccount(req.staff, peek)) return res.status(403).json({ error: "This account has more access than you do", code: "beyond_actor" });
   if (!String(peek.phone || "").replace(/\D/g, "")) return res.status(400).json({ error: "This account has no phone number on file" });
   if (req.body && req.body.replaceExisting !== true) {
     return res.status(409).json({
@@ -2032,13 +2296,14 @@ app.post("/api/staff/accounts/:username/send-credentials", requireStaffRole("adm
       needsConfirm: true,
     });
   }
-  const tempPassword = generateTempPassword();
+  const tempPassword = Sec.generateStrongPassword();
   // Hash before re-reading the db - see the comment above POST /api/auth/signup.
   const passwordHash = await bcrypt.hash(tempPassword, 10);
   const db = readDb();
   const account = db.staffAccounts[username];
   if (!account) return res.status(404).json({ error: "Account not found" });
   account.passwordHash = passwordHash;
+  account.failedLogins = { count: 0, last: 0, lockedUntil: 0 };
   account.mustChangePassword = true;
   account.credentialsIssuedAt = new Date().toISOString();
   logActivity(db, {
@@ -2077,8 +2342,11 @@ app.delete("/api/staff/accounts/:username", requireStaffRole("admin"), (req, res
   const { username } = req.params;
   if (username === req.staff.username) return res.status(400).json({ error: "You can't remove your own account" });
   if (!db.staffAccounts[username]) return res.status(404).json({ error: "Account not found" });
+  if (!canManageAccount(req.staff, db.staffAccounts[username])) return res.status(403).json({ error: "This account has more access than you do", code: "beyond_actor" });
+  if (lastFullAdminGuard(db, username)) return res.status(400).json({ error: "This is the last full administrator - the platform must always have one", code: "last_admin" });
   const removedRole = db.staffAccounts[username].role;
   delete db.staffAccounts[username];
+  dropStaffSessions(username);
   logActivity(db, {
     actorType: "staff",
     actorId: req.staff.username,
@@ -2088,6 +2356,567 @@ app.delete("/api/staff/accounts/:username", requireStaffRole("admin"), (req, res
   });
   writeDb(db);
   res.json({ ok: true });
+});
+
+// =========================================================================
+// USERS & PERMISSIONS  +  SECURITY CENTRE
+// =========================================================================
+// Roles stay the base (what a kind of account may ever do); per-module switches on an account can only take
+// access away. A committee member with their own mix of modules is an "admin" role account with switches.
+// Anything that grants access is limited to what the person granting already has, so nobody can use the
+// Users module to promote themselves or someone else past their own level.
+function dropStaffSessions(username, exceptToken) {
+  let dropped = false;
+  for (const [tok, sess] of sessions) {
+    if (sess.type === "staff" && sess.id === username && tok !== exceptToken) {
+      sessions.delete(tok);
+      dropped = true;
+    }
+  }
+  if (dropped) setImmediate(persistSessions);
+  return dropped;
+}
+const isActiveFullAdmin = (a) => !!a && Sec.isFullAdmin(a) && !!a.passwordHash;
+// True when removing / limiting / disabling `username` would leave the platform with no active full admin.
+function lastFullAdminGuard(db, username) {
+  const target = db.staffAccounts[username];
+  if (!isActiveFullAdmin(target)) return false;
+  return !Object.values(db.staffAccounts).some((a) => a.username !== username && isActiveFullAdmin(a));
+}
+// The grantor may only hand out (or touch an account that holds) what they hold themselves.
+function withinActor(actor, targetEff) {
+  const mine = Sec.effectiveModules(actor);
+  return Sec.MODULE_KEYS.every((k) => !targetEff[k] || mine[k]);
+}
+function canManageAccount(actor, target) {
+  if (Sec.isFullAdmin(actor)) return true;
+  return withinActor(actor, Sec.effectiveModules(target));
+}
+function userSummary(a, db) {
+  const now = Date.now();
+  const inv = Object.values(db.staffInvites || {}).find((i) => i.username === a.username && i.expiresAt > now && !i.usedAt);
+  const lockedMin = staffLockedMinutes(a);
+  let sessionCount = 0;
+  for (const s of sessions.values()) if (s.type === "staff" && s.id === a.username) sessionCount++;
+  const status = a.disabled ? "disabled" : lockedMin ? "locked" : !a.passwordHash ? "invited" : a.mustChangePassword ? "pending" : "active";
+  return {
+    username: a.username,
+    name: a.name,
+    title: a.title || "",
+    role: a.role,
+    phone: a.phone || "",
+    status,
+    disabled: !!a.disabled,
+    locked: lockedMin > 0,
+    lockedMinutes: lockedMin,
+    fullAdmin: Sec.isFullAdmin(a),
+    modules: a.modules || null,
+    effectiveModules: Sec.effectiveModules(a),
+    twoFactor: !!(a.totp && a.totp.enabled),
+    mustChangePassword: !!a.mustChangePassword,
+    lastLoginAt: a.lastLoginAt || null,
+    lastLoginIp: a.lastLoginIp || "",
+    createdAt: a.createdAt || null,
+    createdBy: a.createdBy || "",
+    canCreateEvents: a.role === "tournament" ? a.canCreateEvents === true : undefined,
+    invitePending: inv ? { expiresAt: new Date(inv.expiresAt).toISOString() } : null,
+    activeSessions: sessionCount,
+  };
+}
+const INVITE_TTL_MS = 48 * 60 * 60 * 1000;
+function issueInvite(db, req, username) {
+  for (const [k, v] of Object.entries(db.staffInvites)) if (v.username === username || v.expiresAt < Date.now() - 7 * 86400000) delete db.staffInvites[k];
+  const token = Sec.randomToken(32);
+  const expiresAt = Date.now() + INVITE_TTL_MS;
+  db.staffInvites[Sec.sha256(token)] = { username, createdAt: new Date().toISOString(), createdBy: req.staff.username, expiresAt };
+  return { token, inviteUrl: `${req.protocol}://${req.get("host")}/invite.html?t=${token}`, expiresAt: new Date(expiresAt).toISOString() };
+}
+function accessInfo(req, account) {
+  return { loginUrl: `${req.protocol}://${req.get("host")}/`, username: account.username, name: account.name, phone: account.phone || "" };
+}
+function parseModulesInput(body, role) {
+  if (role === "admin") {
+    if (body.fullAdmin === true) return { modules: undefined };
+    return { modules: Sec.cleanModules(body.modules) };
+  }
+  if (body.modules && typeof body.modules === "object") return { modules: Sec.cleanModules(body.modules) };
+  return { modules: undefined };
+}
+
+app.get("/api/admin/users/meta", requireStaffRole("admin"), (req, res) => {
+  res.json({
+    modules: Sec.MODULES,
+    roles: Sec.ROLES.map((r) => ({ role: r, base: Sec.effectiveModules({ role: r }) })),
+    actorModules: Sec.effectiveModules(req.staff),
+    actorFull: Sec.isFullAdmin(req.staff),
+  });
+});
+app.get("/api/admin/users", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  res.set("Cache-Control", "no-store");
+  res.json({
+    users: Object.values(db.staffAccounts).map((a) => userSummary(a, db)),
+    settings: normalizeSecurity(db.security),
+  });
+});
+app.post("/api/admin/users", requireStaffRole("admin"), async (req, res) => {
+  const body = req.body || {};
+  const username = String(body.username || "").trim();
+  const name = String(body.name || "").trim().slice(0, 80);
+  const role = body.role;
+  const share = body.share === "temp" ? "temp" : "invite";
+  if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) return res.status(400).json({ error: "Username: 3-32 letters, numbers, dot, dash or underscore" });
+  if (!name) return res.status(400).json({ error: "Name is required" });
+  if (!Sec.ROLES.includes(role)) return res.status(400).json({ error: "Choose a valid access level" });
+  const { modules } = parseModulesInput(body, role);
+  const draft = { role, modules };
+  if (!withinActor(req.staff, Sec.effectiveModules(draft))) {
+    return res.status(403).json({ error: "You can only give access that you have yourself", code: "beyond_actor" });
+  }
+  let tempPassword = null;
+  let passwordHash = null;
+  if (share === "temp") {
+    tempPassword = Sec.generateStrongPassword();
+    passwordHash = await bcrypt.hash(tempPassword, 10);
+  }
+  const db = readDb();
+  if (Object.prototype.hasOwnProperty.call(db.staffAccounts, username)) return res.status(409).json({ error: "That username is already taken" });
+  const account = {
+    username,
+    name,
+    title: String(body.title || "").trim().slice(0, 80),
+    role,
+    phone: sanitizeStaffPhone(body.phone),
+    createdAt: new Date().toISOString(),
+    createdBy: req.staff.username,
+    ...(passwordHash ? { passwordHash, mustChangePassword: true } : {}),
+    ...(role === "tournament" ? { canCreateEvents: body.canCreateEvents === true } : {}),
+    ...(modules ? { modules } : {}),
+  };
+  db.staffAccounts[username] = account;
+  let invite = null;
+  if (share === "invite") invite = issueInvite(db, req, username);
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "staff_account_created", details: `${username} (${role}${modules ? ", custom access" : ""}) via ${share === "invite" ? "invite link" : "temporary password"}` });
+  secLog(db, req, { type: "user_created", username: req.staff.username, severity: "info", details: `created ${username} (${role})` });
+  writeDb(db);
+  res.set("Cache-Control", "no-store");
+  res.status(201).json({ user: userSummary(account, db), share, tempPassword, ...(invite || {}), ...accessInfo(req, account) });
+});
+app.put("/api/admin/users/:username", requireStaffRole("admin"), (req, res) => {
+  const db = readDb();
+  const target = db.staffAccounts[req.params.username];
+  if (!target) return res.status(404).json({ error: "Account not found" });
+  const actor = db.staffAccounts[req.staff.username];
+  const body = req.body || {};
+  const self = target.username === actor.username;
+  if (!canManageAccount(actor, target)) return res.status(403).json({ error: "This account has more access than you do", code: "beyond_actor" });
+  const before = { role: target.role, modules: target.modules ? { ...target.modules } : null };
+  if (typeof body.name === "string" && body.name.trim()) target.name = body.name.trim().slice(0, 80);
+  if (typeof body.title === "string") target.title = body.title.trim().slice(0, 80);
+  if (typeof body.phone === "string") target.phone = sanitizeStaffPhone(body.phone);
+  const accessTouched = body.role !== undefined || body.modules !== undefined || body.fullAdmin !== undefined;
+  if (accessTouched) {
+    if (self) return res.status(400).json({ error: "You can't change your own access - ask another administrator", code: "self_access" });
+    const role = body.role !== undefined ? body.role : target.role;
+    if (!Sec.ROLES.includes(role)) return res.status(400).json({ error: "Choose a valid access level" });
+    const draft = { ...target, role };
+    if (role === "admin") {
+      if (body.fullAdmin === true) delete draft.modules;
+      else if (body.modules) draft.modules = Sec.cleanModules(body.modules);
+      else if (!draft.modules) draft.modules = Sec.cleanModules(Sec.effectiveModules(target));
+    } else if (body.modules && typeof body.modules === "object") draft.modules = Sec.cleanModules(body.modules);
+    else if (body.modules === null) delete draft.modules;
+    if (!withinActor(actor, Sec.effectiveModules(draft))) return res.status(403).json({ error: "You can only give access that you have yourself", code: "beyond_actor" });
+    const stillFull = Sec.isFullAdmin(draft);
+    if (!stillFull && lastFullAdminGuard(db, target.username)) {
+      return res.status(400).json({ error: "This is the last full administrator - the platform must always have one", code: "last_admin" });
+    }
+    target.role = draft.role;
+    if (draft.modules) target.modules = draft.modules; else delete target.modules;
+    if (role === "tournament") target.canCreateEvents = body.canCreateEvents === true ? true : body.canCreateEvents === false ? false : target.canCreateEvents === true;
+    else delete target.canCreateEvents;
+    for (const sess of sessions.values()) if (sess.type === "staff" && sess.id === target.username) sess.role = target.role;
+    setImmediate(persistSessions);
+    secLog(db, req, { type: "permissions_changed", username: req.staff.username, severity: "warn", details: `${target.username}: ${before.role}${before.modules ? " (custom)" : ""} -> ${target.role}${target.modules ? " (custom)" : ""}` });
+  } else if (target.role === "tournament" && typeof body.canCreateEvents === "boolean") {
+    target.canCreateEvents = body.canCreateEvents;
+  }
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "staff_account_updated", details: `${target.username}${accessTouched ? " (access changed)" : ""}` });
+  writeDb(db);
+  res.json({ user: userSummary(target, db) });
+});
+function userAction(handler) {
+  return (req, res) => {
+    const db = readDb();
+    const target = db.staffAccounts[req.params.username];
+    if (!target) return res.status(404).json({ error: "Account not found" });
+    const actor = db.staffAccounts[req.staff.username];
+    if (!canManageAccount(actor, target)) return res.status(403).json({ error: "This account has more access than you do", code: "beyond_actor" });
+    return handler(req, res, db, target, actor);
+  };
+}
+app.post("/api/admin/users/:username/status", requireStaffRole("admin"), userAction((req, res, db, target, actor) => {
+  const disable = !!(req.body && req.body.disabled);
+  if (target.username === actor.username) return res.status(400).json({ error: "You can't disable your own account" });
+  if (disable && lastFullAdminGuard(db, target.username)) return res.status(400).json({ error: "This is the last full administrator - the platform must always have one", code: "last_admin" });
+  target.disabled = disable;
+  if (disable) target.disabledAt = new Date().toISOString(); else delete target.disabledAt;
+  logActivity(db, { actorType: "staff", actorId: actor.username, actorName: actor.name, action: disable ? "staff_account_disabled" : "staff_account_enabled", details: target.username });
+  secLog(db, req, { type: disable ? "user_disabled" : "user_enabled", username: actor.username, severity: "warn", details: target.username });
+  writeDb(db);
+  if (disable) dropStaffSessions(target.username);
+  res.json({ user: userSummary(target, db) });
+}));
+app.post("/api/admin/users/:username/unlock", requireStaffRole("admin"), userAction((req, res, db, target, actor) => {
+  target.failedLogins = { count: 0, last: 0, lockedUntil: 0 };
+  secLog(db, req, { type: "account_unlocked", username: actor.username, severity: "info", details: target.username });
+  writeDb(db);
+  res.json({ user: userSummary(target, db) });
+}));
+app.post("/api/admin/users/:username/reset-2fa", requireStaffRole("admin"), userAction((req, res, db, target, actor) => {
+  if (target.username === actor.username) return res.status(400).json({ error: "Use your own 2-step setup to change your own codes" });
+  delete target.totp;
+  delete target.totpPending;
+  delete target.backupCodes;
+  logActivity(db, { actorType: "staff", actorId: actor.username, actorName: actor.name, action: "staff_2fa_reset", details: target.username });
+  secLog(db, req, { type: "2fa_reset", username: actor.username, severity: "warn", details: `2-step login removed for ${target.username}` });
+  writeDb(db);
+  dropStaffSessions(target.username);
+  res.json({ user: userSummary(target, db) });
+}));
+app.post("/api/admin/users/:username/revoke-sessions", requireStaffRole("admin"), userAction((req, res, db, target, actor) => {
+  const n = dropStaffSessions(target.username, target.username === actor.username ? getSessionToken(req) : undefined);
+  secLog(db, req, { type: "sessions_revoked", username: actor.username, severity: "info", details: target.username });
+  writeDb(db);
+  res.json({ ok: true, dropped: !!n, user: userSummary(target, db) });
+}));
+// Re-issue access: a fresh one-time invite link (they choose their own password) or a new temporary password.
+app.post("/api/admin/users/:username/access", requireStaffRole("admin"), async (req, res) => {
+  const peek = req.db.staffAccounts[req.params.username];
+  if (!peek) return res.status(404).json({ error: "Account not found" });
+  if (peek.username === req.staff.username) return res.status(400).json({ error: "You can't reset your own access this way" });
+  if (!canManageAccount(req.staff, peek)) return res.status(403).json({ error: "This account has more access than you do", code: "beyond_actor" });
+  const share = req.body && req.body.share === "temp" ? "temp" : "invite";
+  let tempPassword = null, passwordHash = null;
+  if (share === "temp") {
+    tempPassword = Sec.generateStrongPassword();
+    passwordHash = await bcrypt.hash(tempPassword, 10);
+  }
+  const db = readDb();
+  const target = db.staffAccounts[req.params.username];
+  if (!target) return res.status(404).json({ error: "Account not found" });
+  if (lastFullAdminGuard(db, target.username) && share === "invite") {
+    return res.status(400).json({ error: "This is the last full administrator - give them a temporary password instead", code: "last_admin" });
+  }
+  let invite = null;
+  if (share === "invite") {
+    delete target.passwordHash;
+    delete target.mustChangePassword;
+    invite = issueInvite(db, req, target.username);
+  } else {
+    target.passwordHash = passwordHash;
+    target.mustChangePassword = true;
+    for (const [k, v] of Object.entries(db.staffInvites)) if (v.username === target.username) delete db.staffInvites[k];
+  }
+  target.failedLogins = { count: 0, last: 0, lockedUntil: 0 };
+  target.credentialsIssuedAt = new Date().toISOString();
+  logActivity(db, { actorType: "staff", actorId: req.staff.username, actorName: req.staff.name, action: "staff.credentials_issued", details: `${target.name} (${target.username}) via ${share === "invite" ? "invite link" : "temporary password"}` });
+  secLog(db, req, { type: "access_reissued", username: req.staff.username, severity: "warn", details: `${target.username} (${share})` });
+  writeDb(db);
+  dropStaffSessions(target.username);
+  res.set("Cache-Control", "no-store");
+  res.json({ user: userSummary(target, db), share, tempPassword, ...(invite || {}), ...accessInfo(req, target) });
+});
+
+// ---- invite links (public) ----
+function findInvite(db, token) {
+  const inv = db.staffInvites[Sec.sha256(String(token || ""))];
+  if (!inv || inv.usedAt || inv.expiresAt < Date.now()) return null;
+  const acct = db.staffAccounts[inv.username];
+  if (!acct || acct.disabled) return null;
+  return { inv, acct };
+}
+app.get("/api/auth/invite/:token", (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
+  const found = findInvite(readDb(), req.params.token);
+  if (!found) {
+    recordLoginFailure(req.ip);
+    return res.status(404).json({ error: "This invitation link is no longer valid. Ask the administrator for a new one." });
+  }
+  res.set("Cache-Control", "no-store");
+  res.json({ name: found.acct.name, username: found.acct.username, title: found.acct.title || "", role: found.acct.role, expiresAt: new Date(found.inv.expiresAt).toISOString() });
+});
+app.post("/api/auth/invite/:token", async (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
+  const peek = findInvite(readDb(), req.params.token);
+  if (!peek) {
+    recordLoginFailure(req.ip);
+    return res.status(404).json({ error: "This invitation link is no longer valid. Ask the administrator for a new one." });
+  }
+  const password = String((req.body && req.body.password) || "");
+  const pol = Sec.checkPasswordPolicy(password, { username: peek.acct.username });
+  if (!pol.ok) return res.status(400).json({ error: Sec.policyMessage(pol.problems), problems: pol.problems });
+  const passwordHash = await bcrypt.hash(password, 10);
+  const db = readDb();
+  const found = findInvite(db, req.params.token);
+  if (!found) return res.status(404).json({ error: "This invitation link is no longer valid. Ask the administrator for a new one." });
+  const acct = found.acct;
+  acct.passwordHash = passwordHash;
+  acct.mustChangePassword = false;
+  acct.passwordChangedAt = new Date().toISOString();
+  acct.failedLogins = { count: 0, last: 0, lockedUntil: 0 };
+  delete db.staffInvites[Sec.sha256(req.params.token)];
+  secLog(db, req, { type: "invite_redeemed", username: acct.username, severity: "info", details: "chose their own password" });
+  logActivity(db, { actorType: "staff", actorId: acct.username, actorName: acct.name, action: "staff_invite_redeemed", details: acct.role });
+  SECURITY_CFG = normalizeSecurity(db.security);
+  finishStaffLogin(req, res, db, acct);
+});
+
+// ---- two-step login: each person's own set-up ----
+function requireStaffSession(req, res, next) {
+  const session = getSession(req);
+  if (!session || session.type !== "staff") return res.status(401).json({ error: "Please sign in" });
+  const db = readDb();
+  const staff = db.staffAccounts[session.id];
+  if (!staff || staff.disabled) return res.status(401).json({ error: "Please sign in" });
+  SECURITY_CFG = normalizeSecurity(db.security);
+  req.staff = staff;
+  req.db = db;
+  next();
+}
+async function reauth(req, res) {
+  if (loginRateLimitCheck(req, res)) return false;
+  if (!(await bcrypt.compare(String((req.body && req.body.password) || ""), req.staff.passwordHash || DUMMY_HASH))) {
+    recordLoginFailure(req.ip);
+    res.status(401).json({ error: "Current password is incorrect" });
+    return false;
+  }
+  return true;
+}
+app.post("/api/auth/2fa/setup", requireStaffSession, async (req, res) => {
+  if (!(await reauth(req, res))) return;
+  const db = readDb();
+  const staff = db.staffAccounts[req.staff.username];
+  if (staff.totp && staff.totp.enabled) return res.status(409).json({ error: "2-step login is already on. Turn it off first to set it up again." });
+  const secret = Sec.generateTotpSecret();
+  staff.totpPending = { secretEnc: Sec.encryptSecret(secret, QR_SECRET), at: Date.now() };
+  writeDb(db);
+  const url = Sec.otpauthUrl(staff.username, "MyAhlawy", secret);
+  res.set("Cache-Control", "no-store");
+  res.json({ secret: secret.match(/.{1,4}/g).join(" "), otpauthUrl: url, qr: await QRCode.toDataURL(url, { margin: 1, width: 220 }) });
+});
+app.post("/api/auth/2fa/enable", requireStaffSession, (req, res) => {
+  if (loginRateLimitCheck(req, res)) return;
+  const db = readDb();
+  const staff = db.staffAccounts[req.staff.username];
+  const pending = staff.totpPending;
+  if (!pending || Date.now() - pending.at > 30 * 60 * 1000) return res.status(400).json({ error: "Start the set-up again to get a new code", code: "no_pending" });
+  const secret = Sec.decryptSecret(pending.secretEnc, QR_SECRET);
+  const step = secret ? Sec.verifyTotp(secret, req.body && req.body.code) : null;
+  if (step === null) {
+    recordLoginFailure(req.ip);
+    return res.status(400).json({ error: "That code is not correct - check the time on your phone and try the next code", code: "bad_code" });
+  }
+  const codes = Sec.generateBackupCodes(8);
+  staff.totp = { enabled: true, secretEnc: pending.secretEnc, lastStep: step, enabledAt: new Date().toISOString() };
+  staff.backupCodes = codes.map((c) => ({ h: Sec.hashBackupCode(c, QR_SECRET), used: false }));
+  delete staff.totpPending;
+  logActivity(db, { actorType: "staff", actorId: staff.username, actorName: staff.name, action: "staff_2fa_enabled", details: "" });
+  secLog(db, req, { type: "2fa_enabled", username: staff.username, severity: "info", details: "" });
+  writeDb(db);
+  dropStaffSessions(staff.username, getSessionToken(req));
+  res.set("Cache-Control", "no-store");
+  res.json({ ok: true, backupCodes: codes, staff: publicStaff(staff, db) });
+});
+app.post("/api/auth/2fa/disable", requireStaffSession, async (req, res) => {
+  if (!(await reauth(req, res))) return;
+  const db = readDb();
+  const staff = db.staffAccounts[req.staff.username];
+  if (!(staff.totp && staff.totp.enabled)) return res.status(400).json({ error: "2-step login is not on" });
+  if (needs2faSetup({ ...staff, totp: null }, normalizeSecurity(db.security))) {
+    return res.status(403).json({ error: "The platform requires 2-step login for your account, so it can't be turned off", code: "2fa_required" });
+  }
+  const r = checkSecondFactor(staff, req.body && req.body.code);
+  if (!r.ok) {
+    recordLoginFailure(req.ip);
+    return res.status(401).json({ error: "That code is not correct", code: "bad_code" });
+  }
+  delete staff.totp;
+  delete staff.backupCodes;
+  logActivity(db, { actorType: "staff", actorId: staff.username, actorName: staff.name, action: "staff_2fa_disabled", details: "" });
+  secLog(db, req, { type: "2fa_disabled", username: staff.username, severity: "warn", details: "turned off by the account owner" });
+  writeDb(db);
+  res.json({ ok: true, staff: publicStaff(staff, db) });
+});
+app.post("/api/auth/2fa/backup-codes", requireStaffSession, async (req, res) => {
+  if (!(await reauth(req, res))) return;
+  const db = readDb();
+  const staff = db.staffAccounts[req.staff.username];
+  if (!(staff.totp && staff.totp.enabled)) return res.status(400).json({ error: "Turn on 2-step login first" });
+  const r = checkSecondFactor(staff, req.body && req.body.code);
+  if (!r.ok) {
+    recordLoginFailure(req.ip);
+    return res.status(401).json({ error: "That code is not correct", code: "bad_code" });
+  }
+  if (r.kind === "totp") staff.totp.lastStep = r.step;
+  else r.entry.used = true;
+  const codes = Sec.generateBackupCodes(8);
+  staff.backupCodes = codes.map((c) => ({ h: Sec.hashBackupCode(c, QR_SECRET), used: false }));
+  secLog(db, req, { type: "backup_codes_regenerated", username: staff.username, severity: "info", details: "" });
+  writeDb(db);
+  res.set("Cache-Control", "no-store");
+  res.json({ ok: true, backupCodes: codes, staff: publicStaff(staff, db) });
+});
+
+// ---- Security centre ----
+function securityAlerts(db) {
+  const now = Date.now();
+  const since = new Date(now - 24 * 3600 * 1000).toISOString();
+  const recent = (db.securityLog || []).filter((e) => e.at >= since);
+  const alerts = [];
+  const locked = Object.values(db.staffAccounts).filter((a) => staffLockedMinutes(a) > 0);
+  if (locked.length) alerts.push({ type: "locked_now", severity: "high", count: locked.length, detail: locked.map((a) => a.username).join(", ") });
+  const failByIp = {};
+  for (const e of recent) if (e.type === "login_failed" || e.type === "login_2fa_failed") failByIp[e.ip] = (failByIp[e.ip] || 0) + 1;
+  const hot = Object.entries(failByIp).filter(([, n]) => n >= 5).sort((a, b) => b[1] - a[1]);
+  if (hot.length) alerts.push({ type: "failed_burst", severity: "high", count: hot[0][1], detail: hot.slice(0, 3).map(([ip, n]) => `${ip} (${n})`).join(", ") });
+  const unknownHour = unknownLoginFailures.filter((t) => t > now - 3600 * 1000).length;
+  if (unknownHour >= 10) alerts.push({ type: "unknown_user_guessing", severity: "warn", count: unknownHour, detail: "" });
+  for (const [type, severity] of [["login_new_ip", "warn"], ["backup_code_used", "warn"], ["2fa_disabled", "warn"], ["2fa_reset", "warn"], ["login_blocked_disabled", "warn"], ["password_reset_by_pin", "warn"]]) {
+    const hits = recent.filter((e) => e.type === type);
+    if (hits.length) alerts.push({ type, severity, count: hits.length, detail: Array.from(new Set(hits.map((h) => h.username))).slice(0, 4).join(", "), at: hits[hits.length - 1].at });
+  }
+  return alerts;
+}
+function verifyChains(db) {
+  return {
+    activity: Sec.chainVerify(db.activityLog, db.auditHeads, "activity", AUDIT_KEY),
+    security: Sec.chainVerify(db.securityLog || [], db.auditHeads, "security", AUDIT_KEY),
+  };
+}
+app.get("/api/admin/security/overview", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const cfg = normalizeSecurity(db.security);
+  const accounts = Object.values(db.staffAccounts);
+  const active = accounts.filter((a) => !a.disabled && a.passwordHash);
+  const admins = active.filter((a) => a.role === "admin");
+  const with2fa = active.filter((a) => a.totp && a.totp.enabled);
+  const admins2fa = admins.filter((a) => a.totp && a.totp.enabled);
+  const chains = verifyChains(db);
+  const cloud = cloudBackup.publicConfig(cloudBackup.readConfig());
+  const checks = [
+    { id: "secret", ok: !!process.env.QR_SECRET, weight: 3, hint: "Set the QR_SECRET environment variable on the server" },
+    { id: "https", ok: !!req.secure, weight: 2 },
+    { id: "require2fa", ok: cfg.require2fa !== "off", weight: 3 },
+    { id: "admins2fa", ok: admins.length > 0 && admins2fa.length === admins.length, weight: 3, value: `${admins2fa.length}/${admins.length}` },
+    { id: "idle", ok: cfg.idleMinutes > 0 && cfg.idleMinutes <= 240, weight: 1, value: cfg.idleMinutes },
+    { id: "defaultAdmin", ok: !db.staffAccounts.admin, weight: 1 },
+    { id: "chain", ok: chains.activity.ok && chains.security.ok, weight: 3 },
+    { id: "cloudBackup", ok: !!(cloud && cloud.configured && !cloud.disabled), weight: 2 },
+    { id: "fullAdmins", ok: accounts.filter((a) => Sec.isFullAdmin(a)).length <= 3, weight: 1, value: accounts.filter((a) => Sec.isFullAdmin(a)).length },
+  ];
+  const total = checks.reduce((n, c) => n + c.weight, 0);
+  const got = checks.reduce((n, c) => n + (c.ok ? c.weight : 0), 0);
+  const now = Date.now();
+  const day = new Date(now - 24 * 3600 * 1000).toISOString();
+  const recent = (db.securityLog || []).filter((e) => e.at >= day);
+  let sess = 0;
+  for (const s of sessions.values()) if (s.type === "staff") sess++;
+  res.set("Cache-Control", "no-store");
+  res.json({
+    settings: cfg,
+    score: Math.round((got / total) * 100),
+    checks,
+    alerts: securityAlerts(db),
+    counts: {
+      accounts: accounts.length,
+      active: active.length,
+      with2fa: with2fa.length,
+      locked: accounts.filter((a) => staffLockedMinutes(a) > 0).length,
+      disabled: accounts.filter((a) => a.disabled).length,
+      sessions: sess,
+      failed24h: recent.filter((e) => e.type === "login_failed" || e.type === "login_2fa_failed").length,
+      success24h: recent.filter((e) => e.type === "login_success").length,
+    },
+    chain: { activity: chains.activity, security: chains.security },
+  });
+});
+app.put("/api/admin/security/settings", requireStaffRole("admin"), (req, res) => {
+  const db = readDb();
+  const body = req.body || {};
+  const next = normalizeSecurity({ ...normalizeSecurity(db.security), ...Object.fromEntries(Object.entries(body).filter(([k]) => k in SECURITY_DEFAULTS)) });
+  const actor = db.staffAccounts[req.staff.username];
+  if (next.require2fa !== "off" && next.require2fa !== normalizeSecurity(db.security).require2fa && !(actor.totp && actor.totp.enabled)) {
+    return res.status(400).json({ error: "Turn on 2-step login for your own account first, then require it for everyone", code: "own_2fa_first" });
+  }
+  const old = normalizeSecurity(db.security);
+  db.security = next;
+  SECURITY_CFG = next;
+  const changed = Object.keys(next).filter((k) => next[k] !== old[k]).map((k) => `${k}: ${old[k]} -> ${next[k]}`);
+  logActivity(db, { actorType: "staff", actorId: actor.username, actorName: actor.name, action: "security_settings_changed", details: changed.join("; ") || "no change" });
+  secLog(db, req, { type: "settings_changed", username: actor.username, severity: "warn", details: changed.join("; ") });
+  writeDb(db);
+  res.json({ settings: next });
+});
+app.get("/api/admin/security/sessions", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const mine = getSessionToken(req);
+  const rows = [];
+  for (const [tok, s] of sessions) {
+    if (s.type !== "staff") continue;
+    const a = db.staffAccounts[s.id];
+    rows.push({ id: Sec.sha256(tok).slice(0, 16), username: s.id, name: a ? a.name : s.id, role: a ? a.role : s.role, ip: s.ip || "", ua: s.ua || "", createdAt: s.createdAt ? new Date(s.createdAt).toISOString() : null, lastSeen: s.lastSeen ? new Date(s.lastSeen).toISOString() : null, current: tok === mine });
+  }
+  rows.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)));
+  res.set("Cache-Control", "no-store");
+  res.json({ sessions: rows });
+});
+app.delete("/api/admin/security/sessions/:id", requireStaffRole("admin"), (req, res) => {
+  for (const [tok] of sessions) {
+    if (Sec.sha256(tok).slice(0, 16) === req.params.id) {
+      const s = sessions.get(tok);
+      const target = req.db.staffAccounts[s.id];
+      if (s.type === "staff" && target && !canManageAccount(req.staff, target)) return res.status(403).json({ error: "This account has more access than you do" });
+      sessions.delete(tok);
+      persistSessions();
+      const db = readDb();
+      secLog(db, req, { type: "session_revoked", username: req.staff.username, severity: "info", details: s.id });
+      writeDb(db);
+      return res.json({ ok: true });
+    }
+  }
+  res.status(404).json({ error: "That session has already ended" });
+});
+function filterSecurityLog(db, q) {
+  let rows = (db.securityLog || []).slice().reverse();
+  if (q.type) rows = rows.filter((r) => r.type === q.type);
+  if (q.severity) rows = rows.filter((r) => r.severity === q.severity);
+  if (q.q) {
+    const n = String(q.q).trim().toLowerCase();
+    if (n) rows = rows.filter((r) => `${r.username} ${r.ip} ${r.details}`.toLowerCase().includes(n));
+  }
+  if (q.from) rows = rows.filter((r) => r.at.slice(0, 10) >= q.from);
+  if (q.to) rows = rows.filter((r) => r.at.slice(0, 10) <= q.to);
+  return rows;
+}
+app.get("/api/admin/security/log", requireStaffRole("admin"), (req, res) => {
+  const db = req.db;
+  const rows = filterSecurityLog(db, req.query);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  res.json({ entries: rows.slice(offset, offset + limit), total: rows.length, types: Array.from(new Set((db.securityLog || []).map((r) => r.type))).sort() });
+});
+app.get("/api/admin/security/log/export.xlsx", requireStaffRole("admin"), (req, res) => {
+  const rows = filterSecurityLog(req.db, req.query).map((r) => ({ Time: r.at, Event: r.type, Severity: r.severity, User: r.username, IP: r.ip, Device: r.ua, Details: r.details }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Security log");
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="ahlawy-security-log.xlsx"');
+  res.send(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
+});
+app.get("/api/admin/security/verify", requireStaffRole("admin"), (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(verifyChains(req.db));
 });
 
 // "Forgot password" for members, without any email/SMS infrastructure: the
@@ -2268,7 +3097,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   freshMember.passwordHash = newPasswordHash;
   freshMember.mustChangePassword = false;
   writeDb(freshDb);
-  const token = createSession("member", membershipNumber);
+  const token = createSession("member", membershipNumber, undefined, req);
   setSessionCookie(req, res, token);
   res.json({ ok: true, member: publicMember(freshMember) });
 });
@@ -2285,7 +3114,7 @@ app.post("/api/auth/staff-forgot-password", async (req, res) => {
     });
   }
   const staff = db.staffAccounts[username];
-  if (!staff || !staff.recoveryPinHash) {
+  if (!staff || !staff.recoveryPinHash || staff.disabled) {
     return res.status(400).json({
       error: "No recovery PIN is set for this account. Please ask an admin to reset your password.",
     });
@@ -2296,9 +3125,8 @@ app.post("/api/auth/staff-forgot-password", async (req, res) => {
     return res.status(401).json({ error: "Incorrect username or recovery PIN" });
   }
   clearPinFailures(lockKey);
-  if (!newPassword || String(newPassword).length < 6) {
-    return res.status(400).json({ error: "New password must be at least 6 characters" });
-  }
+  const pol = Sec.checkPasswordPolicy(newPassword, { username });
+  if (!pol.ok) return res.status(400).json({ error: Sec.policyMessage(pol.problems), problems: pol.problems });
   const newPasswordHash = await bcrypt.hash(newPassword, 10);
   // Re-read right before the write - see the comment in POST /api/auth/login.
   const freshDb = readDb();
@@ -2309,10 +3137,18 @@ app.post("/api/auth/staff-forgot-password", async (req, res) => {
     });
   }
   freshStaff.passwordHash = newPasswordHash;
+  freshStaff.passwordChangedAt = new Date().toISOString();
+  freshStaff.failedLogins = { count: 0, last: 0, lockedUntil: 0 };
+  secLog(freshDb, req, { type: "password_reset_by_pin", username, severity: "warn", details: "password changed with the recovery PIN" });
   writeDb(freshDb);
-  const token = createSession("staff", username, freshStaff.role);
+  dropStaffSessions(username);
+  if (freshStaff.totp && freshStaff.totp.enabled) {
+    // 2-step login stays in force: the PIN reset changes the password only, they sign in normally afterwards.
+    return res.json({ ok: true, needsLogin: true });
+  }
+  const token = createSession("staff", username, freshStaff.role, req);
   setSessionCookie(req, res, token);
-  res.json({ ok: true, staff: publicStaff(freshStaff) });
+  res.json({ ok: true, staff: publicStaff(freshStaff, freshDb) });
 });
 
 // -------------------------------------------------------------------------
@@ -11346,6 +12182,7 @@ app.use((err, req, res, next) => {
 });
 
 bootstrapAdmin();
+SECURITY_CFG = normalizeSecurity(readDb().security);
 try { const bootDb = readDb(); if (assignMissingIds(bootDb)) { writeDb(bootDb); console.log("Assigned member IDs and event numbers to existing records."); } } catch (e) { console.error("ID backfill failed:", e.message); }
 app.listen(PORT, () => {
   console.log(`MyAhlawy points system running at http://localhost:${PORT}`);
