@@ -257,13 +257,13 @@ const login = async (num, pw) => { const jar = await prime(newJar()); const r = 
 
   section("staff phone + credentials");
   const sLogin = async (u, p) => { const jar = await prime(newJar()); const r = await api("/api/auth/staff-login", { method: "POST", jar, body: { username: u, password: p } }); return { ...r, jar }; };
-  r = await A("/api/staff/accounts", "POST", { username: "stf1", password: "OldPass!1", name: "Staff One", role: "tournament", phone: "0100 111-2222 abc<script>" });
+  r = await A("/api/staff/accounts", "POST", { username: "stf1", password: "OldPass!1xyz", name: "Staff One", role: "tournament", phone: "0100 111-2222 abc<script>" });
   ok(r.status === 201 && r.json.staff.phone === "0100 111-2222", "create with sanitized phone", r.json);
-  r = await A("/api/staff/accounts", "POST", { username: "stf2", password: "OldPass!2", name: "Staff Two", role: "staff" });
+  r = await A("/api/staff/accounts", "POST", { username: "stf2", password: "OldPass!2xyz", name: "Staff Two", role: "staff" });
   ok(r.status === 201, "create without phone", r.json);
   r = await A("/api/staff/accounts/stf2/send-credentials", "POST", { replaceExisting: true }); ok(r.status === 400, "no phone 400", r.json);
   r = await api("/api/staff/accounts/stf1/send-credentials", { method: "POST", jar: anon, body: { replaceExisting: true } }); ok(r.status === 401 || r.status === 403, "anon blocked", r.status);
-  const stfJar = (await sLogin("stf1", "OldPass!1"));
+  const stfJar = (await sLogin("stf1", "OldPass!1xyz"));
   ok(stfJar.status === 200, "stf1 logs in with original password", stfJar.json);
   r = await api("/api/staff/accounts/stf1/send-credentials", { method: "POST", jar: stfJar.jar, body: { replaceExisting: true } }); ok(r.status === 403, "non-admin staff blocked", r.status);
   r = await api("/api/staff/accounts/stf1/phone", { method: "PUT", jar: stfJar.jar, body: { phone: "0100" } }); ok(r.status === 403, "non-admin cannot edit phone", r.status);
@@ -279,7 +279,7 @@ const login = async (num, pw) => { const jar = await prime(newJar()); const r = 
   ok(r.status === 200 && r.json.tempPassword && r.json.username === "stf1", "issued", r.json);
   const spw = r.json.tempPassword;
   const sess = await api("/api/auth/me", { jar: stfJar.jar }); ok(sess.status === 401 || !(sess.json && sess.json.staff), "old staff session dropped", sess.status);
-  let sl = await sLogin("stf1", "OldPass!1"); ok(sl.status === 401, "old password dead", sl.status);
+  let sl = await sLogin("stf1", "OldPass!1xyz"); ok(sl.status === 401, "old password dead", sl.status);
   sl = await sLogin("stf1", spw); ok(sl.status === 200 && sl.json.staff && sl.json.staff.mustChangePassword === true && !sl.json.staff.passwordHash, "temp password logs in, flagged", sl.json);
   r = await api("/api/auth/change-password", { method: "POST", jar: sl.jar, body: { oldPassword: spw, newPassword: "BrandNew!77" } });
   ok(r.status === 200, "staff changes password", r.json);

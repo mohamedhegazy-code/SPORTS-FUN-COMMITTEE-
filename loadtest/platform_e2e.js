@@ -306,10 +306,10 @@ async function main() {
     ok(wrong.status === 401, "staff-login: wrong password -> 401", wrong.json);
 
     async function createStaff(role, username) {
-      const r = await api("/api/staff/accounts", { method: "POST", jar: admin, body: { username, password: "staffpass1", name: `Staff ${role}`, role } });
+      const r = await api("/api/staff/accounts", { method: "POST", jar: admin, body: { username, password: "Staffpass#1x", name: `Staff ${role}`, role } });
       ok(r.status === 201, `create staff account (role=${role})`, r.json);
       const jar = await primeCsrf(newJar());
-      const login = await api("/api/auth/staff-login", { method: "POST", jar, body: { username, password: "staffpass1" } });
+      const login = await api("/api/auth/staff-login", { method: "POST", jar, body: { username, password: "Staffpass#1x" } });
       ok(login.status === 200, `staff-login succeeds for newly created ${role} account`, login.json);
       return jar;
     }
@@ -319,7 +319,7 @@ async function main() {
     staffManagement = await createStaff("management", `mgmtrole_${Date.now()}`);
     staffAdmin2 = await createStaff("admin", `adminrole2_${Date.now()}`);
 
-    const badRole = await api("/api/staff/accounts", { method: "POST", jar: admin, body: { username: "badrole1", password: "staffpass1", name: "x", role: "superuser" } });
+    const badRole = await api("/api/staff/accounts", { method: "POST", jar: admin, body: { username: "badrole1", password: "Staffpass#1x", name: "x", role: "superuser" } });
     ok(badRole.status === 400, "create staff account with invalid role -> 400", badRole.json);
 
     const list = await api("/api/staff/accounts", { jar: admin });
@@ -360,7 +360,7 @@ async function main() {
     ok(noPinAttempt.status === 400, "forgot-password: account with no PIN set -> 400", noPinAttempt.json);
 
     // staff recovery pin + staff-forgot-password
-    const staffPinSet = await api("/api/staff/recovery-pin", { method: "POST", jar: staffStaff, body: { password: "staffpass1", pin: "556677" } });
+    const staffPinSet = await api("/api/staff/recovery-pin", { method: "POST", jar: staffStaff, body: { password: "Staffpass#1x", pin: "556677" } });
     ok(staffPinSet.status === 200, "staff sets a recovery PIN", staffPinSet.json);
   }
 
