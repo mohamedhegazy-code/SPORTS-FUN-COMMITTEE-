@@ -1998,3 +1998,20 @@ a.tourn-live-link { color: var(--red); font-weight: 600; font-size: 0.8rem; bord
 .bk-table td b { font-variant-numeric: tabular-nums; }
 .roster-table button.roster-btn.promote { background: #1e8e3e; border-color: #1e8e3e; color: #fff; font-weight: 600; }
 .roster-table button.roster-btn.promote:hover:not(:disabled) { background: #187a34; }
+
+/* Member ID card (profile) */
+.uid-hero { display: flex; justify-content: center; margin: 6px 0 10px; }
+.uid-num { font-size: 2.6rem; font-weight: 800; letter-spacing: 0.12em; direction: ltr; font-variant-numeric: tabular-nums; color: var(--maroon, #7a0000); background: #fbf6ea; border: 2px dashed #c9a24a; border-radius: 14px; padding: 8px 26px; }
+.uid-family { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.uid-family-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+.uid-family-row b { letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
+.roster-evno { display: inline-block; min-width: 2.4em; text-align: center; background: #7a0000; color: #fff; border-radius: 8px; padding: 1px 7px; margin-inline-end: 6px; font-variant-numeric: tabular-nums; }
+/* Over-capacity warning when promoting from the waiting list */
+.promote-over-overlay { z-index: 1200; }
+.promote-over-box { max-width: 460px; padding: 22px; border-top: 5px solid #c9a24a; }
+.promote-over-box h2 { margin: 0 0 8px; font-size: 1.15rem; color: #7a0000; }
+.promote-over-who { font-weight: 700; margin: 0 0 6px; }
+.promote-over-tip { background: #fbf6ea; border-inline-start: 4px solid #c9a24a; padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; }
+.promote-over-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.promote-over-actions button { width: 100%; margin: 0; }
+.roster-toolbar .mp-copy { padding: 6px 12px; font-size: 0.8rem; font-weight: 700; border-radius: 8px; border: 1px solid #c9a24a; background: #fff; color: #7a0000; cursor: pointer; }

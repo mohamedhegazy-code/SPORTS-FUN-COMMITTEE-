@@ -349,6 +349,13 @@
       <p style="color:var(--muted);" data-i18n="mpSignInFirst">Log in on the Register tab to see your points balance.</p>
     </div>
 
+    <div class="card hidden" id="mp-uid-card">
+      <h2 data-i18n="uidTitle">My ID number</h2>
+      <div class="uid-hero"><div class="uid-num" id="mp-uid-num">—</div></div>
+      <p class="hint-note" data-i18n="uidHint">Your personal number on the platform. It never changes. Give it to the committee or the gate staff and they find you straight away.</p>
+      <div id="mp-uid-family"></div>
+    </div>
+
     <div class="card hidden" id="mp-points-disabled-note">
       <p style="color:var(--muted);" data-i18n="pointsSystemUnavailable">The points system isn't active right now — check back later.</p>
     </div>
@@ -632,7 +639,7 @@
         <label data-i18n="fieldEvent">Event</label>
         <select id="checkin-event-select"></select>
         <div id="checkin-tourn-panel" class="ci-tourn hidden"></div>
-        <input id="checkin-search" type="text" placeholder="Search by name or membership number" style="margin-top:10px;" />
+        <input id="checkin-search" type="text" data-i18n-ph="checkinSearchPh" placeholder="Search by name, membership number or #number" style="margin-top:10px;" />
         <div id="checkin-roster-wrap" style="margin-top:12px;max-height:420px;overflow-y:auto;"></div>
         <div class="msg" id="checkin-roster-msg"></div>
       </div>
@@ -757,7 +764,7 @@
             </div>
 
             <h4 style="margin-top:18px;" data-i18n="hubAttendanceTitle">Attendance &amp; check-in</h4>
-            <input id="hub-checkin-search" type="text" placeholder="Search by name or membership number" />
+            <input id="hub-checkin-search" type="text" data-i18n-ph="checkinSearchPh" placeholder="Search by name, membership number or #number" />
             <div id="hub-checkin-wrap" style="margin-top:10px;max-height:320px;overflow-y:auto;"></div>
             <div class="msg" id="hub-checkin-msg"></div>
 

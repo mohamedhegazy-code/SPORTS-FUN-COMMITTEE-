@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MyAhlawy - My Match Page</title>
+<meta name="robots" content="noindex" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;900&display=swap" />
+<link rel="stylesheet" href="/card.css" />
+<link rel="stylesheet" href="/me.css" />
+<script src="/i18n.js"></script>
+</head>
+<body class="pc-page me-page">
+<div class="pc-lang"><a id="me-lang" href="#">EN</a></div>
+<main class="me-wrap">
+  <header class="me-head">
+    <div class="me-brand">MyAhlawy</div>
+    <h1 id="me-event"></h1>
+  </header>
+  <form id="me-form" class="me-form" autocomplete="off">
+    <label for="me-no" id="me-no-label"></label>
+    <div class="me-input-row">
+      <input id="me-no" inputmode="numeric" pattern="[0-9]*" maxlength="6" dir="ltr" />
+      <button type="submit" id="me-go" class="me-go"></button>
+    </div>
+  </form>
+  <div id="me-msg" class="me-msg" aria-live="polite"></div>
+  <div id="me-result"></div>
+  <div class="me-foot"><span id="me-updated"></span> <button type="button" id="me-change" class="me-link" hidden></button></div>
+</main>
+<script src="/card.js"></script>
+<script src="/me.js"></script>
+</body>
+</html>

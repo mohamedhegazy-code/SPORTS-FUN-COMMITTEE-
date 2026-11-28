@@ -1365,6 +1365,7 @@ function updateUIForSession() {
 
   // My Points tab
   document.getElementById("mp-signed-out").classList.toggle("hidden", isMember);
+  document.getElementById("mp-uid-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-nickname-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-agegroup-card").classList.toggle("hidden", !isMember);
   document.getElementById("mp-phone-card").classList.toggle("hidden", !isMember);
@@ -1377,6 +1378,7 @@ function updateUIForSession() {
   if (isMember) {
     renderRecoveryPinStatus("mp-recovery-pin-status", CURRENT_SESSION.member.hasRecoveryPin);
     renderNicknameStatus();
+    renderUidCard();
     renderAgeGroupStatus();
     renderMyPhoneInput();
     renderMyGenderInput();
@@ -3092,16 +3094,33 @@ function familyRelationSelectHtml(currentValue) {
 // (Father/Mother/.../Other) - populated once here since su-relationship is
 // a plain <select>, not re-rendered per session like the family list below.
 document.getElementById("su-relationship").innerHTML = familyRelationSelectHtml("");
+// "482913" -> "482 913" (easier to read out loud); accepts anything with digits in it.
+function uidText(uid) {
+  const d = String(uid || "").replace(/\D/g, "");
+  return d.length === 6 ? d.slice(0, 3) + " " + d.slice(3) : d;
+}
+function renderUidCard() {
+  const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
+  const num = document.getElementById("mp-uid-num");
+  if (!member || !num) return;
+  num.textContent = member.uid ? uidText(member.uid) : "—";
+  const fam = document.getElementById("mp-uid-family");
+  const deps = (member.dependents || []).filter((d) => d.uid);
+  fam.innerHTML = deps.length
+    ? `<div class="uid-family">${deps.map((d) => `<div class="uid-family-row"><span>${escapeAttr(d.name)}</span><b dir="ltr">${escapeAttr(uidText(d.uid))}</b></div>`).join("")}</div>`
+    : "";
+}
 function renderFamilyList() {
   const wrap = document.getElementById("mp-family-list");
   const member = CURRENT_SESSION && CURRENT_SESSION.type === "member" ? CURRENT_SESSION.member : null;
   if (!wrap || !member) return;
+  renderUidCard();
   const deps = member.dependents || [];
   wrap.innerHTML = deps.length
     ? deps
         .map(
           (d) => `<div class="family-item" data-dep-id="${d.id}">
-        <span class="name">${escapeAttr(d.name)}${
+        <span class="name">${escapeAttr(d.name)}${d.uid ? ` <span class="fam-rel-badge" dir="ltr">ID ${escapeAttr(uidText(d.uid))}</span>` : ""}${
             d.relationship ? ` <span class="fam-rel-badge">(${escapeAttr(d.relationship)})</span>` : ""
           } <span class="fam-rel-badge ${d.birthDate ? "" : "fam-age-missing"}">${d.birthDate ? escapeAttr(ageGroupLabel(effectiveAgeGroup(d)) + " · " + bornAgeText(d)) : escapeAttr(t("famBirthMissing"))}</span>${d.phone || d.email ? ` <span class="fam-rel-badge">${[d.phone, d.email].filter(Boolean).map(escapeAttr).join(" · ")}</span>` : ""}</span>
         <span class="fam-rel-edit">
@@ -5384,7 +5403,7 @@ async function openAdminWaitlist(eventId, eventLabelText) {
       .map(
         (r) => `<div class="waitlist-row">
           <span>${escapeAttr(r.attendeeName)} ${r.member ? "(#" + escapeAttr(r.member.membershipNumber) + ")" : ""}</span>
-          <button class="primary" data-promote-id="${r.id}" style="padding:3px 10px;font-size:0.78rem;">${t("btnPromote")}</button>
+          <button class="primary" data-promote-id="${r.id}" data-promote-name="${escapeAttr(r.attendeeName)}" style="padding:3px 10px;font-size:0.78rem;">${t("btnPromote")}</button>
         </div>`
       )
       .join("");
@@ -5392,7 +5411,9 @@ async function openAdminWaitlist(eventId, eventLabelText) {
       btn.addEventListener("click", async () => {
         const waitlistMsg = document.getElementById("admin-waitlist-msg");
         try {
-          await api(`/api/admin/registrations/${btn.dataset.promoteId}/promote`, { method: "POST" });
+          const pr = await promoteFromWaitlist("reg", btn.dataset.promoteId, btn.dataset.promoteName || "", eventId);
+          if (!pr.promoted) return;
+          await loadEvents();
           await openAdminWaitlist(eventId, eventLabelText);
           await loadAdminDashboard();
           // Member directory is admin-only - a Tournament Manager can also
@@ -5775,10 +5796,10 @@ function renderMembersTable() {
     return;
   }
   const rows = MEMBERS_DATA.map((m) => {
-    const searchBlob = escapeAttr(searchNorm(`${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup}`));
+    const searchBlob = escapeAttr(searchNorm(`${m.name} ${m.membershipNumber} ${m.phone} ${m.familyGroup} ${m.uid || ""} ${(m.dependentUids || []).join(" ")}`));
     return `<tr data-member-row data-search="${searchBlob}">
       <td><input type="checkbox" data-member-checkbox value="${escapeAttr(m.membershipNumber)}" /></td>
-      <td>${escapeAttr(m.membershipNumber)}</td>
+      <td>${escapeAttr(m.membershipNumber)}${m.uid ? `<br/><small style="color:var(--muted);" dir="ltr">ID ${escapeAttr(uidText(m.uid))}</small>` : ""}</td>
       <td>${escapeAttr(m.name)}</td>
       <td>${escapeAttr(m.phone)}</td>
       <td>${escapeAttr(m.familyGroup)}</td>
@@ -11857,16 +11878,31 @@ function rosterToolbarHtml(roster, ev) {
   const sw = canManageEventSettings(ev)
     ? `<label class="att-switch" title="${escapeAttr(t("attSwitchHint"))}"><input type="checkbox" data-att-switch="${ev.id}"${attOn ? " checked" : ""} /> <span>${escapeAttr(t("attSwitchLabel"))}</span></label>`
     : "";
-  return `<div class="roster-toolbar"><div class="roster-filters">${chips}</div>${sw}${waBulkBarHtml(roster, ev)}</div>`;
+  // Member page: players type the number above their QR code on /me.html to see their status, matches and wait.
+  const mpOn = !!(ev && ev.memberPageEnabled);
+  const mpSw = canManageEventSettings(ev)
+    ? `<label class="att-switch" title="${escapeAttr(t("mpSwitchHint"))}"><input type="checkbox" data-mp-switch="${ev.id}"${mpOn ? " checked" : ""} /> <span>${escapeAttr(t("mpSwitchLabel"))}</span></label>${mpOn ? `<button type="button" class="roster-btn mp-copy" data-mp-copy="${ev.id}">${escapeAttr(t("mpCopyLink"))}</button>` : ""}`
+    : "";
+  return `<div class="roster-toolbar"><div class="roster-filters">${chips}</div>${sw}${mpSw}${waBulkBarHtml(roster, ev)}</div>`;
 }
 function rosterTableHtml(roster, query, eventId, showCancel) {
   const attOn = attendanceConfirmOn(eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null);
   if (!attOn && ["conf", "decl", "noreply"].includes(ROSTER_FILTER)) ROSTER_FILTER = "all";
   if (!attOn && ROSTER_SORT.key === "confirm") ROSTER_SORT = { key: "", dir: 1 };
+  // A short number ("#12" or "12") finds that registration's event number; a 6-digit number finds a member ID.
+  // When a typed number is somebody's event number we show only that person.
+  const qDigits = String(query || "").replace(/[\s#]/g, "");
+  const evNoMode = /^\d{1,5}$/.test(qDigits) && roster.some((r) => String(r.eventNo) === qDigits);
+  const uidMode = /^\d{6}$/.test(qDigits) && roster.some((r) => String(r.memberUid) === qDigits);
   let filtered = roster.filter(
     (r) =>
       rosterFilterMatch(r, ROSTER_FILTER) &&
-      (!query || r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query))
+      (!query ||
+        (evNoMode
+          ? String(r.eventNo) === qDigits
+          : uidMode
+            ? String(r.memberUid) === qDigits
+            : r.attendeeName.toLowerCase().includes(query) || String(r.membershipNumber).toLowerCase().includes(query)))
   );
   const evForBar = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
   if (!filtered.length) {
@@ -11893,8 +11929,10 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
         status = `<span class="capacity-badge waitlist">${t("waitlistLabel")}</span>`;
         // Admin / the event's Tournament Manager can confirm a waiting-list person by hand (for example
         // when a place frees up). Players of a team on the waiting list move with their whole team instead.
-        action = canManageEventSettings(ev) && !r.teamId
-          ? `<button class="roster-btn promote" data-promote-reg="${r.registrationId}" data-promote-name="${escapeAttr(r.attendeeName)}">${escapeAttr(t("btnPromote"))}</button>`
+        action = canManageEventSettings(ev)
+          ? r.teamId
+            ? `<button class="roster-btn promote" data-promote-team="${r.teamId}" data-promote-event="${ev ? ev.id : ""}" data-promote-name="${escapeAttr(r.teamName || r.attendeeName)}">${escapeAttr(t("btnPromoteTeam"))}</button>`
+            : `<button class="roster-btn promote" data-promote-reg="${r.registrationId}" data-promote-event="${ev ? ev.id : ""}" data-promote-name="${escapeAttr(r.attendeeName)}">${escapeAttr(t("btnPromote"))}</button>`
           : "";
       } else if (r.checkedIn) {
         const time = r.checkInAt ? new Date(r.checkInAt).toLocaleString() : "";
@@ -11924,7 +11962,7 @@ function rosterTableHtml(roster, query, eventId, showCancel) {
               <button type="button" class="roster-btn conf-no${r.attendanceConfirm === "no" ? " on" : ""}" data-att-conf="${r.attendanceConfirm === "no" ? "none" : "no"}" data-att-reg="${r.registrationId}">\u2717 ${escapeAttr(t("attConfNo"))}</button>
             </div></td>`;
       return `<tr>
-        <td>${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}</small></td>
+        <td>${r.eventNo ? `<b class="roster-evno" dir="ltr">#${escapeAttr(String(r.eventNo))}</b> ` : ""}${escapeAttr(r.attendeeName)}<br/><small style="color:var(--muted);">${escapeAttr(r.membershipNumber)}${r.memberUid ? ` · ID ${escapeAttr(uidText(r.memberUid))}` : ""}</small></td>
         <td><small style="color:var(--muted);">${escapeAttr(registeredAt)}</small></td>
         <td>${status}</td>
         ${confCell}
@@ -12008,15 +12046,68 @@ document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-att-conf]");
   if (btn) attendanceConfirmClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
 });
-// "Promote to confirmed" on a waiting-list row (Check-in list and Event hub).
-async function promoteRowClick(btn, msgId, reload) {
-  const name = btn.dataset.promoteName || "";
-  if (!window.confirm(`${name}\n${t("confirmPromoteRow")}`)) return;
-  btn.disabled = true;
-  const msg = document.getElementById(msgId);
+// Manual promote from the waiting list. When the event is already full the server answers 409 "over_capacity";
+// we then explain it and recommend raising the capacity (one click raises it and promotes). Admin and the
+// event's Tournament Manager can do this. kind: "reg" (one person) or "team" (a whole team).
+function promoteOverCapacityDialog(info, name, kind) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay promote-over-overlay";
+    overlay.innerHTML = `<div class="modal-box promote-over-box" role="alertdialog" aria-modal="true">
+      <h2>\u26A0 ${escapeAttr(t("promoteOverTitle"))}</h2>
+      <p class="promote-over-who">${escapeAttr(name)}</p>
+      <p>${escapeAttr(t(kind === "team" ? "promoteOverBodyTeam" : "promoteOverBody").replace("{max}", fmt(info.maxCapacity)).replace("{confirmed}", fmt(info.confirmed)).replace("{n}", fmt(info.suggested)))}</p>
+      <p class="promote-over-tip">${escapeAttr(t("promoteOverRecommend").replace("{n}", fmt(info.suggested)))}</p>
+      <div class="promote-over-actions">
+        <button class="primary" data-po="raise">${escapeAttr(t("btnRaiseAndPromote").replace("{n}", fmt(info.suggested)))}</button>
+        <button class="secondary" data-po="force">${escapeAttr(t("btnPromoteAnyway"))}</button>
+        <button class="secondary" data-po="cancel">${escapeAttr(t("btnCancel"))}</button>
+      </div>
+    </div>`;
+    const done = (v) => { overlay.remove(); document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") done("cancel"); };
+    overlay.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-po]");
+      if (b) done(b.dataset.po);
+      else if (e.target === overlay) done("cancel");
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    const first = overlay.querySelector('[data-po="raise"]');
+    if (first) first.focus();
+  });
+}
+// Returns { promoted, raisedTo } - promoted is false when the staff member cancelled.
+async function promoteFromWaitlist(kind, id, name, eventId) {
+  const path = kind === "team" ? `/api/admin/event-teams/${id}/promote` : `/api/admin/registrations/${id}/promote`;
+  const ev = eventId ? EVENTS_DATA.find((e) => e.id === Number(eventId)) : null;
+  const max = ev ? (kind === "team" ? ev.teamRegistration && ev.teamRegistration.maxTeams : ev.maxCapacity) : null;
+  const seemsFull = max != null && ev && (kind === "team" ? (ev.teamCount || 0) >= max : (ev.confirmedCount || 0) >= max);
+  // A full event gets the stronger warning below instead of this plain question.
+  if (!seemsFull && !window.confirm(`${name}\n${t(kind === "team" ? "confirmPromoteTeam" : "confirmPromoteRow")}`)) return { promoted: false };
+  const send = (body) => api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
   try {
-    await api(`/api/admin/registrations/${btn.dataset.promoteReg}/promote`, { method: "POST" });
-    showMsg(msg, `${name} — ${t("promoted")}`, true);
+    const r = await send();
+    return { promoted: true, raisedTo: r && r.capacityRaised ? r.capacityRaised.to : null };
+  } catch (err) {
+    if (!err || !err.data || err.data.code !== "over_capacity") throw err;
+    const choice = await promoteOverCapacityDialog(err.data, name, kind);
+    if (choice === "cancel") return { promoted: false };
+    const info = err.data;
+    const r = await send(choice === "raise" ? { raiseCapacityTo: info.suggested } : { force: true });
+    return { promoted: true, raisedTo: r && r.capacityRaised ? r.capacityRaised.to : null, over: !!(r && r.overCapacity) };
+  }
+}
+async function promoteRowClick(btn, msgId, reload) {
+  const isTeam = !!btn.dataset.promoteTeam;
+  const name = btn.dataset.promoteName || "";
+  const msg = document.getElementById(msgId);
+  btn.disabled = true;
+  try {
+    const r = await promoteFromWaitlist(isTeam ? "team" : "reg", isTeam ? btn.dataset.promoteTeam : btn.dataset.promoteReg, name, btn.dataset.promoteEvent);
+    if (!r.promoted) { btn.disabled = false; return; }
+    showMsg(msg, `${name} — ${t("promoted")}${r.raisedTo ? " · " + t("capacityRaisedTo").replace("{n}", fmt(r.raisedTo)) : r.over ? " · " + t("promotedOverCapacity") : ""}`, true);
+    try { await loadEvents(); } catch (e) { /* list refresh is best effort */ }
     await reload();
     try { await loadAdminDashboard(); } catch (e) { /* dashboard not open: fine */ }
   } catch (err) {
@@ -12025,11 +12116,11 @@ async function promoteRowClick(btn, msgId, reload) {
   }
 }
 document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-promote-reg]");
+  const btn = e.target.closest("[data-promote-reg], [data-promote-team]");
   if (btn) promoteRowClick(btn, "checkin-roster-msg", () => loadCheckinRoster(true));
 });
 document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-promote-reg]");
+  const btn = e.target.closest("[data-promote-reg], [data-promote-team]");
   if (btn) promoteRowClick(btn, "hub-checkin-msg", () => loadHubRoster(true));
 });
 // The per-event "Use attendance confirmation" switch in the roster toolbar (Admin and the event's
@@ -12053,10 +12144,46 @@ async function attendanceSwitchChange(cb, inHub) {
 document.getElementById("checkin-roster-wrap").addEventListener("change", (e) => {
   const cb = e.target.closest("[data-att-switch]");
   if (cb) attendanceSwitchChange(cb, false);
+  const mp = e.target.closest("[data-mp-switch]");
+  if (mp) memberPageSwitchChange(mp, false);
 });
 document.getElementById("hub-checkin-wrap").addEventListener("change", (e) => {
   const cb = e.target.closest("[data-att-switch]");
   if (cb) attendanceSwitchChange(cb, true);
+  const mp = e.target.closest("[data-mp-switch]");
+  if (mp) memberPageSwitchChange(mp, true);
+});
+// The per-event "Member page" switch (Admin and the event's Tournament Manager) and its share link.
+function memberPageUrl(eventId) { return location.origin + "/me.html?event=" + eventId + (currentLang === "en" ? "&lang=en" : ""); }
+async function memberPageSwitchChange(cb, inHub) {
+  const eventId = Number(cb.dataset.mpSwitch);
+  const msg = document.getElementById(inHub ? "hub-checkin-msg" : "checkin-roster-msg");
+  cb.disabled = true;
+  try {
+    const r = await api(`/api/staff/events/${eventId}/member-page-setting`, { method: "PUT", body: JSON.stringify({ enabled: cb.checked }) });
+    const ev = EVENTS_DATA.find((x) => x.id === eventId);
+    if (ev) ev.memberPageEnabled = !!r.memberPageEnabled;
+    showMsg(msg, r.memberPageEnabled ? t("mpSwitchOnMsg").replace("{url}", memberPageUrl(eventId)) : t("mpSwitchOffMsg"), true);
+  } catch (err) {
+    showMsg(msg, err.message, false);
+  }
+  if (inHub) document.getElementById("hub-checkin-search").dispatchEvent(new Event("input"));
+  else renderCheckinRoster();
+}
+async function memberPageCopyClick(btn, inHub) {
+  const url = memberPageUrl(btn.dataset.mpCopy);
+  const msg = document.getElementById(inHub ? "hub-checkin-msg" : "checkin-roster-msg");
+  let ok = false;
+  try { await navigator.clipboard.writeText(url); ok = true; } catch (e) { /* older browser: show the link instead */ }
+  showMsg(msg, ok ? t("mpLinkCopied") + " " + url : url, true);
+}
+document.getElementById("checkin-roster-wrap").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mp-copy]");
+  if (b) memberPageCopyClick(b, false);
+});
+document.getElementById("hub-checkin-wrap").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mp-copy]");
+  if (b) memberPageCopyClick(b, true);
 });
 
 // ---- Check-in screen: "Tournament" panel (run the tournament from the gate list) ----
